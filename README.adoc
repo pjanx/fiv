@@ -1,0 +1,39 @@
+fastiv
+======
+
+'fastiv' is a fast image viewer, supporting BMP, PNG, GIF and JPEG.
+
+It is meant to be a viable replacement for Eye of GNOME, which is slow and likes
+to break on huge pictures.  Memory efficiency is specifically a non-goal.
+
+Packages
+--------
+Regular releases are sporadic.  git master should be stable enough.  You can get
+a package with the latest development version from Archlinux's AUR.
+
+Building and Running
+--------------------
+Build dependencies: Meson, pkg-config +
+Runtime dependencies: gtk+-3.0, libturbojpeg
+
+ $ git clone --recursive https://git.janouch.name/p/fastiv.git
+ $ meson builddir
+ $ cd builddir
+ $ meson compile
+
+To install the application, you can do:
+
+ # meson install
+
+Contributing and Support
+------------------------
+Use https://git.janouch.name/p/fastiv to report any bugs, request features,
+or submit pull requests.  `git send-email` is tolerated.  If you want to discuss
+the project, feel free to join me at ircs://irc.janouch.name, channel #dev.
+
+Bitcoin donations are accepted at: 12r5uEWEgcHC46xd64tt3hHt9EUvYYDHe9
+
+License
+-------
+This software is released under the terms of the 0BSD license, the text of which
+is included within the package along with the list of authors.

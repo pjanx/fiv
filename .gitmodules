@@ -1,0 +1,3 @@
+[submodule "wuffs-mirror-release-c"]
+	path = wuffs-mirror-release-c
+	url = https://github.com/google/wuffs-mirror-release-c
