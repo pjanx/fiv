@@ -88,8 +88,25 @@ fastiv_view_draw(GtkWidget *widget, cairo_t *cr)
 	if (!self->surface)
 		return TRUE;
 
+	// TODO(p): Make this adjustable later.
+	cairo_set_source_rgb(cr, 0, 0, 0);
+	cairo_paint(cr);
+
+	GtkAllocation allocation;
+	gtk_widget_get_allocation(widget, &allocation);
+
+	int w = cairo_image_surface_get_width(self->surface);
+	int h = cairo_image_surface_get_height(self->surface);
+
+	double x = 0;
+	double y = 0;
+	if (w < allocation.width)
+		x = (allocation.width - w) / 2;
+	if (h < allocation.height)
+		y = (allocation.height - h) / 2;
+
 	// TODO(p): Times the zoom.
-	cairo_set_source_surface(cr, self->surface, 0, 0);
+	cairo_set_source_surface(cr, self->surface, x, y);
 	cairo_paint(cr);
 	return TRUE;
 }
