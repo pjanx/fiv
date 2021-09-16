@@ -1,6 +1,6 @@
 project('fastiv', 'c', default_options : ['c_std=gnu99'], version : '0.1.0')
 
-# TODO(p): consider whether libraw_r would be appropriate
+# TODO(p): Use libraw_r later, when we start parallelizing/preloading.
 libraw = dependency('libraw', required : get_option('libraw'))
 dependencies = [
 	dependency('gtk+-3.0'),
@@ -17,7 +17,11 @@ configure_file(
 	configuration : conf,
 )
 
-# TODO(p): we need to create and install a .desktop file
 executable('fastiv', 'fastiv.c', 'fastiv-view.c',
 	install : true,
 	dependencies : [dependencies])
+
+install_data('fastiv.desktop',
+	install_dir : get_option('datadir') + '/applications')
+install_data('fastiv.svg',
+	install_dir : get_option('datadir') + '/icons/hicolor/scalable/apps')

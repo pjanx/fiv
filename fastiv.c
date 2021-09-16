@@ -77,6 +77,8 @@ main(int argc, char *argv[])
 		return 0;
 	}
 
+	gtk_window_set_default_icon_name(PROJECT_NAME);
+
 	GtkWidget *view = g_object_new(FASTIV_TYPE_VIEW, NULL);
 	GtkWidget *window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	g_signal_connect(window, "destroy", G_CALLBACK(gtk_main_quit), NULL);

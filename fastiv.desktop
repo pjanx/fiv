@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=fastiv
+GenericName=Image Viewer
+Icon=fastiv
+Exec=fastiv %F
+Terminal=false
+StartupNotify=true
+Categories=Graphics;2DGraphics;Viewer;
+# TODO(p): Figure out how to include RAW MIME types, if appropriate.
+MimeType=image/png;image/bmp;image/x-bmp;image/x-MS-bmp;image/gif;image/jpeg;
