@@ -30,7 +30,12 @@
 #include "wuffs-mirror-release-c/release/c/wuffs-v0.3.c"
 #include <turbojpeg.h>
 
+#include "config.h"
 #include "fastiv-view.h"
+
+#ifdef HAVE_LIBRAW
+#include <libraw.h>
+#endif  // HAVE_LIBRAW
 
 struct _FastivView {
 	GtkWidget parent_instance;
@@ -330,12 +335,120 @@ open_libjpeg_turbo(const gchar *data, gsize len, GError **error)
 	return surface;
 }
 
+#ifdef HAVE_LIBRAW  // ---------------------------------------------------------
+
+static cairo_surface_t *
+open_libraw(const gchar *data, gsize len, GError **error)
+{
+	// https://github.com/LibRaw/LibRaw/issues/418
+	libraw_data_t *iprc = libraw_init(LIBRAW_OPIONS_NO_MEMERR_CALLBACK
+		| LIBRAW_OPIONS_NO_DATAERR_CALLBACK);
+	if (!iprc) {
+		set_error(error, "failed to obtain a LibRaw handle");
+		return NULL;
+	}
+
+#if 0
+	// TODO(p): Consider setting this--the image is still likely to be
+	// rendered suboptimally, so why not make it faster.
+	iprc->params.half_size = 1;
+#endif
+
+	// TODO(p): Check if we need to set anything for autorotation (sizes.flip).
+	iprc->params.use_camera_wb = 1;
+	iprc->params.output_color = 1;  // sRGB, TODO(p): Is this used?
+	iprc->params.output_bps = 8;  // This should be the default value.
+
+	int err = 0;
+	if ((err = libraw_open_buffer(iprc, (void *) data, len))) {
+		set_error(error, libraw_strerror(err));
+		libraw_close(iprc);
+		return NULL;
+	}
+
+	// TODO(p): Do we need to check iprc->idata.raw_count? Maybe for TIFFs?
+	if ((err = libraw_unpack(iprc))) {
+		set_error(error, libraw_strerror(err));
+		libraw_close(iprc);
+		return NULL;
+	}
+
+#if 0
+	// TODO(p): I'm not sure when this is necessary or useful yet.
+	if ((err = libraw_adjust_sizes_info_only(iprc))) {
+		set_error(error, libraw_strerror(err));
+		libraw_close(iprc);
+		return NULL;
+	}
+#endif
+
+	// TODO(p): Documentation says I should look at the code and do it myself.
+	if ((err = libraw_dcraw_process(iprc))) {
+		set_error(error, libraw_strerror(err));
+		libraw_close(iprc);
+		return NULL;
+	}
+
+	// FIXME: This is shittily written to iterate over the range of
+	// idata.colors, and will be naturally slow.
+	libraw_processed_image_t *image = libraw_dcraw_make_mem_image(iprc, &err);
+	if (!image) {
+		set_error(error, libraw_strerror(err));
+		libraw_close(iprc);
+		return NULL;
+	}
+
+	// This should have been transformed, and kept, respectively.
+	if (image->colors != 3 || image->bits != 8) {
+		set_error(error, "unexpected number of colours, or bit depth");
+		libraw_dcraw_clear_mem(image);
+		libraw_close(iprc);
+		return NULL;
+	}
+
+	int width = image->width, height = image->height;
+	cairo_surface_t *surface =
+		cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
+	if (!surface) {
+		set_error(error, "failed to allocate an image surface");
+		libraw_dcraw_clear_mem(image);
+		libraw_close(iprc);
+		return NULL;
+	}
+
+	// Starting to modify pixel data directly. Probably an unnecessary call.
+	cairo_surface_flush(surface);
+
+	uint32_t *pixels = (uint32_t *) cairo_image_surface_get_data(surface);
+	unsigned char *p = image->data;
+	for (ushort y = 0; y < image->height; y++) {
+		for (ushort x = 0; x < image->width; x++) {
+			*pixels++ = 0xff000000 | (uint32_t) p[0] << 16
+				| (uint32_t) p[1] << 8 | (uint32_t) p[2];
+			p += 3;
+		}
+	}
+
+	// Pixel data has been written, need to let Cairo know.
+	cairo_surface_mark_dirty(surface);
+
+	libraw_dcraw_clear_mem(image);
+	libraw_close(iprc);
+	return surface;
+}
+
+#endif  // HAVE_LIBRAW ---------------------------------------------------------
+
 // TODO(p): Progressive picture loading, or at least async/cancellable.
 gboolean
 fastiv_view_open(FastivView *self, const gchar *path, GError **error)
 {
 	// TODO(p): Don't always load everything into memory, test type first,
 	// for which we only need the first 16 bytes right now.
+	// Though LibRaw poses an issue--we may want to try to map RAW formats
+	// to FourCC values--many of them are compliant TIFF files.
+	// We might want to employ a more generic way of magic identification,
+	// and with some luck, it could even be integrated into Wuffs.
 	gchar *data = NULL;
 	gsize len = 0;
 	if (!g_file_get_contents(path, &data, &len, error))
@@ -366,6 +479,15 @@ fastiv_view_open(FastivView *self, const gchar *path, GError **error)
 		surface = open_libjpeg_turbo(data, len, error);
 		break;
 	default:
+#ifdef HAVE_LIBRAW  // ---------------------------------------------------------
+		if ((surface = open_libraw(data, len, error)))
+			break;
+
+		// TODO(p): We should try to pass actual processing errors through,
+		// notably only continue with LIBRAW_FILE_UNSUPPORTED.
+		g_clear_error(error);
+#endif  // HAVE_LIBRAW ---------------------------------------------------------
+
 		// TODO(p): Integrate gdk-pixbuf as a fallback (optional dependency).
 		set_error(error, "unsupported file type");
 	}

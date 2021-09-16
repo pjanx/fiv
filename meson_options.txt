@@ -1,0 +1,2 @@
+option('libraw', type : 'feature', value : 'auto',
+    description : 'Build with RAW support, requires LibRaw')
