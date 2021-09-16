@@ -84,6 +84,14 @@ main(int argc, char *argv[])
 	g_signal_connect(window, "destroy", G_CALLBACK(gtk_main_quit), NULL);
 	gtk_container_add(GTK_CONTAINER(window), view);
 
+	// The references to closures are initially floating and sunk on connect.
+	GtkAccelGroup *accel_group = gtk_accel_group_new();
+	gtk_accel_group_connect(accel_group, GDK_KEY_Escape, 0, 0,
+		g_cclosure_new(G_CALLBACK(gtk_main_quit), NULL, NULL));
+	gtk_accel_group_connect(accel_group, GDK_KEY_q, 0, 0,
+		g_cclosure_new(G_CALLBACK(gtk_main_quit), NULL, NULL));
+	gtk_window_add_accel_group(GTK_WINDOW(window), accel_group);
+
 	// TODO(p): Load directory entries, store in `g`.
 	//  - Only when there's just one filename.
 	//     - stat() it if it's a dictionary or a filename;

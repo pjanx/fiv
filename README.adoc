@@ -29,6 +29,9 @@ Low priority:
  - display 16-bit pictures smoothly, using the 30-bit depth under X.org
  - make RAW as fast as it can possibly be
  - load everything that resembles a picture, potentially even play video
+ - port to something less hostile than the current GNOME stack, such as SDL,
+   although it may involve a lot of reimplemented code,
+   or result in reduced functionality
 
 Non-goals:
 
