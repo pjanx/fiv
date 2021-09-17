@@ -6,6 +6,7 @@ dependencies = [
 	dependency('gtk+-3.0'),
 	dependency('libturbojpeg'),
 	libraw,
+	meson.get_compiler('c').find_library('m', required : false),
 ]
 
 conf = configuration_data()

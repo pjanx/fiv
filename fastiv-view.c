@@ -40,11 +40,29 @@
 struct _FastivView {
 	GtkWidget parent_instance;
 	cairo_surface_t *surface;
-	// TODO(p): Eventually, we'll want to have the zoom level (scale) here,
-	// and some zoom-to-fit indication.
+	// TODO(p): Zoom-to-fit indication.
+	double scale;
 };
 
 G_DEFINE_TYPE(FastivView, fastiv_view, GTK_TYPE_WIDGET)
+
+static int
+get_display_width(FastivView *self)
+{
+	if (!self->surface)
+		return 0;
+
+	return ceil(cairo_image_surface_get_width(self->surface) * self->scale);
+}
+
+static int
+get_display_height(FastivView *self)
+{
+	if (!self->surface)
+		return 0;
+
+	return ceil(cairo_image_surface_get_height(self->surface) * self->scale);
+}
 
 static void
 fastiv_view_finalize(GObject *gobject)
@@ -62,10 +80,8 @@ fastiv_view_get_preferred_height(GtkWidget *widget,
 	*minimum = 0;
 	*natural = 0;
 
-	// TODO(p): Times the zoom.
 	FastivView *self = FASTIV_VIEW(widget);
-	if (self->surface)
-		*natural = cairo_image_surface_get_height(self->surface);
+	*natural = get_display_height(self);
 }
 
 static void
@@ -75,10 +91,8 @@ fastiv_view_get_preferred_width(GtkWidget *widget,
 	*minimum = 0;
 	*natural = 0;
 
-	// TODO(p): Times the zoom.
 	FastivView *self = FASTIV_VIEW(widget);
-	if (self->surface)
-		*natural = cairo_image_surface_get_width(self->surface);
+	*natural = get_display_width(self);
 }
 
 static gboolean
@@ -95,8 +109,8 @@ fastiv_view_draw(GtkWidget *widget, cairo_t *cr)
 	GtkAllocation allocation;
 	gtk_widget_get_allocation(widget, &allocation);
 
-	int w = cairo_image_surface_get_width(self->surface);
-	int h = cairo_image_surface_get_height(self->surface);
+	int w = get_display_width(self);
+	int h = get_display_height(self);
 
 	double x = 0;
 	double y = 0;
@@ -105,8 +119,10 @@ fastiv_view_draw(GtkWidget *widget, cairo_t *cr)
 	if (h < allocation.height)
 		y = (allocation.height - h) / 2;
 
-	// TODO(p): Times the zoom.
-	cairo_set_source_surface(cr, self->surface, x, y);
+	cairo_scale(cr, self->scale, self->scale);
+	cairo_set_source_surface(cr, self->surface,
+		x / self->scale, y / self->scale);
+
 	cairo_paint(cr);
 	return TRUE;
 }
@@ -126,6 +142,8 @@ fastiv_view_class_init(FastivViewClass *klass)
 static void
 fastiv_view_init(FastivView *self)
 {
+	self->scale = 1.0;
+
 	gtk_widget_set_has_window(GTK_WIDGET(self), FALSE);
 }
 
