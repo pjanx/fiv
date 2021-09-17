@@ -48,9 +48,43 @@ exit_fatal(const gchar *format, ...)
 // --- Main --------------------------------------------------------------------
 
 struct {
-	// TODO(p): Add some state variables.
-	//  - Directory filenames, index within the list.
+	// TODO(p): Directory filenames, index within the list, ...
+	GtkWidget *window;
+	GtkWidget *view;
 } g;
+
+static void
+open(const gchar *path)
+{
+	GError *error = NULL;
+	if (!fastiv_view_open(FASTIV_VIEW(g.view), path, &error)) {
+		GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(g.window),
+			GTK_DIALOG_MODAL,
+			GTK_MESSAGE_ERROR, GTK_BUTTONS_CLOSE, "%s", error->message);
+		gtk_dialog_run(GTK_DIALOG(dialog));
+		gtk_widget_destroy(dialog);
+		return;
+	}
+
+	gtk_window_set_title(GTK_WINDOW(g.window), path);
+}
+
+static void
+on_open(void)
+{
+	GtkWidget *dialog = gtk_file_chooser_dialog_new("Open file",
+		GTK_WINDOW(g.window), GTK_FILE_CHOOSER_ACTION_OPEN,
+		"_Cancel", GTK_RESPONSE_CANCEL,
+		"_Open", GTK_RESPONSE_ACCEPT, NULL);
+
+	if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
+		gchar *path = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
+		open(path);
+		g_free(path);
+	}
+
+	gtk_widget_destroy(dialog);
+}
 
 int
 main(int argc, char *argv[])
@@ -79,10 +113,10 @@ main(int argc, char *argv[])
 
 	gtk_window_set_default_icon_name(PROJECT_NAME);
 
-	GtkWidget *view = g_object_new(FASTIV_TYPE_VIEW, NULL);
-	GtkWidget *window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-	g_signal_connect(window, "destroy", G_CALLBACK(gtk_main_quit), NULL);
-	gtk_container_add(GTK_CONTAINER(window), view);
+	g.view = g_object_new(FASTIV_TYPE_VIEW, NULL);
+	g.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	g_signal_connect(g.window, "destroy", G_CALLBACK(gtk_main_quit), NULL);
+	gtk_container_add(GTK_CONTAINER(g.window), g.view);
 
 	// The references to closures are initially floating and sunk on connect.
 	GtkAccelGroup *accel_group = gtk_accel_group_new();
@@ -90,7 +124,11 @@ main(int argc, char *argv[])
 		g_cclosure_new(G_CALLBACK(gtk_main_quit), NULL, NULL));
 	gtk_accel_group_connect(accel_group, GDK_KEY_q, 0, 0,
 		g_cclosure_new(G_CALLBACK(gtk_main_quit), NULL, NULL));
-	gtk_window_add_accel_group(GTK_WINDOW(window), accel_group);
+	gtk_accel_group_connect(accel_group, GDK_KEY_o, 0, 0,
+		g_cclosure_new(G_CALLBACK(on_open), NULL, NULL));
+	gtk_accel_group_connect(accel_group, GDK_KEY_o, GDK_CONTROL_MASK, 0,
+		g_cclosure_new(G_CALLBACK(on_open), NULL, NULL));
+	gtk_window_add_accel_group(GTK_WINDOW(g.window), accel_group);
 
 	// TODO(p): Load directory entries, store in `g`.
 	//  - Only when there's just one filename.
@@ -112,13 +150,10 @@ main(int argc, char *argv[])
 			g_dir_close(dir);
 		}
 
-		if (!fastiv_view_open(FASTIV_VIEW(view), files[0], &error))
-			g_printerr("error: %s\n", error->message);
-		else
-			gtk_window_set_title(GTK_WINDOW(window), files[0]);
+		open(files[0]);
 	}
 
-	gtk_widget_show_all(window);
+	gtk_widget_show_all(g.window);
 	gtk_main();
 	return 0;
 }
