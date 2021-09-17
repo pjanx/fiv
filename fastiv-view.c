@@ -77,11 +77,43 @@ fastiv_view_get_preferred_width(GtkWidget *widget,
 	*natural = get_display_width(self);
 }
 
+static void
+fastiv_view_realize(GtkWidget *widget)
+{
+	GtkAllocation allocation;
+	gtk_widget_get_allocation(widget, &allocation);
+
+	GdkWindowAttr attributes = {
+		.window_type = GDK_WINDOW_CHILD,
+		.x           = allocation.x,
+		.y           = allocation.y,
+		.width       = allocation.width,
+		.height      = allocation.height,
+
+		// Input-only would presumably also work (as in GtkPathBar, e.g.),
+		// but it merely seems to involve more work.
+		.wclass      = GDK_INPUT_OUTPUT,
+
+		// Assuming here that we can't ask for a higher-precision Visual
+		// than what we get automatically.
+		.visual      = gtk_widget_get_visual(widget),
+		.event_mask  = gtk_widget_get_events(widget) | GDK_SCROLL_MASK,
+	};
+
+	// We need this window to receive input events at all.
+	GdkWindow *window = gdk_window_new(gtk_widget_get_parent_window(widget),
+		&attributes, GDK_WA_X | GDK_WA_Y | GDK_WA_VISUAL);
+	gtk_widget_register_window(widget, window);
+	gtk_widget_set_window(widget, window);
+	gtk_widget_set_realized(widget, TRUE);
+}
+
 static gboolean
 fastiv_view_draw(GtkWidget *widget, cairo_t *cr)
 {
 	FastivView *self = FASTIV_VIEW(widget);
-	if (!self->surface)
+	if (!self->surface
+	 || !gtk_cairo_should_draw_window(cr, gtk_widget_get_window(widget)))
 		return TRUE;
 
 	// TODO(p): Make this adjustable later.
@@ -109,6 +141,27 @@ fastiv_view_draw(GtkWidget *widget, cairo_t *cr)
 	return TRUE;
 }
 
+static gboolean
+fastiv_view_scroll_event(GtkWidget *widget, GdkEventScroll *event)
+{
+	FastivView *self = FASTIV_VIEW(widget);
+	if (!self->surface)
+		return FALSE;
+
+	switch (event->direction) {
+	case GDK_SCROLL_UP:
+		self->scale *= 1.4;
+		gtk_widget_queue_resize(widget);
+		return TRUE;
+	case GDK_SCROLL_DOWN:
+		self->scale /= 1.4;
+		gtk_widget_queue_resize(widget);
+		return TRUE;
+	default:
+		return FALSE;
+	}
+}
+
 static void
 fastiv_view_class_init(FastivViewClass *klass)
 {
@@ -118,15 +171,18 @@ fastiv_view_class_init(FastivViewClass *klass)
 	GtkWidgetClass *widget_class = GTK_WIDGET_CLASS(klass);
 	widget_class->get_preferred_height = fastiv_view_get_preferred_height;
 	widget_class->get_preferred_width = fastiv_view_get_preferred_width;
+	widget_class->realize = fastiv_view_realize;
 	widget_class->draw = fastiv_view_draw;
+	widget_class->scroll_event = fastiv_view_scroll_event;
+
+	// TODO(p): Later override "screen_changed", recreate Pango layouts there,
+	// if we get to have any, or otherwise reflect DPI changes.
 }
 
 static void
 fastiv_view_init(FastivView *self)
 {
 	self->scale = 1.0;
-
-	gtk_widget_set_has_window(GTK_WIDGET(self), FALSE);
 }
 
 // --- Picture loading ---------------------------------------------------------
