@@ -229,8 +229,10 @@ open_wuffs(wuffs_base__image_decoder *dec,
 
 	cairo_surface_t *surface =
 		cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
-	if (!surface) {
-		set_error(error, "failed to allocate an image surface");
+	cairo_status_t surface_status = cairo_surface_status(surface);
+	if (surface_status != CAIRO_STATUS_SUCCESS) {
+		set_error(error, cairo_status_to_string(surface_status));
+		cairo_surface_destroy(surface);
 		free(workbuf.ptr);
 		return NULL;
 	}
@@ -336,8 +338,10 @@ open_libjpeg_turbo(const gchar *data, gsize len, GError **error)
 
 	cairo_surface_t *surface =
 		cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
-	if (!surface) {
-		set_error(error, "failed to allocate an image surface");
+	cairo_status_t surface_status = cairo_surface_status(surface);
+	if (surface_status != CAIRO_STATUS_SUCCESS) {
+		set_error(error, cairo_status_to_string(surface_status));
+		cairo_surface_destroy(surface);
 		tjDestroy(dec);
 		return NULL;
 	}
@@ -444,8 +448,10 @@ open_libraw(const gchar *data, gsize len, GError **error)
 	int width = image->width, height = image->height;
 	cairo_surface_t *surface =
 		cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
-	if (!surface) {
-		set_error(error, "failed to allocate an image surface");
+	cairo_status_t surface_status = cairo_surface_status(surface);
+	if (surface_status != CAIRO_STATUS_SUCCESS) {
+		set_error(error, cairo_status_to_string(surface_status));
+		cairo_surface_destroy(surface);
 		libraw_dcraw_clear_mem(image);
 		libraw_close(iprc);
 		return NULL;
