@@ -18,7 +18,7 @@ configure_file(
 	configuration : conf,
 )
 
-executable('fastiv', 'fastiv.c', 'fastiv-view.c',
+executable('fastiv', 'fastiv.c', 'fastiv-view.c', 'fastiv-io.c',
 	install : true,
 	dependencies : [dependencies])
 

@@ -24,3 +24,6 @@ G_DECLARE_FINAL_TYPE(FastivView, fastiv_view, FASTIV, VIEW, GtkWidget)
 
 /// Try to open the given file, synchronously, to be displayed by the widget.
 gboolean fastiv_view_open(FastivView *self, const gchar *path, GError **error);
+
+// Private, fastiv-io.c
+cairo_surface_t *fastiv_io_open(const gchar *path, GError **error);
