@@ -137,6 +137,9 @@ fastiv_view_draw(GtkWidget *widget, cairo_t *cr)
 	cairo_set_source_surface(cr, self->surface,
 		x / self->scale, y / self->scale);
 
+	// TODO(p): Prescale it ourselves to an off-screen bitmap, gamma-correctly.
+	cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_GOOD);
+
 	cairo_paint(cr);
 	return TRUE;
 }
