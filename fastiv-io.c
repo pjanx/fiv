@@ -390,7 +390,8 @@ fastiv_io_open(const gchar *path, GError **error)
 	cairo_surface_t *surface = NULL;
 	switch (wuffs_base__magic_number_guess_fourcc(prefix)) {
 	case WUFFS_BASE__FOURCC__BMP:
-		// Note that BMP can redirect into another format, which is unsupported.
+		// Note that BMP can redirect into another format,
+		// which is so far unsupported here.
 		surface = open_wuffs_using(
 			wuffs_bmp__decoder__alloc_as__wuffs_base__image_decoder,
 			data, len, error);
