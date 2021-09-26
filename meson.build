@@ -5,6 +5,7 @@ libraw = dependency('libraw', required : get_option('libraw'))
 dependencies = [
 	dependency('gtk+-3.0'),
 	dependency('libturbojpeg'),
+	dependency('libpng', version : '>=1.5.4'),
 	libraw,
 	meson.get_compiler('c').find_library('m', required : false),
 ]

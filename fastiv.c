@@ -74,7 +74,7 @@ add_applying_transitive_closure(const gchar *element, GHashTable *relation,
 
 // --- XDG ---------------------------------------------------------------------
 
-static gchar *
+gchar *
 get_xdg_home_dir(const char *var, const char *default_)
 {
 	const char *env = getenv(var);

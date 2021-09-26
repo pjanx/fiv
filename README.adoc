@@ -46,7 +46,7 @@ a package with the latest development version from Archlinux's AUR.
 Building and Running
 --------------------
 Build dependencies: Meson, pkg-config +
-Runtime dependencies: gtk+-3.0, libturbojpeg, LibRaw (optional),
+Runtime dependencies: gtk+-3.0, libpng > 1.5.4, libturbojpeg, LibRaw (optional),
 shared-mime-info
 
  $ git clone --recursive https://git.janouch.name/p/fastiv.git
