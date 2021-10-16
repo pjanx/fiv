@@ -129,9 +129,9 @@ fastiv_view_draw(GtkWidget *widget, cairo_t *cr)
 	double x = 0;
 	double y = 0;
 	if (w < allocation.width)
-		x = (allocation.width - w) / 2;
+		x = round((allocation.width - w) / 2.);
 	if (h < allocation.height)
-		y = (allocation.height - h) / 2;
+		y = round((allocation.height - h) / 2.);
 
 	cairo_scale(cr, self->scale, self->scale);
 	cairo_set_source_surface(cr, self->surface,
