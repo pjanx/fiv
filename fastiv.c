@@ -425,6 +425,12 @@ main(int argc, char *argv[])
 
 	gtk_window_set_default_icon_name(PROJECT_NAME);
 
+	const char *style = "fastiv-view { background: black; }";
+	GtkCssProvider *provider = gtk_css_provider_new();
+	gtk_css_provider_load_from_data(provider, style, strlen(style), NULL);
+	gtk_style_context_add_provider_for_screen(gdk_screen_get_default(),
+		GTK_STYLE_PROVIDER(provider), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+
 	g.view = g_object_new(FASTIV_TYPE_VIEW, NULL);
 	g.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	g_signal_connect(g.window, "destroy", G_CALLBACK(gtk_main_quit), NULL);

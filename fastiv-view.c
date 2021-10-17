@@ -116,12 +116,10 @@ fastiv_view_draw(GtkWidget *widget, cairo_t *cr)
 	 || !gtk_cairo_should_draw_window(cr, gtk_widget_get_window(widget)))
 		return TRUE;
 
-	// TODO(p): Make this adjustable later.
-	cairo_set_source_rgb(cr, 0, 0, 0);
-	cairo_paint(cr);
-
 	GtkAllocation allocation;
 	gtk_widget_get_allocation(widget, &allocation);
+	gtk_render_background(gtk_widget_get_style_context(widget), cr,
+		0, 0, allocation.width, allocation.height);
 
 	int w = get_display_width(self);
 	int h = get_display_height(self);
@@ -180,6 +178,7 @@ fastiv_view_class_init(FastivViewClass *klass)
 
 	// TODO(p): Later override "screen_changed", recreate Pango layouts there,
 	// if we get to have any, or otherwise reflect DPI changes.
+	gtk_widget_class_set_css_name(widget_class, "fastiv-view");
 }
 
 static void
