@@ -28,6 +28,7 @@
 
 #include "config.h"
 #include "fastiv-view.h"
+#include "fastiv-browser.h"
 
 // --- Utilities ---------------------------------------------------------------
 
@@ -246,6 +247,8 @@ struct {
 
 	GtkWidget *window;
 	GtkWidget *view;
+	GtkWidget *browser;
+	GtkWidget *browser_scroller;
 } g;
 
 static gboolean
@@ -287,6 +290,8 @@ load_directory(const gchar *dirname)
 	g.directory = g_strdup(dirname);
 	g_ptr_array_set_size(g.files, 0);
 	g.files_index = -1;
+
+	fastiv_browser_load(FASTIV_BROWSER(g.browser), dirname);
 
 	GError *error = NULL;
 	GDir *dir = g_dir_open(dirname, 0, &error);
@@ -429,16 +434,32 @@ main(int argc, char *argv[])
 
 	gtk_window_set_default_icon_name(PROJECT_NAME);
 
-	const char *style = "fastiv-view { background: black; }";
+	const char *style = "fastiv-view, fastiv-browser { background: black; }";
 	GtkCssProvider *provider = gtk_css_provider_new();
 	gtk_css_provider_load_from_data(provider, style, strlen(style), NULL);
 	gtk_style_context_add_provider_for_screen(gdk_screen_get_default(),
 		GTK_STYLE_PROVIDER(provider), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
 
 	g.view = g_object_new(FASTIV_TYPE_VIEW, NULL);
+	gtk_widget_show_all(g.view);
+
+	g.browser_scroller = gtk_scrolled_window_new(NULL, NULL);
+	g.browser = g_object_new(FASTIV_TYPE_BROWSER, NULL);
+	gtk_widget_set_vexpand(g.browser, TRUE);
+	gtk_widget_set_hexpand(g.browser, TRUE);
+	gtk_container_add(GTK_CONTAINER(g.browser_scroller), g.browser);
+	// TODO(p): Can we not do it here separately?
+	gtk_widget_show_all(g.browser_scroller);
+
+	GtkWidget *stack = gtk_stack_new();
+	gtk_stack_set_transition_type(
+		GTK_STACK(stack), GTK_STACK_TRANSITION_TYPE_NONE);
+	gtk_container_add(GTK_CONTAINER(stack), g.view);
+	gtk_container_add(GTK_CONTAINER(stack), g.browser_scroller);
+
 	g.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	g_signal_connect(g.window, "destroy", G_CALLBACK(gtk_main_quit), NULL);
-	gtk_container_add(GTK_CONTAINER(g.window), g.view);
+	gtk_container_add(GTK_CONTAINER(g.window), stack);
 
 	// The references to closures are initially floating and sunk on connect.
 	GtkAccelGroup *accel_group = gtk_accel_group_new();
@@ -491,8 +512,9 @@ main(int argc, char *argv[])
 	}
 	g_free(cwd);
 
-	// TODO(p): When no picture is loaded, show a view of this directory
-	// (we're missing a widget for that).
+	if (g.files_index < 0)
+		gtk_stack_set_visible_child(GTK_STACK(stack), g.browser_scroller);
+
 	gtk_widget_show_all(g.window);
 	gtk_main();
 	return 0;

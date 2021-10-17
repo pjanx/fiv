@@ -482,11 +482,11 @@ check_png_thumbnail(png_structp pngp, png_infop infop, const gchar *target,
 // TODO(p): Support spng as well (it can't premultiply alpha by itself,
 // but at least it won't gamma-adjust it for us).
 static cairo_surface_t *
-read_png_thumbnail(const gchar *filename, const gchar *target, time_t mtime,
+read_png_thumbnail(const gchar *path, const gchar *uri, time_t mtime,
 	GError **error)
 {
 	FILE *fp;
-	if (!(fp = fopen(filename, "rb"))) {
+	if (!(fp = fopen(path, "rb"))) {
 		set_error(error, g_strerror(errno));
 		return NULL;
 	}
@@ -514,7 +514,7 @@ read_png_thumbnail(const gchar *filename, const gchar *target, time_t mtime,
 	// XXX: libpng will premultiply with the alpha, but it also gamma-adjust it.
 	png_set_alpha_mode(pngp, PNG_ALPHA_BROKEN, PNG_DEFAULT_sRGB);
 	png_read_info(pngp, infop);
-	if (check_png_thumbnail(pngp, infop, target, mtime) == FALSE)
+	if (check_png_thumbnail(pngp, infop, uri, mtime) == FALSE)
 		png_error(pngp, "mismatch");
 
 	// Asking for at least 8-bit channels. This call is a superset of:
@@ -572,7 +572,7 @@ read_png_thumbnail(const gchar *filename, const gchar *target, time_t mtime,
 	// The specification does not say where the required metadata should be,
 	// it could very well be broken up into two parts.
 	png_read_end(pngp, infop);
-	if (check_png_thumbnail(pngp, infop, target, mtime) != TRUE)
+	if (check_png_thumbnail(pngp, infop, uri, mtime) != TRUE)
 		png_error(pngp, "mismatch or not a thumbnail");
 
 fail:
@@ -601,10 +601,15 @@ fastiv_io_lookup_thumbnail(const gchar *target)
 
 	cairo_surface_t *result = NULL;
 	const gchar *sizes[] = {"large", "x-large", "xx-large", "normal"};
+	GError *error = NULL;
 	for (gsize i = 0; !result && i < G_N_ELEMENTS(sizes); i++) {
 		gchar *path = g_strdup_printf("%s/thumbnails/%s/%s.png",
-			cache_dir, "large", sum);
-		result = read_png_thumbnail(path, target, st.st_mtim.tv_sec, NULL);
+			cache_dir, sizes[i], sum);
+		result = read_png_thumbnail(path, uri, st.st_mtim.tv_sec, &error);
+		if (error) {
+			g_debug("%s: %s", path, error->message);
+			g_clear_error(&error);
+		}
 		g_free(path);
 	}
 

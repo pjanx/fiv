@@ -1,5 +1,5 @@
 //
-// fastiv-view.h: fast image viewer - view widget
+// fastiv-browser.h: fast image viewer - filesystem browser widget
 //
 // Copyright (c) 2021, Přemysl Eric Janouch <p@janouch.name>
 //
@@ -19,12 +19,7 @@
 
 #include <gtk/gtk.h>
 
-#define FASTIV_TYPE_VIEW  (fastiv_view_get_type())
-G_DECLARE_FINAL_TYPE(FastivView, fastiv_view, FASTIV, VIEW, GtkWidget)
+#define FASTIV_TYPE_BROWSER  (fastiv_browser_get_type())
+G_DECLARE_FINAL_TYPE(FastivBrowser, fastiv_browser, FASTIV, BROWSER, GtkWidget)
 
-/// Try to open the given file, synchronously, to be displayed by the widget.
-gboolean fastiv_view_open(FastivView *self, const gchar *path, GError **error);
-
-// Private, fastiv-io.c
-cairo_surface_t *fastiv_io_open(const gchar *path, GError **error);
-cairo_surface_t *fastiv_io_lookup_thumbnail(const gchar *target);
+void fastiv_browser_load(FastivBrowser *self, const char *path);
