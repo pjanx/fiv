@@ -448,7 +448,7 @@ main(int argc, char *argv[])
 	gtk_accel_group_connect(accel_group, GDK_KEY_o, GDK_CONTROL_MASK, 0,
 		g_cclosure_new(G_CALLBACK(on_open), NULL, NULL));
 
-	// FIXME: The left/right arrows do not work, for whatever reason.
+	// FIXME: The left/right arrows can't be bound this way at all.
 	gtk_accel_group_connect(accel_group, GDK_KEY_Left, 0, 0,
 		g_cclosure_new(G_CALLBACK(on_previous), NULL, NULL));
 	gtk_accel_group_connect(accel_group, GDK_KEY_Page_Up, 0, 0,
