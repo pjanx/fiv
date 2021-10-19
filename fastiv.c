@@ -292,7 +292,11 @@ load_directory(const gchar *dirname)
 	GDir *dir = g_dir_open(dirname, 0, &error);
 	if (dir) {
 		for (const gchar *name = NULL; (name = g_dir_read_name(dir)); ) {
-			if (!is_supported(name))
+			// This really wants to make you use readdir() directly.
+			char *absolute = g_canonicalize_filename(name, g.directory);
+			gboolean is_dir = g_file_test(absolute, G_FILE_TEST_IS_DIR);
+			g_free(absolute);
+			if (is_dir || !is_supported(name))
 				continue;
 
 			// XXX: We presume that this basename is from the same directory.
