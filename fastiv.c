@@ -356,12 +356,22 @@ open(const gchar *path)
 static void
 on_open(void)
 {
-	// TODO(p): Populate and pass a GtkFileFilter.
-	// If we want to keep this functionality, that is.
 	GtkWidget *dialog = gtk_file_chooser_dialog_new("Open file",
 		GTK_WINDOW(g.window), GTK_FILE_CHOOSER_ACTION_OPEN,
 		"_Cancel", GTK_RESPONSE_CANCEL,
 		"_Open", GTK_RESPONSE_ACCEPT, NULL);
+
+	// NOTE: gdk-pixbuf has gtk_file_filter_add_pixbuf_formats().
+	GtkFileFilter *filter = gtk_file_filter_new();
+	for (gsize i = 0; i < G_N_ELEMENTS(supported_media_types); i++)
+		gtk_file_filter_add_mime_type(filter, supported_media_types[i]);
+	gtk_file_filter_set_name(filter, "Supported images");
+	gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dialog), filter);
+
+	GtkFileFilter *all_files = gtk_file_filter_new();
+	gtk_file_filter_set_name(all_files, "All files");
+	gtk_file_filter_add_pattern(all_files, "*");
+	gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dialog), all_files);
 
 	// The default is local-only, single item. Paths are returned absolute.
 	if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
