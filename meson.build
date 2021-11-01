@@ -20,7 +20,7 @@ configure_file(
 )
 
 executable('fastiv', 'fastiv.c', 'fastiv-view.c', 'fastiv-io.c',
-	'fastiv-browser.c',
+	'fastiv-browser.c', 'xdg.c',
 	install : true,
 	dependencies : [dependencies])
 

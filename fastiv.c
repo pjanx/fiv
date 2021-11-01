@@ -30,6 +30,7 @@
 #include "fastiv-browser.h"
 #include "fastiv-io.h"
 #include "fastiv-view.h"
+#include "xdg.h"
 
 // --- Utilities ---------------------------------------------------------------
 
@@ -47,176 +48,6 @@ exit_fatal(const gchar *format, ...)
 
 	va_end(ap);
 	exit(EXIT_FAILURE);
-}
-
-/// Add `element` to the `output` set. `relation` is a map of sets of strings
-/// defining is-a relations, and is traversed recursively.
-static void
-add_applying_transitive_closure(
-	const gchar *element, GHashTable *relation, GHashTable *output)
-{
-	// Stop condition.
-	if (!g_hash_table_add(output, g_strdup(element)))
-		return;
-
-	// TODO(p): Iterate over all aliases of `element` in addition to
-	// any direct match (and rename this no-longer-generic function).
-	GHashTable *targets = g_hash_table_lookup(relation, element);
-	if (!targets)
-		return;
-
-	GHashTableIter iter;
-	g_hash_table_iter_init(&iter, targets);
-
-	gpointer key = NULL, value = NULL;
-	while (g_hash_table_iter_next(&iter, &key, &value))
-		add_applying_transitive_closure(key, relation, output);
-}
-
-// --- XDG ---------------------------------------------------------------------
-
-gchar *
-get_xdg_home_dir(const char *var, const char *default_)
-{
-	const char *env = getenv(var);
-	if (env && *env == '/')
-		return g_strdup(env);
-
-	// The specification doesn't handle a missing HOME variable explicitly.
-	// Implicitly, assuming Bourne shell semantics, it simply resolves empty.
-	const char *home = getenv("HOME");
-	return g_build_filename(home ? home : "", default_, NULL);
-}
-
-static gchar **
-get_xdg_data_dirs(void)
-{
-	// GStrvBuilder is too new, it would help a little bit.
-	GPtrArray *output = g_ptr_array_new_with_free_func(g_free);
-	g_ptr_array_add(output, get_xdg_home_dir("XDG_DATA_HOME", ".local/share"));
-
-	const gchar *xdg_data_dirs;
-	if (!(xdg_data_dirs = getenv("XDG_DATA_DIRS")) || !*xdg_data_dirs)
-		xdg_data_dirs = "/usr/local/share/:/usr/share/";
-
-	gchar **candidates = g_strsplit(xdg_data_dirs, ":", 0);
-	for (gchar **p = candidates; *p; p++) {
-		if (**p == '/')
-			g_ptr_array_add(output, *p);
-		else
-			g_free(*p);
-	}
-	g_free(candidates);
-	g_ptr_array_add(output, NULL);
-	return (gchar **) g_ptr_array_free(output, FALSE);
-}
-
-// --- Filtering ---------------------------------------------------------------
-
-// Derived from shared-mime-info-spec 0.21.
-
-static void
-read_mime_subclasses(const gchar *path, GHashTable *subclass_sets)
-{
-	gchar *data = NULL;
-	if (!g_file_get_contents(path, &data, NULL /* length */, NULL /* error */))
-		return;
-
-	// The format of this file is unspecified,
-	// but in practice it's a list of space-separated media types.
-	gchar *datasave = NULL;
-	for (gchar *line = strtok_r(data, "\r\n", &datasave); line;
-			line = strtok_r(NULL, "\r\n", &datasave)) {
-		gchar *linesave = NULL,
-			*subclass = strtok_r(line, " ", &linesave),
-			*superclass = strtok_r(NULL, " ", &linesave);
-
-		// Nothing about comments is specified, we're being nice.
-		if (!subclass || *subclass == '#' || !superclass)
-			continue;
-
-		GHashTable *set = NULL;
-		if (!(set = g_hash_table_lookup(subclass_sets, superclass))) {
-			set = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
-			g_hash_table_insert(subclass_sets, g_strdup(superclass), set);
-		}
-		g_hash_table_add(set, g_strdup(subclass));
-	}
-	g_free(data);
-}
-
-static gboolean
-filter_mime_globs(const gchar *path, guint is_globs2, GHashTable *supported_set,
-	GHashTable *output_set)
-{
-	gchar *data = NULL;
-	if (!g_file_get_contents(path, &data, NULL /* length */, NULL /* error */))
-		return FALSE;
-
-	gchar *datasave = NULL;
-	for (const gchar *line = strtok_r(data, "\r\n", &datasave); line;
-			line = strtok_r(NULL, "\r\n", &datasave)) {
-		if (*line == '#')
-			continue;
-
-		// We do not support __NOGLOBS__, nor even parse out the "cs" flag.
-		// The weight is irrelevant.
-		gchar **f = g_strsplit(line, ":", 0);
-		if (g_strv_length(f) >= is_globs2 + 2) {
-			const gchar *type = f[is_globs2 + 0], *glob = f[is_globs2 + 1];
-			if (g_hash_table_contains(supported_set, type))
-				g_hash_table_add(output_set, g_utf8_strdown(glob, -1));
-		}
-		g_strfreev(f);
-	}
-	g_free(data);
-	return TRUE;
-}
-
-static gchar **
-get_supported_globs(const char **media_types)
-{
-	gchar **data_dirs = get_xdg_data_dirs();
-
-	// The mime.cache format is inconvenient to parse,
-	// we'll do it from the text files manually, and once only.
-	GHashTable *subclass_sets = g_hash_table_new_full(
-		g_str_hash, g_str_equal, g_free, (GDestroyNotify) g_hash_table_destroy);
-	for (gsize i = 0; data_dirs[i]; i++) {
-		gchar *path =
-			g_build_filename(data_dirs[i], "mime", "subclasses", NULL);
-		read_mime_subclasses(path, subclass_sets);
-		g_free(path);
-	}
-
-	// A hash set of all supported media types, including subclasses,
-	// but not aliases.
-	GHashTable *supported =
-		g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
-	while (*media_types) {
-		add_applying_transitive_closure(
-			*media_types++, subclass_sets, supported);
-	}
-	g_hash_table_destroy(subclass_sets);
-
-	// We do not support the distinction of case-sensitive globs (:cs).
-	GHashTable *globs =
-		g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
-	for (gsize i = 0; data_dirs[i]; i++) {
-		gchar *path2 = g_build_filename(data_dirs[i], "mime", "globs2", NULL);
-		gchar *path1 = g_build_filename(data_dirs[i], "mime", "globs", NULL);
-		if (!filter_mime_globs(path2, TRUE, supported, globs))
-			filter_mime_globs(path1, FALSE, supported, globs);
-		g_free(path2);
-		g_free(path1);
-	}
-	g_strfreev(data_dirs);
-	g_hash_table_destroy(supported);
-
-	gchar **result = (gchar **) g_hash_table_get_keys_as_array(globs, NULL);
-	g_hash_table_steal_all(globs);
-	g_hash_table_destroy(globs);
-	return result;
 }
 
 // --- Main --------------------------------------------------------------------
@@ -478,7 +309,7 @@ main(int argc, char *argv[])
 		g_cclosure_new(G_CALLBACK(on_next), NULL, NULL));
 	gtk_window_add_accel_group(GTK_WINDOW(g.window), accel_group);
 
-	g.supported_globs = get_supported_globs(fastiv_io_supported_media_types);
+	g.supported_globs = extract_mime_globs(fastiv_io_supported_media_types);
 	g.files = g_ptr_array_new_full(16, g_free);
 	gchar *cwd = g_get_current_dir();
 

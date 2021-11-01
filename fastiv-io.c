@@ -37,6 +37,8 @@
 #define WUFFS_CONFIG__MODULE__ZLIB
 #include "wuffs-mirror-release-c/release/c/wuffs-v0.3.c"
 
+#include "xdg.h"
+
 // A subset of shared-mime-info that produces an appropriate list of
 // file extensions. Chiefly motivated by the suckiness of RAW images:
 // someone else will maintain the list of file extensions for us.
@@ -447,9 +449,6 @@ fastiv_io_open(const gchar *path, GError **error)
 // We can use the pixman library to scale, PIXMAN_a8r8g8b8_sRGB.
 #include <glib/gstdio.h>
 #include <png.h>
-
-// TODO(p): Reorganize the sources.
-gchar *get_xdg_home_dir(const char *var, const char *default_);
 
 static void
 redirect_png_error(png_structp pngp, const char *error)
