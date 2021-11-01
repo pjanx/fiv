@@ -223,6 +223,57 @@ on_next(void)
 	}
 }
 
+// Cursor keys, e.g., simply cannot be bound through accelerators
+// (and GtkWidget::keynav-failed would arguably be an awful solution).
+//
+// GtkBindingSets can be added directly through GtkStyleContext,
+// but that would still require setting up action signals on the widget class,
+// which is extremely cumbersome.  GtkWidget::move-focus has no return value,
+// so we can't override that and abort further handling.
+//
+// Therefore, bind directly to keypresses.  Order can be fine-tuned with
+// g_signal_connect{,after}(), or overriding the handler and either tactically
+// chaining up or using gtk_window_propagate_key_event().
+static gboolean
+on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEvent *event,
+	G_GNUC_UNUSED gpointer data)
+{
+	switch (event->key.state & gtk_accelerator_get_default_mod_mask()) {
+	case GDK_CONTROL_MASK:
+		switch (event->key.keyval) {
+		case GDK_KEY_o:
+			on_open();
+			return TRUE;
+		}
+		break;
+	case 0:
+		switch (event->key.keyval) {
+		case GDK_KEY_Escape:
+		case GDK_KEY_q:
+			gtk_main_quit();
+			return TRUE;
+
+		case GDK_KEY_o:
+			on_open();
+			return TRUE;
+
+		case GDK_KEY_Left:
+		case GDK_KEY_Up:
+		case GDK_KEY_Page_Up:
+			on_previous();
+			return TRUE;
+
+		case GDK_KEY_Right:
+		case GDK_KEY_Down:
+		case GDK_KEY_Page_Down:
+		case GDK_KEY_space:
+			on_next();
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -281,42 +332,16 @@ main(int argc, char *argv[])
 	gtk_container_add(GTK_CONTAINER(stack), g.browser_scroller);
 
 	g.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-	g_signal_connect(g.window, "destroy", G_CALLBACK(gtk_main_quit), NULL);
+	g_signal_connect(g.window, "destroy",
+		G_CALLBACK(gtk_main_quit), NULL);
+	g_signal_connect(g.window, "key-press-event",
+		G_CALLBACK(on_key_press), NULL);
 	gtk_container_add(GTK_CONTAINER(g.window), stack);
-
-	// The references to closures are initially floating and sunk on connect.
-	GtkAccelGroup *accel_group = gtk_accel_group_new();
-	gtk_accel_group_connect(accel_group, GDK_KEY_Escape, 0, 0,
-		g_cclosure_new(G_CALLBACK(gtk_main_quit), NULL, NULL));
-	gtk_accel_group_connect(accel_group, GDK_KEY_q, 0, 0,
-		g_cclosure_new(G_CALLBACK(gtk_main_quit), NULL, NULL));
-
-	gtk_accel_group_connect(accel_group, GDK_KEY_o, 0, 0,
-		g_cclosure_new(G_CALLBACK(on_open), NULL, NULL));
-	gtk_accel_group_connect(accel_group, GDK_KEY_o, GDK_CONTROL_MASK, 0,
-		g_cclosure_new(G_CALLBACK(on_open), NULL, NULL));
-
-	// FIXME: The left/right arrows can't be bound this way at all.
-	gtk_accel_group_connect(accel_group, GDK_KEY_Left, 0, 0,
-		g_cclosure_new(G_CALLBACK(on_previous), NULL, NULL));
-	gtk_accel_group_connect(accel_group, GDK_KEY_Page_Up, 0, 0,
-		g_cclosure_new(G_CALLBACK(on_previous), NULL, NULL));
-	gtk_accel_group_connect(accel_group, GDK_KEY_Right, 0, 0,
-		g_cclosure_new(G_CALLBACK(on_next), NULL, NULL));
-	gtk_accel_group_connect(accel_group, GDK_KEY_Page_Down, 0, 0,
-		g_cclosure_new(G_CALLBACK(on_next), NULL, NULL));
-	gtk_accel_group_connect(accel_group, GDK_KEY_space, 0, 0,
-		g_cclosure_new(G_CALLBACK(on_next), NULL, NULL));
-	gtk_window_add_accel_group(GTK_WINDOW(g.window), accel_group);
 
 	g.supported_globs = extract_mime_globs(fastiv_io_supported_media_types);
 	g.files = g_ptr_array_new_full(16, g_free);
 	gchar *cwd = g_get_current_dir();
 
-	// TODO(p): Desired behaviour:
-	//  - No arguments: show directory view of the current working directory.
-	//  - File argument: load its directory for browsing, open the file.
-	//  - Directory argument: load its directory for browsing, show the dir.
 	GStatBuf st;
 	if (!path_arg) {
 		load_directory(cwd);
