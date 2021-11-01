@@ -2,41 +2,13 @@ fastiv
 ======
 
 'fastiv' is a fast image viewer, supporting BMP, PNG, GIF, JPEG, and optionally
-RAW pictures.
+RAW pictures.  Currently, it's not particularly usable.
 
-It is meant to be a viable replacement for Eye of GNOME, which is slow, likes
-to break on huge pictures, and its underlying gdk-pixbuf can only be made to use
-the broken libopenraw
-https://mail.gnome.org/archives/eog-list/2016-January/msg00004.html[as of now].
-
-Further development
--------------------
-Urgent blockers for the first stable version:
-
- - directory browsing
- - implement zoom and scrolling
-
-High priority:
-
- - some level of asynchronous loading and preloading,
-   which becomes a difficult problem with network mounts,
-   confusingly acting as fast devices
- - write a replacement for GNOME's Nautilus in grid mode:
-   read-only, with focus on staggered previews and minimising wasted space
-
-Low priority:
-
- - display 16-bit pictures smoothly, using the 30-bit depth under X.org
- - make RAW as fast as it can possibly be
- - load everything that resembles a picture, potentially even play video
- - port to something less hostile than the current GNOME stack, such as SDL,
-   although it may involve a lot of reimplemented code,
-   or result in reduced functionality
-
-Non-goals:
-
- - fancy UI, focus solely on speed of use
+Non-goals
+---------
+ - fancy UI--the focus is on speed of use first, colour accuracy second
  - memory efficiency, though preloading can cause some pressure
+ - portability to non-UNIXy systems
 
 Packages
 --------
@@ -46,8 +18,8 @@ a package with the latest development version from Archlinux's AUR.
 Building and Running
 --------------------
 Build dependencies: Meson, pkg-config +
-Runtime dependencies: gtk+-3.0, libpng > 1.5.4, libturbojpeg, LibRaw (optional),
-shared-mime-info
+Runtime dependencies: gtk+-3.0, shared-mime-info, libpng>=1.5.4, libturbojpeg,
+LibRaw (optional)
 
  $ git clone --recursive https://git.janouch.name/p/fastiv.git
  $ meson builddir
