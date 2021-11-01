@@ -17,8 +17,8 @@
 
 #include "config.h"
 
-#include <glib.h>
 #include <cairo.h>
+#include <glib.h>
 #include <turbojpeg.h>
 #ifdef HAVE_LIBRAW
 #include <libraw.h>
@@ -53,7 +53,7 @@ const char *fastiv_io_supported_media_types[] = {
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-#define FASTIV_IO_ERROR  fastiv_io_error_quark()
+#define FASTIV_IO_ERROR fastiv_io_error_quark()
 
 G_DEFINE_QUARK(fastiv-io-error-quark, fastiv_io_error)
 
@@ -64,8 +64,7 @@ enum FastivIoError {
 static void
 set_error(GError **error, const char *message)
 {
-	g_set_error_literal(error,
-		FASTIV_IO_ERROR, FASTIV_IO_ERROR_OPEN, message);
+	g_set_error_literal(error, FASTIV_IO_ERROR, FASTIV_IO_ERROR_OPEN, message);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -74,8 +73,8 @@ set_error(GError **error, const char *message)
 // is pure C, and a good reference. I can't use the auxiliary libraries,
 // since they depend on C++, which is undesirable.
 static cairo_surface_t *
-open_wuffs(wuffs_base__image_decoder *dec,
-	wuffs_base__io_buffer src, GError **error)
+open_wuffs(
+	wuffs_base__image_decoder *dec, wuffs_base__io_buffer src, GError **error)
 {
 	wuffs_base__image_config cfg;
 	wuffs_base__status status =
@@ -148,7 +147,7 @@ open_wuffs(wuffs_base__image_decoder *dec,
 	status = wuffs_base__pixel_buffer__set_from_slice(&pb, &cfg.pixcfg,
 		wuffs_base__make_slice_u8(cairo_image_surface_get_data(surface),
 			cairo_image_surface_get_stride(surface) *
-			cairo_image_surface_get_height(surface)));
+				cairo_image_surface_get_height(surface)));
 	if (!wuffs_base__status__is_ok(&status)) {
 		set_error(error, wuffs_base__status__message(&status));
 		cairo_surface_destroy(surface);
@@ -170,8 +169,8 @@ open_wuffs(wuffs_base__image_decoder *dec,
 	// Starting to modify pixel data directly. Probably an unnecessary call.
 	cairo_surface_flush(surface);
 
-	status = wuffs_base__image_decoder__decode_frame(dec, &pb, &src,
-		WUFFS_BASE__PIXEL_BLEND__SRC, workbuf, NULL);
+	status = wuffs_base__image_decoder__decode_frame(
+		dec, &pb, &src, WUFFS_BASE__PIXEL_BLEND__SRC, workbuf, NULL);
 	if (!wuffs_base__status__is_ok(&status)) {
 		set_error(error, wuffs_base__status__message(&status));
 		cairo_surface_destroy(surface);
@@ -196,8 +195,8 @@ open_wuffs_using(wuffs_base__image_decoder *(*allocate)(),
 		return NULL;
 	}
 
-	cairo_surface_t *surface = open_wuffs(dec,
-		wuffs_base__ptr_u8__reader((uint8_t *) data, len, TRUE), error);
+	cairo_surface_t *surface = open_wuffs(
+		dec, wuffs_base__ptr_u8__reader((uint8_t *) data, len, TRUE), error);
 	free(dec);
 	return surface;
 }
@@ -255,8 +254,8 @@ open_libjpeg_turbo(const gchar *data, gsize len, GError **error)
 
 	int stride = cairo_image_surface_get_stride(surface);
 	if (tjDecompress2(dec, (const unsigned char *) data, len,
-			cairo_image_surface_get_data(surface), width, stride,
-			height, pixel_format, TJFLAG_ACCURATEDCT)) {
+			cairo_image_surface_get_data(surface), width, stride, height,
+			pixel_format, TJFLAG_ACCURATEDCT)) {
 		set_error(error, tjGetErrorStr2(dec));
 		cairo_surface_destroy(surface);
 		tjDestroy(dec);
@@ -267,8 +266,8 @@ open_libjpeg_turbo(const gchar *data, gsize len, GError **error)
 	if (pixel_format == TJPF_CMYK) {
 		// CAIRO_STRIDE_ALIGNMENT is 4 bytes, so there will be no padding with
 		// ARGB/BGR/XRGB/BGRX.
-		trivial_cmyk_to_bgra(cairo_image_surface_get_data(surface),
-			width * height);
+		trivial_cmyk_to_bgra(
+			cairo_image_surface_get_data(surface), width * height);
 	}
 
 	// Pixel data has been written, need to let Cairo know.
@@ -284,8 +283,8 @@ static cairo_surface_t *
 open_libraw(const gchar *data, gsize len, GError **error)
 {
 	// https://github.com/LibRaw/LibRaw/issues/418
-	libraw_data_t *iprc = libraw_init(LIBRAW_OPIONS_NO_MEMERR_CALLBACK
-		| LIBRAW_OPIONS_NO_DATAERR_CALLBACK);
+	libraw_data_t *iprc = libraw_init(
+		LIBRAW_OPIONS_NO_MEMERR_CALLBACK | LIBRAW_OPIONS_NO_DATAERR_CALLBACK);
 	if (!iprc) {
 		set_error(error, "failed to obtain a LibRaw handle");
 		return NULL;
@@ -300,7 +299,7 @@ open_libraw(const gchar *data, gsize len, GError **error)
 	// TODO(p): Check if we need to set anything for autorotation (sizes.flip).
 	iprc->params.use_camera_wb = 1;
 	iprc->params.output_color = 1;  // sRGB, TODO(p): Is this used?
-	iprc->params.output_bps = 8;  // This should be the default value.
+	iprc->params.output_bps = 8;    // This should be the default value.
 
 	int err = 0;
 	if ((err = libraw_open_buffer(iprc, (void *) data, len))) {
@@ -368,8 +367,8 @@ open_libraw(const gchar *data, gsize len, GError **error)
 	unsigned char *p = image->data;
 	for (ushort y = 0; y < image->height; y++) {
 		for (ushort x = 0; x < image->width; x++) {
-			*pixels++ = 0xff000000 | (uint32_t) p[0] << 16
-				| (uint32_t) p[1] << 8 | (uint32_t) p[2];
+			*pixels++ = 0xff000000 | (uint32_t) p[0] << 16 |
+				(uint32_t) p[1] << 8 | (uint32_t) p[2];
 			p += 3;
 		}
 	}
@@ -407,18 +406,18 @@ fastiv_io_open(const gchar *path, GError **error)
 		// Note that BMP can redirect into another format,
 		// which is so far unsupported here.
 		surface = open_wuffs_using(
-			wuffs_bmp__decoder__alloc_as__wuffs_base__image_decoder,
-			data, len, error);
+			wuffs_bmp__decoder__alloc_as__wuffs_base__image_decoder, data, len,
+			error);
 		break;
 	case WUFFS_BASE__FOURCC__GIF:
 		surface = open_wuffs_using(
-			wuffs_gif__decoder__alloc_as__wuffs_base__image_decoder,
-			data, len, error);
+			wuffs_gif__decoder__alloc_as__wuffs_base__image_decoder, data, len,
+			error);
 		break;
 	case WUFFS_BASE__FOURCC__PNG:
 		surface = open_wuffs_using(
-			wuffs_png__decoder__alloc_as__wuffs_base__image_decoder,
-			data, len, error);
+			wuffs_png__decoder__alloc_as__wuffs_base__image_decoder, data, len,
+			error);
 		break;
 	case WUFFS_BASE__FOURCC__JPEG:
 		surface = open_libjpeg_turbo(data, len, error);
@@ -446,8 +445,8 @@ fastiv_io_open(const gchar *path, GError **error)
 // scaled, linear encoded, pre-multiplied component values must be used!"
 //
 // We can use the pixman library to scale, PIXMAN_a8r8g8b8_sRGB.
-#include <png.h>
 #include <glib/gstdio.h>
+#include <png.h>
 
 // TODO(p): Reorganize the sources.
 gchar *get_xdg_home_dir(const char *var, const char *default_);
@@ -467,8 +466,8 @@ discard_png_warning(png_structp pngp, const char *warning)
 }
 
 static int
-check_png_thumbnail(png_structp pngp, png_infop infop, const gchar *target,
-	time_t mtime)
+check_png_thumbnail(
+	png_structp pngp, png_infop infop, const gchar *target, time_t mtime)
 {
 	// May contain Thumb::Image::Width Thumb::Image::Height,
 	// but those aren't interesting currently (would be for fast previews).
@@ -496,8 +495,8 @@ check_png_thumbnail(png_structp pngp, png_infop infop, const gchar *target,
 // TODO(p): Support spng as well (it can't premultiply alpha by itself,
 // but at least it won't gamma-adjust it for us).
 static cairo_surface_t *
-read_png_thumbnail(const gchar *path, const gchar *uri, time_t mtime,
-	GError **error)
+read_png_thumbnail(
+	const gchar *path, const gchar *uri, time_t mtime, GError **error)
 {
 	FILE *fp;
 	if (!(fp = fopen(path, "rb"))) {
@@ -506,8 +505,8 @@ read_png_thumbnail(const gchar *path, const gchar *uri, time_t mtime,
 	}
 
 	cairo_surface_t *volatile surface = NULL;
-	png_structp pngp = png_create_read_struct(PNG_LIBPNG_VER_STRING,
-		error, redirect_png_error, discard_png_warning);
+	png_structp pngp = png_create_read_struct(
+		PNG_LIBPNG_VER_STRING, error, redirect_png_error, discard_png_warning);
 	png_infop infop = png_create_info_struct(pngp);
 	if (!infop) {
 		set_error(error, g_strerror(errno));
@@ -617,8 +616,8 @@ fastiv_io_lookup_thumbnail(const gchar *target)
 	const gchar *sizes[] = {"large", "x-large", "xx-large", "normal"};
 	GError *error = NULL;
 	for (gsize i = 0; !result && i < G_N_ELEMENTS(sizes); i++) {
-		gchar *path = g_strdup_printf("%s/thumbnails/%s/%s.png",
-			cache_dir, sizes[i], sum);
+		gchar *path = g_strdup_printf(
+			"%s/thumbnails/%s/%s.png", cache_dir, sizes[i], sum);
 		result = read_png_thumbnail(path, uri, st.st_mtim.tv_sec, &error);
 		if (error) {
 			g_debug("%s: %s", path, error->message);

@@ -74,8 +74,8 @@ fastiv_browser_get_request_mode(G_GNUC_UNUSED GtkWidget *widget)
 }
 
 static void
-fastiv_browser_get_preferred_width(GtkWidget *widget,
-	gint *minimum, gint *natural)
+fastiv_browser_get_preferred_width(
+	GtkWidget *widget, gint *minimum, gint *natural)
 {
 	G_GNUC_UNUSED FastivBrowser *self = FASTIV_BROWSER(widget);
 	// TODO(p): Set it to the width of the widget with one wide item within.
@@ -83,8 +83,8 @@ fastiv_browser_get_preferred_width(GtkWidget *widget,
 }
 
 static void
-fastiv_browser_get_preferred_height_for_width(GtkWidget *widget,
-	G_GNUC_UNUSED gint width, gint *minimum, gint *natural)
+fastiv_browser_get_preferred_height_for_width(
+	GtkWidget *widget, G_GNUC_UNUSED gint width, gint *minimum, gint *natural)
 {
 	G_GNUC_UNUSED FastivBrowser *self = FASTIV_BROWSER(widget);
 	// TODO(p): Re-layout, figure it out.
@@ -99,18 +99,18 @@ fastiv_browser_realize(GtkWidget *widget)
 
 	GdkWindowAttr attributes = {
 		.window_type = GDK_WINDOW_CHILD,
-		.x           = allocation.x,
-		.y           = allocation.y,
-		.width       = allocation.width,
-		.height      = allocation.height,
+		.x = allocation.x,
+		.y = allocation.y,
+		.width = allocation.width,
+		.height = allocation.height,
 
 		// Input-only would presumably also work (as in GtkPathBar, e.g.),
 		// but it merely seems to involve more work.
-		.wclass      = GDK_INPUT_OUTPUT,
+		.wclass = GDK_INPUT_OUTPUT,
 
-		.visual      = gtk_widget_get_visual(widget),
-		.event_mask  = gtk_widget_get_events(widget)
-			| GDK_KEY_PRESS_MASK | GDK_BUTTON_PRESS_MASK,
+		.visual = gtk_widget_get_visual(widget),
+		.event_mask = gtk_widget_get_events(widget) | GDK_KEY_PRESS_MASK |
+			GDK_BUTTON_PRESS_MASK,
 	};
 
 	// We need this window to receive input events at all.
@@ -131,8 +131,8 @@ fastiv_browser_draw(GtkWidget *widget, cairo_t *cr)
 
 	GtkAllocation allocation;
 	gtk_widget_get_allocation(widget, &allocation);
-	gtk_render_background(gtk_widget_get_style_context(widget), cr,
-		0, 0, allocation.width, allocation.height);
+	gtk_render_background(gtk_widget_get_style_context(widget), cr, 0, 0,
+		allocation.width, allocation.height);
 
 	const double row_height = 256;
 
@@ -152,8 +152,8 @@ fastiv_browser_draw(GtkWidget *widget, cairo_t *cr)
 		int projected_width = round(scale * width);
 		int projected_height = round(scale * height);
 
-		if (occupied_width != 0
-		 && occupied_width + projected_width > allocation.width) {
+		if (occupied_width != 0 &&
+			occupied_width + projected_width > allocation.width) {
 			occupied_width = 0;
 			y += row_height;
 		}
@@ -178,17 +178,15 @@ fastiv_browser_class_init(FastivBrowserClass *klass)
 
 	GtkWidgetClass *widget_class = GTK_WIDGET_CLASS(klass);
 	widget_class->get_request_mode = fastiv_browser_get_request_mode;
-	widget_class->get_preferred_width =
-		fastiv_browser_get_preferred_width;
+	widget_class->get_preferred_width = fastiv_browser_get_preferred_width;
 	widget_class->get_preferred_height_for_width =
 		fastiv_browser_get_preferred_height_for_width;
 	widget_class->realize = fastiv_browser_realize;
 	widget_class->draw = fastiv_browser_draw;
 
 	// TODO(p): Connect to this and emit it.
-	browser_signals[ITEM_ACTIVATED] =
-		g_signal_new("item-activated", G_TYPE_FROM_CLASS(klass),
-			0, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
+	browser_signals[ITEM_ACTIVATED] = g_signal_new("item-activated",
+		G_TYPE_FROM_CLASS(klass), 0, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
 
 	// TODO(p): Later override "screen_changed", recreate Pango layouts there,
 	// if we get to have any, or otherwise reflect DPI changes.
@@ -217,15 +215,15 @@ fastiv_browser_load(FastivBrowser *self, const char *path)
 
 	const char *filename;
 	while ((filename = g_dir_read_name(dir))) {
-		if (!strcmp(filename, ".")
-		 || !strcmp(filename, ".."))
+		if (!strcmp(filename, ".") || !strcmp(filename, ".."))
 			continue;
 
 		gchar *subpath = g_build_filename(path, filename, NULL);
-		g_array_append_val(self->entries, ((Entry) {
-			.thumbnail = fastiv_io_lookup_thumbnail(subpath),
-			.filename = subpath,
-		}));
+		g_array_append_val(self->entries,
+			((Entry){
+				.thumbnail = fastiv_io_lookup_thumbnail(subpath),
+				.filename = subpath,
+			}));
 	}
 	g_dir_close(dir);
 

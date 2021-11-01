@@ -15,26 +15,25 @@
 // CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 //
 
-#include <gtk/gtk.h>
 #include <glib.h>
 #include <glib/gstdio.h>
+#include <gtk/gtk.h>
 
-#include <stdio.h>
-#include <stdarg.h>
-#include <stdlib.h>
 #include <locale.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include <fnmatch.h>
 
 #include "config.h"
+#include "fastiv-browser.h"
 #include "fastiv-io.h"
 #include "fastiv-view.h"
-#include "fastiv-browser.h"
 
 // --- Utilities ---------------------------------------------------------------
 
-static void
-exit_fatal(const gchar *format, ...) G_GNUC_PRINTF(1, 2);
+static void exit_fatal(const gchar *format, ...) G_GNUC_PRINTF(1, 2);
 
 static void
 exit_fatal(const gchar *format, ...)
@@ -53,8 +52,8 @@ exit_fatal(const gchar *format, ...)
 /// Add `element` to the `output` set. `relation` is a map of sets of strings
 /// defining is-a relations, and is traversed recursively.
 static void
-add_applying_transitive_closure(const gchar *element, GHashTable *relation,
-	GHashTable *output)
+add_applying_transitive_closure(
+	const gchar *element, GHashTable *relation, GHashTable *output)
 {
 	// Stop condition.
 	if (!g_hash_table_add(output, g_strdup(element)))
@@ -181,8 +180,8 @@ get_supported_globs(const char **media_types)
 
 	// The mime.cache format is inconvenient to parse,
 	// we'll do it from the text files manually, and once only.
-	GHashTable *subclass_sets = g_hash_table_new_full(g_str_hash, g_str_equal,
-		g_free, (GDestroyNotify) g_hash_table_destroy);
+	GHashTable *subclass_sets = g_hash_table_new_full(
+		g_str_hash, g_str_equal, g_free, (GDestroyNotify) g_hash_table_destroy);
 	for (gsize i = 0; data_dirs[i]; i++) {
 		gchar *path =
 			g_build_filename(data_dirs[i], "mime", "subclasses", NULL);
@@ -195,8 +194,8 @@ get_supported_globs(const char **media_types)
 	GHashTable *supported =
 		g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
 	while (*media_types) {
-		add_applying_transitive_closure(*media_types++,
-			subclass_sets, supported);
+		add_applying_transitive_closure(
+			*media_types++, subclass_sets, supported);
 	}
 	g_hash_table_destroy(subclass_sets);
 
@@ -261,9 +260,9 @@ is_supported(const gchar *filename)
 static void
 show_error_dialog(GError *error)
 {
-	GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(g.window),
-		GTK_DIALOG_MODAL,
-		GTK_MESSAGE_ERROR, GTK_BUTTONS_CLOSE, "%s", error->message);
+	GtkWidget *dialog =
+		gtk_message_dialog_new(GTK_WINDOW(g.window), GTK_DIALOG_MODAL,
+			GTK_MESSAGE_ERROR, GTK_BUTTONS_CLOSE, "%s", error->message);
 	gtk_dialog_run(GTK_DIALOG(dialog));
 	gtk_widget_destroy(dialog);
 	g_error_free(error);
@@ -336,7 +335,6 @@ open(const gchar *path)
 		}
 	}
 	g_free(dirname);
-
 }
 
 static void
@@ -375,9 +373,8 @@ on_previous(void)
 	if (g.files_index >= 0) {
 		int previous =
 			(g.files->len - 1 + g.files_index - 1) % (g.files->len - 1);
-		char *absolute =
-			g_canonicalize_filename(g_ptr_array_index(g.files, previous),
-				g.directory);
+		char *absolute = g_canonicalize_filename(
+			g_ptr_array_index(g.files, previous), g.directory);
 		open(absolute);
 		g_free(absolute);
 	}
@@ -388,9 +385,8 @@ on_next(void)
 {
 	if (g.files_index >= 0) {
 		int next = (g.files_index + 1) % (g.files->len - 1);
-		char *absolute =
-			g_canonicalize_filename(g_ptr_array_index(g.files, next),
-				g.directory);
+		char *absolute = g_canonicalize_filename(
+			g_ptr_array_index(g.files, next), g.directory);
 		open(absolute);
 		g_free(absolute);
 	}
@@ -408,13 +404,13 @@ main(int argc, char *argv[])
 		{G_OPTION_REMAINING, 0, 0, G_OPTION_ARG_FILENAME_ARRAY, &path_args,
 			NULL, "[FILE | DIRECTORY]"},
 		{"version", 'V', G_OPTION_FLAG_IN_MAIN, G_OPTION_ARG_NONE,
-		 &show_version, "output version information and exit", NULL},
+			&show_version, "output version information and exit", NULL},
 		{},
 	};
 
 	GError *error = NULL;
-	if (!gtk_init_with_args(&argc, &argv, " - fast image viewer",
-		options, NULL, &error))
+	if (!gtk_init_with_args(
+			&argc, &argv, " - fast image viewer", options, NULL, &error))
 		exit_fatal("%s", error->message);
 	if (show_version) {
 		printf(PROJECT_NAME " " PROJECT_VERSION "\n");
@@ -494,9 +490,9 @@ main(int argc, char *argv[])
 	if (!path_arg) {
 		load_directory(cwd);
 	} else if (g_stat(path_arg, &st)) {
-		show_error_dialog(g_error_new(G_FILE_ERROR,
-			g_file_error_from_errno(errno),
-			"%s: %s", path_arg, g_strerror(errno)));
+		show_error_dialog(
+			g_error_new(G_FILE_ERROR, g_file_error_from_errno(errno), "%s: %s",
+				path_arg, g_strerror(errno)));
 		load_directory(cwd);
 	} else {
 		gchar *path_arg_absolute = g_canonicalize_filename(path_arg, cwd);

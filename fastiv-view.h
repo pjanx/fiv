@@ -19,7 +19,7 @@
 
 #include <gtk/gtk.h>
 
-#define FASTIV_TYPE_VIEW  (fastiv_view_get_type())
+#define FASTIV_TYPE_VIEW (fastiv_view_get_type())
 G_DECLARE_FINAL_TYPE(FastivView, fastiv_view, FASTIV, VIEW, GtkWidget)
 
 /// Try to open the given file, synchronously, to be displayed by the widget.

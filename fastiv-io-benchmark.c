@@ -15,8 +15,8 @@
 // CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 //
 
-#include <time.h>
 #include <gdk-pixbuf/gdk-pixbuf.h>
+#include <time.h>
 
 #include "fastiv-view.h"
 

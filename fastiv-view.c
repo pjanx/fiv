@@ -57,8 +57,8 @@ fastiv_view_finalize(GObject *gobject)
 }
 
 static void
-fastiv_view_get_preferred_height(GtkWidget *widget,
-	gint *minimum, gint *natural)
+fastiv_view_get_preferred_height(
+	GtkWidget *widget, gint *minimum, gint *natural)
 {
 	*minimum = 0;
 	*natural = 0;
@@ -68,8 +68,7 @@ fastiv_view_get_preferred_height(GtkWidget *widget,
 }
 
 static void
-fastiv_view_get_preferred_width(GtkWidget *widget,
-	gint *minimum, gint *natural)
+fastiv_view_get_preferred_width(GtkWidget *widget, gint *minimum, gint *natural)
 {
 	*minimum = 0;
 	*natural = 0;
@@ -86,19 +85,19 @@ fastiv_view_realize(GtkWidget *widget)
 
 	GdkWindowAttr attributes = {
 		.window_type = GDK_WINDOW_CHILD,
-		.x           = allocation.x,
-		.y           = allocation.y,
-		.width       = allocation.width,
-		.height      = allocation.height,
+		.x = allocation.x,
+		.y = allocation.y,
+		.width = allocation.width,
+		.height = allocation.height,
 
 		// Input-only would presumably also work (as in GtkPathBar, e.g.),
 		// but it merely seems to involve more work.
-		.wclass      = GDK_INPUT_OUTPUT,
+		.wclass = GDK_INPUT_OUTPUT,
 
 		// Assuming here that we can't ask for a higher-precision Visual
 		// than what we get automatically.
-		.visual      = gtk_widget_get_visual(widget),
-		.event_mask  = gtk_widget_get_events(widget) | GDK_SCROLL_MASK,
+		.visual = gtk_widget_get_visual(widget),
+		.event_mask = gtk_widget_get_events(widget) | GDK_SCROLL_MASK,
 	};
 
 	// We need this window to receive input events at all.
@@ -113,14 +112,14 @@ static gboolean
 fastiv_view_draw(GtkWidget *widget, cairo_t *cr)
 {
 	FastivView *self = FASTIV_VIEW(widget);
-	if (!self->surface
-	 || !gtk_cairo_should_draw_window(cr, gtk_widget_get_window(widget)))
+	if (!self->surface ||
+		!gtk_cairo_should_draw_window(cr, gtk_widget_get_window(widget)))
 		return TRUE;
 
 	GtkAllocation allocation;
 	gtk_widget_get_allocation(widget, &allocation);
-	gtk_render_background(gtk_widget_get_style_context(widget), cr,
-		0, 0, allocation.width, allocation.height);
+	gtk_render_background(gtk_widget_get_style_context(widget), cr, 0, 0,
+		allocation.width, allocation.height);
 
 	int w = get_display_width(self);
 	int h = get_display_height(self);
@@ -133,8 +132,8 @@ fastiv_view_draw(GtkWidget *widget, cairo_t *cr)
 		y = round((allocation.height - h) / 2.);
 
 	cairo_scale(cr, self->scale, self->scale);
-	cairo_set_source_surface(cr, self->surface,
-		x / self->scale, y / self->scale);
+	cairo_set_source_surface(
+		cr, self->surface, x / self->scale, y / self->scale);
 
 	// TODO(p): Prescale it ourselves to an off-screen bitmap, gamma-correctly.
 	cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_GOOD);
