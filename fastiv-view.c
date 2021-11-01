@@ -17,6 +17,7 @@
 
 #include <math.h>
 
+#include "fastiv-io.h"
 #include "fastiv-view.h"
 
 struct _FastivView {

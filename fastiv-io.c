@@ -37,6 +37,20 @@
 #define WUFFS_CONFIG__MODULE__ZLIB
 #include "wuffs-mirror-release-c/release/c/wuffs-v0.3.c"
 
+// A subset of shared-mime-info that produces an appropriate list of
+// file extensions. Chiefly motivated by the suckiness of RAW images:
+// someone else will maintain the list of file extensions for us.
+const char *fastiv_io_supported_media_types[] = {
+	"image/bmp",
+	"image/gif",
+	"image/png",
+	"image/jpeg",
+#ifdef HAVE_LIBRAW
+	"image/x-dcraw",
+#endif  // HAVE_LIBRAW
+	NULL
+};
+
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 #define FASTIV_IO_ERROR  fastiv_io_error_quark()

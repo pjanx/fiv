@@ -27,6 +27,7 @@
 #include <fnmatch.h>
 
 #include "config.h"
+#include "fastiv-io.h"
 #include "fastiv-view.h"
 #include "fastiv-browser.h"
 
@@ -115,21 +116,6 @@ get_xdg_data_dirs(void)
 
 // Derived from shared-mime-info-spec 0.21.
 
-// TODO(p): Move to fastiv-io.c, expose the prototype in a header file
-// (perhaps finally start a new one for it).
-// A subset of shared-mime-info that produces an appropriate list of
-// file extensions. Chiefly motivated by the suckiness of RAW images:
-// someone else will maintain the list of file extensions for us.
-static const char *supported_media_types[] = {
-	"image/bmp",
-	"image/gif",
-	"image/png",
-	"image/jpeg",
-#ifdef HAVE_LIBRAW
-	"image/x-dcraw",
-#endif  // HAVE_LIBRAW
-};
-
 static void
 read_mime_subclasses(const gchar *path, GHashTable *subclass_sets)
 {
@@ -189,7 +175,7 @@ filter_mime_globs(const gchar *path, guint is_globs2, GHashTable *supported_set,
 }
 
 static gchar **
-get_supported_globs (void)
+get_supported_globs(const char **media_types)
 {
 	gchar **data_dirs = get_xdg_data_dirs();
 
@@ -208,8 +194,8 @@ get_supported_globs (void)
 	// but not aliases.
 	GHashTable *supported =
 		g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
-	for (gsize i = 0; i < G_N_ELEMENTS(supported_media_types); i++) {
-		add_applying_transitive_closure(supported_media_types[i],
+	while (*media_types) {
+		add_applying_transitive_closure(*media_types++,
 			subclass_sets, supported);
 	}
 	g_hash_table_destroy(subclass_sets);
@@ -363,8 +349,8 @@ on_open(void)
 
 	// NOTE: gdk-pixbuf has gtk_file_filter_add_pixbuf_formats().
 	GtkFileFilter *filter = gtk_file_filter_new();
-	for (gsize i = 0; i < G_N_ELEMENTS(supported_media_types); i++)
-		gtk_file_filter_add_mime_type(filter, supported_media_types[i]);
+	for (const char **p = fastiv_io_supported_media_types; *p; p++)
+		gtk_file_filter_add_mime_type(filter, *p);
 	gtk_file_filter_set_name(filter, "Supported images");
 	gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dialog), filter);
 
@@ -496,7 +482,7 @@ main(int argc, char *argv[])
 		g_cclosure_new(G_CALLBACK(on_next), NULL, NULL));
 	gtk_window_add_accel_group(GTK_WINDOW(g.window), accel_group);
 
-	g.supported_globs = get_supported_globs();
+	g.supported_globs = get_supported_globs(fastiv_io_supported_media_types);
 	g.files = g_ptr_array_new_full(16, g_free);
 	gchar *cwd = g_get_current_dir();
 

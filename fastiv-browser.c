@@ -18,6 +18,7 @@
 #include <math.h>
 
 #include "fastiv-browser.h"
+#include "fastiv-io.h"
 #include "fastiv-view.h"
 
 typedef struct entry Entry;
