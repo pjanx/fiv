@@ -16,6 +16,7 @@
 //
 
 #include <math.h>
+#include <pixman.h>
 
 #include "fastiv-browser.h"
 #include "fastiv-io.h"
@@ -145,12 +146,49 @@ fastiv_browser_draw(GtkWidget *widget, cairo_t *cr)
 		int width = cairo_image_surface_get_width(entry->thumbnail);
 		int height = cairo_image_surface_get_height(entry->thumbnail);
 
-		double scale = row_height / height;
-		if (width * scale > 2 * row_height)
-			scale = 2 * row_height / width;
+		double scale_x = 1;
+		double scale_y = 1;
+		if (width > 2 * height) {
+			scale_x = 2 * row_height / width;
+			scale_y = round(scale_x * height) / height;
+		} else {
+			scale_y = row_height / height;
+			scale_x = round(scale_y * width) / width;
+		}
 
-		int projected_width = round(scale * width);
-		int projected_height = round(scale * height);
+		int projected_width = round(scale_x * width);
+		int projected_height = round(scale_y * height);
+		cairo_surface_t *scaled = cairo_image_surface_create(
+			CAIRO_FORMAT_ARGB32, projected_width, projected_height);
+
+		// pixman can take gamma into account when scaling, unlike Cairo.
+		struct pixman_f_transform xform_floating;
+		struct pixman_transform xform;
+
+		pixman_image_t *src = pixman_image_create_bits(
+			PIXMAN_a8r8g8b8_sRGB, width, height,
+			(uint32_t *) cairo_image_surface_get_data(entry->thumbnail),
+			cairo_image_surface_get_stride(entry->thumbnail));
+		pixman_image_t *dest = pixman_image_create_bits(
+			PIXMAN_a8r8g8b8_sRGB,
+			cairo_image_surface_get_width(scaled),
+			cairo_image_surface_get_height(scaled),
+			(uint32_t *) cairo_image_surface_get_data(scaled),
+			cairo_image_surface_get_stride(scaled));
+
+		pixman_f_transform_init_scale(&xform_floating, scale_x, scale_y);
+		pixman_f_transform_invert(&xform_floating, &xform_floating);
+		pixman_transform_from_pixman_f_transform(&xform, &xform_floating);
+		pixman_image_set_transform(src, &xform);
+		pixman_image_set_filter(src, PIXMAN_FILTER_BILINEAR, NULL, 0);
+		pixman_image_set_repeat(src, PIXMAN_REPEAT_PAD);
+
+		pixman_image_composite(PIXMAN_OP_SRC, src, NULL, dest, 0, 0, 0, 0, 0, 0,
+			projected_width, projected_height);
+		pixman_image_unref(src);
+		pixman_image_unref(dest);
+
+		cairo_surface_mark_dirty(scaled);
 
 		if (occupied_width != 0 &&
 			occupied_width + projected_width > allocation.width) {
@@ -160,8 +198,8 @@ fastiv_browser_draw(GtkWidget *widget, cairo_t *cr)
 
 		cairo_save(cr);
 		cairo_translate(cr, occupied_width, y + row_height - projected_height);
-		cairo_scale(cr, scale, scale);
-		cairo_set_source_surface(cr, entry->thumbnail, 0, 0);
+		cairo_set_source_surface(cr, scaled, 0, 0);
+		cairo_surface_destroy(scaled);
 		cairo_paint(cr);
 		cairo_restore(cr);
 

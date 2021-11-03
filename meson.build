@@ -6,6 +6,7 @@ dependencies = [
 	dependency('gtk+-3.0'),
 	dependency('libturbojpeg'),
 	dependency('libpng', version : '>=1.5.4'),
+	dependency('pixman-1'),
 	libraw,
 	meson.get_compiler('c').find_library('m', required : false),
 ]
