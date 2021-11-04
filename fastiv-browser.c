@@ -225,12 +225,14 @@ rescale_thumbnail(cairo_surface_t *thumbnail)
 	struct pixman_f_transform xform_floating;
 	struct pixman_transform xform;
 
-	pixman_image_t *src = pixman_image_create_bits(
-		PIXMAN_a8r8g8b8_sRGB, width, height,
+	// PIXMAN_a8r8g8b8_sRGB can be used for gamma-correct results,
+	// but it's an incredibly slow transformation
+	pixman_format_code_t format = PIXMAN_a8r8g8b8;
+
+	pixman_image_t *src = pixman_image_create_bits(format, width, height,
 		(uint32_t *) cairo_image_surface_get_data(thumbnail),
 		cairo_image_surface_get_stride(thumbnail));
-	pixman_image_t *dest = pixman_image_create_bits(
-		PIXMAN_a8r8g8b8_sRGB,
+	pixman_image_t *dest = pixman_image_create_bits(format,
 		cairo_image_surface_get_width(scaled),
 		cairo_image_surface_get_height(scaled),
 		(uint32_t *) cairo_image_surface_get_data(scaled),
