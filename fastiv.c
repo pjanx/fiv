@@ -19,7 +19,6 @@
 #include <glib/gstdio.h>
 #include <gtk/gtk.h>
 
-#include <locale.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -277,9 +276,6 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEvent *event,
 int
 main(int argc, char *argv[])
 {
-	if (!setlocale(LC_CTYPE, ""))
-		exit_fatal("cannot set locale");
-
 	gboolean show_version = FALSE;
 	gchar **path_args = NULL;
 	const GOptionEntry options[] = {
