@@ -22,11 +22,32 @@
 #include "fastiv-io.h"
 #include "fastiv-view.h"
 
+// --- Widget ------------------------------------------------------------------
+
+struct _FastivBrowser {
+	GtkWidget parent_instance;
+
+	GArray *entries;                    ///< [Entry]
+	GArray *layouted_rows;              ///< [Row]
+	int selected;
+};
+
 typedef struct entry Entry;
+typedef struct item Item;
+typedef struct row Row;
+
+static const double g_row_height = 256;
+static const double g_permitted_width_multiplier = 2;
+
+// Could be split out to also-idiomatic row-spacing/column-spacing properties.
+// TODO(p): Make a property for this.
+static const int g_item_spacing = 5;
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 struct entry {
-	char *filename;
-	cairo_surface_t *thumbnail;
+	char *filename;                     ///< Absolute path
+	cairo_surface_t *thumbnail;         ///< Prescaled thumbnail
 };
 
 static void
@@ -37,18 +58,86 @@ entry_free(Entry *self)
 		cairo_surface_destroy(self->thumbnail);
 }
 
-static const double g_row_height = 256;
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+struct item {
+	const Entry *entry;
+	int x_offset;                       ///< Offset within the row
+};
+
+struct row {
+	Item *items;                        ///< Ends with a NULL entry
+	int x_offset;                       ///< Start position including padding
+	int y_offset;                       ///< Start position including padding
+};
+
+static void
+row_free(Row *self)
+{
+	g_free(self->items);
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+static void
+append_row(FastivBrowser *self, int *y, int x, GArray *items_array)
+{
+	if (self->layouted_rows->len)
+		*y += g_item_spacing;
+
+	g_array_append_val(self->layouted_rows, ((Row) {
+		.items = g_array_steal(items_array, NULL),
+		.x_offset = x,
+		.y_offset = *y,
+	}));
+
+	// Not trying to pack them vertically, but this would be the place to do it.
+	*y += g_row_height;
+}
+
+static int
+relayout(FastivBrowser *self, int width)
+{
+	GtkWidget *widget = GTK_WIDGET(self);
+	GtkStyleContext *context = gtk_widget_get_style_context(widget);
+
+	GtkBorder padding = {};
+	gtk_style_context_get_padding(context, GTK_STATE_FLAG_NORMAL, &padding);
+	int available_width = width - padding.left - padding.right;
+
+	g_array_set_size(self->layouted_rows, 0);
+
+	GArray *items = g_array_new(TRUE, TRUE, sizeof(Item));
+	int x = 0, y = padding.top;
+	for (guint i = 0; i < self->entries->len; i++) {
+		const Entry *entry = &g_array_index(self->entries, Entry, i);
+		if (!entry->thumbnail)
+			continue;
+
+		int width = cairo_image_surface_get_width(entry->thumbnail);
+		if (!items->len) {
+			// Just insert it, whether or not there's any space.
+		} else if (x + g_item_spacing + width <= available_width) {
+			x += g_item_spacing;
+		} else {
+			append_row(self, &y,
+				padding.left + MAX(0, available_width - x) / 2, items);
+			x = 0;
+		}
+
+		g_array_append_val(items, ((Item) {.entry = entry, .x_offset = x}));
+		x += width;
+	}
+	if (items->len) {
+		append_row(self, &y,
+			padding.left + MAX(0, available_width - x) / 2, items);
+	}
+
+	g_array_free(items, TRUE);
+	return y + padding.bottom;
+}
 
 // --- Boilerplate -------------------------------------------------------------
-
-struct _FastivBrowser {
-	GtkWidget parent_instance;
-
-	// TODO(p): We probably want to pre-arrange everything into rows.
-	//  - All rows are the same height.
-	GArray *entries;
-	int selected;
-};
 
 // TODO(p): For proper navigation, we need to implement GtkScrollable.
 G_DEFINE_TYPE_EXTENDED(FastivBrowser, fastiv_browser, GTK_TYPE_WIDGET, 0,
@@ -80,18 +169,19 @@ static void
 fastiv_browser_get_preferred_width(
 	GtkWidget *widget, gint *minimum, gint *natural)
 {
-	G_GNUC_UNUSED FastivBrowser *self = FASTIV_BROWSER(widget);
-	// TODO(p): Set it to the width of the widget with one wide item within.
-	*minimum = *natural = 0;
+	GtkBorder padding = {};
+	GtkStyleContext *context = gtk_widget_get_style_context(widget);
+	gtk_style_context_get_padding(context, GTK_STATE_FLAG_NORMAL, &padding);
+	*minimum = *natural = g_permitted_width_multiplier * g_row_height +
+		padding.left + padding.right;;
 }
 
 static void
 fastiv_browser_get_preferred_height_for_width(
-	GtkWidget *widget, G_GNUC_UNUSED gint width, gint *minimum, gint *natural)
+	GtkWidget *widget, gint width, gint *minimum, gint *natural)
 {
-	G_GNUC_UNUSED FastivBrowser *self = FASTIV_BROWSER(widget);
-	// TODO(p): Re-layout, figure it out.
-	*minimum = *natural = 0;
+	// XXX: This is rather ugly, the caller is only asking.
+	*minimum = *natural = relayout(FASTIV_BROWSER(widget), width);
 }
 
 static void
@@ -125,6 +215,15 @@ fastiv_browser_realize(GtkWidget *widget)
 	gtk_widget_set_realized(widget, TRUE);
 }
 
+static void
+fastiv_browser_size_allocate(GtkWidget *widget, GtkAllocation *allocation)
+{
+	GTK_WIDGET_CLASS(fastiv_browser_parent_class)
+		->size_allocate(widget, allocation);
+
+	relayout(FASTIV_BROWSER(widget), allocation->width);
+}
+
 static gboolean
 fastiv_browser_draw(GtkWidget *widget, cairo_t *cr)
 {
@@ -137,27 +236,23 @@ fastiv_browser_draw(GtkWidget *widget, cairo_t *cr)
 	gtk_render_background(gtk_widget_get_style_context(widget), cr, 0, 0,
 		allocation.width, allocation.height);
 
-	gint occupied_width = 0, y = 0;
-	for (guint i = 0; i < self->entries->len; i++) {
-		const Entry *entry = &g_array_index(self->entries, Entry, i);
-		if (!entry->thumbnail)
-			continue;
+	for (guint i = 0; i < self->layouted_rows->len; i++) {
+		const Row *row = &g_array_index(self->layouted_rows, Row, i);
+		for (Item *item = row->items; item->entry; item++) {
+			cairo_surface_t *thumbnail = item->entry->thumbnail;
+			int width = cairo_image_surface_get_width(thumbnail);
+			int height = cairo_image_surface_get_height(thumbnail);
+			int x = row->x_offset + item->x_offset;
+			int y = row->y_offset + g_row_height - height;
 
-		int width = cairo_image_surface_get_width(entry->thumbnail);
-		int height = cairo_image_surface_get_height(entry->thumbnail);
-		if (occupied_width != 0 &&
-			occupied_width + width > allocation.width) {
-			occupied_width = 0;
-			y += g_row_height;
+			// TODO(p): Test whether we need to render this first.
+
+			cairo_save(cr);
+			cairo_translate(cr, x, y);
+			cairo_set_source_surface(cr, thumbnail, 0, 0);
+			cairo_paint(cr);
+			cairo_restore(cr);
 		}
-
-		cairo_save(cr);
-		cairo_translate(cr, occupied_width, y + g_row_height - height);
-		cairo_set_source_surface(cr, entry->thumbnail, 0, 0);
-		cairo_paint(cr);
-		cairo_restore(cr);
-
-		occupied_width += width;
 	}
 	return TRUE;
 }
@@ -175,6 +270,7 @@ fastiv_browser_class_init(FastivBrowserClass *klass)
 		fastiv_browser_get_preferred_height_for_width;
 	widget_class->realize = fastiv_browser_realize;
 	widget_class->draw = fastiv_browser_draw;
+	widget_class->size_allocate = fastiv_browser_size_allocate;
 
 	// TODO(p): Connect to this and emit it.
 	browser_signals[ITEM_ACTIVATED] = g_signal_new("item-activated",
@@ -192,6 +288,9 @@ fastiv_browser_init(FastivBrowser *self)
 
 	self->entries = g_array_new(FALSE, TRUE, sizeof(Entry));
 	g_array_set_clear_func(self->entries, (GDestroyNotify) entry_free);
+	self->layouted_rows = g_array_new(FALSE, TRUE, sizeof(Row));
+	g_array_set_clear_func(self->layouted_rows, (GDestroyNotify) row_free);
+
 	self->selected = -1;
 }
 
@@ -206,8 +305,8 @@ rescale_thumbnail(cairo_surface_t *thumbnail)
 
 	double scale_x = 1;
 	double scale_y = 1;
-	if (width > 2 * height) {
-		scale_x = 2 * g_row_height / width;
+	if (width > g_permitted_width_multiplier * height) {
+		scale_x = g_permitted_width_multiplier * g_row_height / width;
 		scale_y = round(scale_x * height) / height;
 	} else {
 		scale_y = g_row_height / height;
