@@ -23,6 +23,18 @@
 #include "fastiv-view.h"
 
 // --- Widget ------------------------------------------------------------------
+//                     _________________________________
+//                    │    p   a   d   d   i   n   g
+//                    │ p ╭───────────────────╮ s ╭┄┄┄┄┄
+//                    │ a │ glow border   ┊   │ p ┊
+//                    │ d │ ┄ ╔═══════════╗ ┄ │ a ┊
+//                    │ d │   ║ thumbnail ║   │ c ┊ ...
+//                    │ i │ ┄ ╚═══════════╝ ┄ │ i ┊
+//                    │ n │   ┊   glow border │ n ┊
+//                    │ g ╰───────────────────╯ g ╰┄┄┄┄┄
+//                    │    s  p  a  c  i  n  g
+//                    │   ╭┄┄┄┄┄┄┄┄┄┄┄┄╮   ╭┄┄┄┄┄┄┄┄┄┄┄┄
+//
 
 struct _FastivBrowser {
 	GtkWidget parent_instance;
@@ -30,6 +42,8 @@ struct _FastivBrowser {
 	GArray *entries;                    ///< [Entry]
 	GArray *layouted_rows;              ///< [Row]
 	int selected;
+
+	cairo_surface_t *glow;              ///< CAIRO_FORMAT_A8 mask
 };
 
 typedef struct entry Entry;
@@ -41,7 +55,10 @@ static const double g_permitted_width_multiplier = 2;
 
 // Could be split out to also-idiomatic row-spacing/column-spacing properties.
 // TODO(p): Make a property for this.
-static const int g_item_spacing = 5;
+static const int g_item_spacing = 1;
+
+// All around, from the primary colour to transparency.
+static const int g_item_border = 10;
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
@@ -85,6 +102,7 @@ append_row(FastivBrowser *self, int *y, int x, GArray *items_array)
 	if (self->layouted_rows->len)
 		*y += g_item_spacing;
 
+	*y += g_item_border;
 	g_array_append_val(self->layouted_rows, ((Row) {
 		.items = g_array_steal(items_array, NULL),
 		.x_offset = x,
@@ -93,6 +111,7 @@ append_row(FastivBrowser *self, int *y, int x, GArray *items_array)
 
 	// Not trying to pack them vertically, but this would be the place to do it.
 	*y += g_row_height;
+	*y += g_item_border;
 }
 
 static int
@@ -114,7 +133,8 @@ relayout(FastivBrowser *self, int width)
 		if (!entry->thumbnail)
 			continue;
 
-		int width = cairo_image_surface_get_width(entry->thumbnail);
+		int width =
+			cairo_image_surface_get_width(entry->thumbnail) + 2 * g_item_border;
 		if (!items->len) {
 			// Just insert it, whether or not there's any space.
 		} else if (x + g_item_spacing + width <= available_width) {
@@ -125,7 +145,8 @@ relayout(FastivBrowser *self, int width)
 			x = 0;
 		}
 
-		g_array_append_val(items, ((Item) {.entry = entry, .x_offset = x}));
+		g_array_append_val(
+			items, ((Item){.entry = entry, .x_offset = x + g_item_border}));
 		x += width;
 	}
 	if (items->len) {
@@ -135,6 +156,57 @@ relayout(FastivBrowser *self, int width)
 
 	g_array_free(items, TRUE);
 	return y + padding.bottom;
+}
+
+static void
+draw_item_border(FastivBrowser *self, cairo_t *cr, int width, int height)
+{
+	cairo_set_source_rgb(cr, .75, .75, .75);
+	cairo_pattern_t *mask = cairo_pattern_create_for_surface(self->glow);
+	cairo_matrix_t matrix;
+
+	cairo_pattern_set_extend(mask, CAIRO_EXTEND_PAD);
+
+	cairo_save(cr);
+	cairo_translate(cr, -g_item_border, -g_item_border);
+	cairo_rectangle(cr, 0, 0, g_item_border + width, g_item_border + height);
+	cairo_clip(cr);
+	cairo_mask(cr, mask);
+	cairo_restore(cr);
+
+	cairo_save(cr);
+	cairo_translate(cr, width + g_item_border, height + g_item_border);
+	cairo_rectangle(cr, 0, 0, -g_item_border - width, -g_item_border - height);
+	cairo_clip(cr);
+	cairo_matrix_init_scale(&matrix, -1, -1);
+	cairo_pattern_set_matrix(mask, &matrix);
+	cairo_mask(cr, mask);
+	cairo_restore(cr);
+
+	cairo_pattern_set_extend(mask, CAIRO_EXTEND_NONE);
+
+	cairo_save(cr);
+	cairo_translate(cr, width + g_item_border, -g_item_border);
+	cairo_matrix_init_scale(&matrix, -1, 1);
+	cairo_pattern_set_matrix(mask, &matrix);
+	cairo_mask(cr, mask);
+	cairo_restore(cr);
+
+	cairo_save(cr);
+	cairo_translate(cr, -g_item_border, height + g_item_border);
+	cairo_matrix_init_scale(&matrix, 1, -1);
+	cairo_pattern_set_matrix(mask, &matrix);
+	cairo_mask(cr, mask);
+	cairo_restore(cr);
+
+	// TODO(p): Distinguish between an inner and outer border,
+	// don't override part of the glow.
+	cairo_rectangle(cr, -.5, -.5, width + 1, height + 1);
+	cairo_set_source_rgba(cr, 1, 1, 1, 0.75);
+	cairo_set_line_width(cr, 1);
+	cairo_stroke(cr);
+
+	cairo_pattern_destroy(mask);
 }
 
 // --- Boilerplate -------------------------------------------------------------
@@ -155,7 +227,11 @@ static guint browser_signals[LAST_SIGNAL];
 static void
 fastiv_browser_finalize(GObject *gobject)
 {
-	G_GNUC_UNUSED FastivBrowser *self = FASTIV_BROWSER(gobject);
+	FastivBrowser *self = FASTIV_BROWSER(gobject);
+	g_array_free(self->entries, TRUE);
+	g_array_free(self->layouted_rows, TRUE);
+	cairo_surface_destroy(self->glow);
+
 	G_OBJECT_CLASS(fastiv_browser_parent_class)->finalize(gobject);
 }
 
@@ -173,7 +249,7 @@ fastiv_browser_get_preferred_width(
 	GtkStyleContext *context = gtk_widget_get_style_context(widget);
 	gtk_style_context_get_padding(context, GTK_STATE_FLAG_NORMAL, &padding);
 	*minimum = *natural = g_permitted_width_multiplier * g_row_height +
-		padding.left + padding.right;;
+		padding.left + 2 * g_item_border + padding.right;
 }
 
 static void
@@ -227,7 +303,7 @@ fastiv_browser_size_allocate(GtkWidget *widget, GtkAllocation *allocation)
 static gboolean
 fastiv_browser_draw(GtkWidget *widget, cairo_t *cr)
 {
-	G_GNUC_UNUSED FastivBrowser *self = FASTIV_BROWSER(widget);
+	FastivBrowser *self = FASTIV_BROWSER(widget);
 	if (!gtk_cairo_should_draw_window(cr, gtk_widget_get_window(widget)))
 		return TRUE;
 
@@ -248,7 +324,13 @@ fastiv_browser_draw(GtkWidget *widget, cairo_t *cr)
 			// TODO(p): Test whether we need to render this first.
 
 			cairo_save(cr);
-			cairo_translate(cr, x, y);
+			cairo_translate (cr, x, y);
+			draw_item_border(self, cr, width, height);
+
+			cairo_rectangle(cr, 0, 0, width, height);
+			cairo_set_source_rgb(cr, .25, .25, .25);
+			cairo_fill(cr);
+
 			cairo_set_source_surface(cr, thumbnail, 0, 0);
 			cairo_paint(cr);
 			cairo_restore(cr);
@@ -292,6 +374,24 @@ fastiv_browser_init(FastivBrowser *self)
 	g_array_set_clear_func(self->layouted_rows, (GDestroyNotify) row_free);
 
 	self->selected = -1;
+
+	self->glow = cairo_image_surface_create(
+		CAIRO_FORMAT_A8, g_item_border, g_item_border);
+	unsigned char *data = cairo_image_surface_get_data(self->glow);
+	int stride = cairo_image_surface_get_stride(self->glow);
+
+	// Smooth out the curve, so that the edge of the glow doesn't stand out
+	const double fade_factor = 1.5;
+
+	const int max = g_item_border - 1;
+	for (int y = 0; y <= max; y++)
+		for (int x = 0; x <= max; x++) {
+			int xn = max - x;
+			int yn = max - y;
+			double v = MIN(sqrt(xn * xn + yn * yn) / max, 1);
+			data[y * stride + x] = round(pow(1 - v, fade_factor) * 255);
+		}
+	cairo_surface_mark_dirty(self->glow);
 }
 
 static cairo_surface_t *
