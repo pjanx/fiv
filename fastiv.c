@@ -329,6 +329,7 @@ main(int argc, char *argv[])
 	gtk_container_add(GTK_CONTAINER(stack), g.browser_scroller);
 
 	g.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	gtk_window_set_default_size (GTK_WINDOW (g.window), 800, 600);
 	g_signal_connect(g.window, "destroy",
 		G_CALLBACK(gtk_main_quit), NULL);
 	g_signal_connect(g.window, "key-press-event",
