@@ -200,26 +200,52 @@ draw_item_border(FastivBrowser *self, cairo_t *cr, int width, int height)
 	cairo_pattern_destroy(mask);
 }
 
+static GdkRectangle
+item_extents(const Item *item, const Row *row)
+{
+	int width = cairo_image_surface_get_width(item->entry->thumbnail);
+	int height = cairo_image_surface_get_height(item->entry->thumbnail);
+	return (GdkRectangle) {
+		.x = row->x_offset + item->x_offset,
+		.y = row->y_offset + g_row_height - height,
+		.width = width,
+		.height = height,
+	};
+}
+
+static const Entry *
+entry_at(FastivBrowser *self, int x, int y)
+{
+	for (guint i = 0; i < self->layouted_rows->len; i++) {
+		const Row *row = &g_array_index(self->layouted_rows, Row, i);
+		for (Item *item = row->items; item->entry; item++) {
+			GdkRectangle extents = item_extents(item, row);
+			if (x >= extents.x &&
+				y >= extents.y &&
+				x <= extents.x + extents.width &&
+				y <= extents.y + extents.height)
+				return item->entry;
+		}
+	}
+	return NULL;
+}
+
 static void
 draw_row(FastivBrowser *self, cairo_t *cr, const Row *row)
 {
 	for (Item *item = row->items; item->entry; item++) {
-		cairo_surface_t *thumbnail = item->entry->thumbnail;
-		int width = cairo_image_surface_get_width(thumbnail);
-		int height = cairo_image_surface_get_height(thumbnail);
-		int x = row->x_offset + item->x_offset;
-		int y = row->y_offset + g_row_height - height;
+		GdkRectangle extents = item_extents(item, row);
 
 		cairo_save(cr);
-		cairo_translate(cr, x, y);
-		draw_item_border(self, cr, width, height);
+		cairo_translate(cr, extents.x, extents.y);
+		draw_item_border(self, cr, extents.width, extents.height);
 
 		// TODO(p): See if a mild checkerboard pattern would not look nice.
-		cairo_rectangle(cr, 0, 0, width, height);
+		cairo_rectangle(cr, 0, 0, extents.width, extents.height);
 		cairo_set_source_rgb(cr, .25, .25, .25);
 		cairo_fill(cr);
 
-		cairo_set_source_surface(cr, thumbnail, 0, 0);
+		cairo_set_source_surface(cr, item->entry->thumbnail, 0, 0);
 		cairo_paint(cr);
 		cairo_restore(cr);
 	}
@@ -345,6 +371,22 @@ fastiv_browser_draw(GtkWidget *widget, cairo_t *cr)
 	return TRUE;
 }
 
+static gboolean
+fastiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
+{
+	FastivBrowser *self = FASTIV_BROWSER(widget);
+	if (event->type != GDK_BUTTON_PRESS || event->button != 1 ||
+		event->state != 0)
+		return FALSE;
+
+	const Entry *entry = entry_at(self, event->x, event->y);
+	if (!entry)
+		return FALSE;
+
+	g_signal_emit(widget, browser_signals[ITEM_ACTIVATED], 0, entry->filename);
+	return TRUE;
+}
+
 static void
 fastiv_browser_class_init(FastivBrowserClass *klass)
 {
@@ -359,10 +401,11 @@ fastiv_browser_class_init(FastivBrowserClass *klass)
 	widget_class->realize = fastiv_browser_realize;
 	widget_class->draw = fastiv_browser_draw;
 	widget_class->size_allocate = fastiv_browser_size_allocate;
+	widget_class->button_press_event = fastiv_browser_button_press_event;
 
-	// TODO(p): Connect to this and emit it.
-	browser_signals[ITEM_ACTIVATED] = g_signal_new("item-activated",
-		G_TYPE_FROM_CLASS(klass), 0, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
+	browser_signals[ITEM_ACTIVATED] =
+		g_signal_new("item-activated", G_TYPE_FROM_CLASS(klass), 0, 0,
+			NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_STRING);
 
 	// TODO(p): Later override "screen_changed", recreate Pango layouts there,
 	// if we get to have any, or otherwise reflect DPI changes.

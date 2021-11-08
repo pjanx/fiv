@@ -131,6 +131,11 @@ fastiv_view_draw(GtkWidget *widget, cairo_t *cr)
 	if (h < allocation.height)
 		y = round((allocation.height - h) / 2.);
 
+	// XXX: The rounding together with padding may result in up to
+	// a pixel's worth of made-up picture data.
+	cairo_rectangle(cr, x, y, w, h);
+	cairo_clip(cr);
+
 	cairo_scale(cr, self->scale, self->scale);
 	cairo_set_source_surface(
 		cr, self->surface, x / self->scale, y / self->scale);

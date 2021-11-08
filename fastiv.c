@@ -61,6 +61,7 @@ struct {
 	gchar *basename;
 
 	GtkWidget *window;
+	GtkWidget *stack;
 	GtkWidget *view;
 	GtkWidget *browser;
 	GtkWidget *browser_scroller;
@@ -148,6 +149,7 @@ open(const gchar *path)
 	}
 
 	gtk_window_set_title(GTK_WINDOW(g.window), path);
+	gtk_stack_set_visible_child(GTK_STACK(g.stack), g.view);
 
 	gchar *basename = g_path_get_basename(path);
 	g_free(g.basename);
@@ -222,6 +224,13 @@ on_next(void)
 	}
 }
 
+static void
+on_item_activated(G_GNUC_UNUSED FastivBrowser *browser, const char *path,
+	G_GNUC_UNUSED gpointer data)
+{
+	open(path);
+}
+
 // Cursor keys, e.g., simply cannot be bound through accelerators
 // (and GtkWidget::keynav-failed would arguably be an awful solution).
 //
@@ -267,6 +276,14 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEvent *event,
 		case GDK_KEY_Page_Down:
 		case GDK_KEY_space:
 			on_next();
+			return TRUE;
+
+		case GDK_KEY_Tab:
+		case GDK_KEY_Return:
+			gtk_stack_set_visible_child(GTK_STACK(g.stack),
+				gtk_stack_get_visible_child(GTK_STACK(g.stack)) == g.view
+					? g.browser_scroller
+					: g.view);
 			return TRUE;
 		}
 	}
@@ -318,15 +335,17 @@ main(int argc, char *argv[])
 	g.browser = g_object_new(FASTIV_TYPE_BROWSER, NULL);
 	gtk_widget_set_vexpand(g.browser, TRUE);
 	gtk_widget_set_hexpand(g.browser, TRUE);
+	g_signal_connect(g.browser, "item-activated",
+		G_CALLBACK(on_item_activated), NULL);
 	gtk_container_add(GTK_CONTAINER(g.browser_scroller), g.browser);
 	// TODO(p): Can we not do it here separately?
 	gtk_widget_show_all(g.browser_scroller);
 
-	GtkWidget *stack = gtk_stack_new();
+	g.stack = gtk_stack_new();
 	gtk_stack_set_transition_type(
-		GTK_STACK(stack), GTK_STACK_TRANSITION_TYPE_NONE);
-	gtk_container_add(GTK_CONTAINER(stack), g.view);
-	gtk_container_add(GTK_CONTAINER(stack), g.browser_scroller);
+		GTK_STACK(g.stack), GTK_STACK_TRANSITION_TYPE_NONE);
+	gtk_container_add(GTK_CONTAINER(g.stack), g.view);
+	gtk_container_add(GTK_CONTAINER(g.stack), g.browser_scroller);
 
 	g.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk_window_set_default_size (GTK_WINDOW (g.window), 800, 600);
@@ -334,7 +353,7 @@ main(int argc, char *argv[])
 		G_CALLBACK(gtk_main_quit), NULL);
 	g_signal_connect(g.window, "key-press-event",
 		G_CALLBACK(on_key_press), NULL);
-	gtk_container_add(GTK_CONTAINER(g.window), stack);
+	gtk_container_add(GTK_CONTAINER(g.window), g.stack);
 
 	g.supported_globs = extract_mime_globs(fastiv_io_supported_media_types);
 	g.files = g_ptr_array_new_full(16, g_free);
@@ -359,7 +378,7 @@ main(int argc, char *argv[])
 	g_free(cwd);
 
 	if (g.files_index < 0)
-		gtk_stack_set_visible_child(GTK_STACK(stack), g.browser_scroller);
+		gtk_stack_set_visible_child(GTK_STACK(g.stack), g.browser_scroller);
 
 	gtk_widget_show_all(g.window);
 	gtk_main();
