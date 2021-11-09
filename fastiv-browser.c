@@ -166,38 +166,29 @@ draw_item_border(FastivBrowser *self, cairo_t *cr, int width, int height)
 	cairo_matrix_t matrix;
 
 	cairo_pattern_set_extend(mask, CAIRO_EXTEND_PAD);
-
 	cairo_save(cr);
 	cairo_translate(cr, -g_item_border, -g_item_border);
 	cairo_rectangle(cr, 0, 0, g_item_border + width, g_item_border + height);
 	cairo_clip(cr);
 	cairo_mask(cr, mask);
 	cairo_restore(cr);
-
 	cairo_save(cr);
 	cairo_translate(cr, width + g_item_border, height + g_item_border);
 	cairo_rectangle(cr, 0, 0, -g_item_border - width, -g_item_border - height);
 	cairo_clip(cr);
-	cairo_matrix_init_scale(&matrix, -1, -1);
-	cairo_pattern_set_matrix(mask, &matrix);
+	cairo_scale(cr, -1, -1);
 	cairo_mask(cr, mask);
 	cairo_restore(cr);
 
 	cairo_pattern_set_extend(mask, CAIRO_EXTEND_NONE);
-
-	cairo_save(cr);
-	cairo_translate(cr, width + g_item_border, -g_item_border);
 	cairo_matrix_init_scale(&matrix, -1, 1);
+	cairo_matrix_translate(&matrix, -width - g_item_border, g_item_border);
 	cairo_pattern_set_matrix(mask, &matrix);
 	cairo_mask(cr, mask);
-	cairo_restore(cr);
-
-	cairo_save(cr);
-	cairo_translate(cr, -g_item_border, height + g_item_border);
 	cairo_matrix_init_scale(&matrix, 1, -1);
+	cairo_matrix_translate(&matrix, g_item_border, -height - g_item_border);
 	cairo_pattern_set_matrix(mask, &matrix);
 	cairo_mask(cr, mask);
-	cairo_restore(cr);
 
 	// TODO(p): Distinguish between an inner and outer border,
 	// don't override part of the glow.
@@ -207,6 +198,31 @@ draw_item_border(FastivBrowser *self, cairo_t *cr, int width, int height)
 	cairo_stroke(cr);
 
 	cairo_pattern_destroy(mask);
+}
+
+static void
+draw_row(FastivBrowser *self, cairo_t *cr, const Row *row)
+{
+	for (Item *item = row->items; item->entry; item++) {
+		cairo_surface_t *thumbnail = item->entry->thumbnail;
+		int width = cairo_image_surface_get_width(thumbnail);
+		int height = cairo_image_surface_get_height(thumbnail);
+		int x = row->x_offset + item->x_offset;
+		int y = row->y_offset + g_row_height - height;
+
+		cairo_save(cr);
+		cairo_translate(cr, x, y);
+		draw_item_border(self, cr, width, height);
+
+		// TODO(p): See if a mild checkerboard pattern would not look nice.
+		cairo_rectangle(cr, 0, 0, width, height);
+		cairo_set_source_rgb(cr, .25, .25, .25);
+		cairo_fill(cr);
+
+		cairo_set_source_surface(cr, thumbnail, 0, 0);
+		cairo_paint(cr);
+		cairo_restore(cr);
+	}
 }
 
 // --- Boilerplate -------------------------------------------------------------
@@ -313,28 +329,8 @@ fastiv_browser_draw(GtkWidget *widget, cairo_t *cr)
 		allocation.width, allocation.height);
 
 	for (guint i = 0; i < self->layouted_rows->len; i++) {
-		const Row *row = &g_array_index(self->layouted_rows, Row, i);
-		for (Item *item = row->items; item->entry; item++) {
-			cairo_surface_t *thumbnail = item->entry->thumbnail;
-			int width = cairo_image_surface_get_width(thumbnail);
-			int height = cairo_image_surface_get_height(thumbnail);
-			int x = row->x_offset + item->x_offset;
-			int y = row->y_offset + g_row_height - height;
-
-			// TODO(p): Test whether we need to render this first.
-
-			cairo_save(cr);
-			cairo_translate (cr, x, y);
-			draw_item_border(self, cr, width, height);
-
-			cairo_rectangle(cr, 0, 0, width, height);
-			cairo_set_source_rgb(cr, .25, .25, .25);
-			cairo_fill(cr);
-
-			cairo_set_source_surface(cr, thumbnail, 0, 0);
-			cairo_paint(cr);
-			cairo_restore(cr);
-		}
+		// TODO(p): Test whether we need to render the row first.
+		draw_row(self, cr, &g_array_index(self->layouted_rows, Row, i));
 	}
 	return TRUE;
 }
