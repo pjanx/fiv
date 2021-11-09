@@ -400,10 +400,14 @@ open_libraw(const gchar *data, gsize len, GError **error)
 
 // FIXME: librsvg rasterizes filters, so this method isn't fully appropriate.
 static cairo_surface_t *
-open_librsvg(const gchar *data, gsize len, GError **error)
+open_librsvg(const gchar *data, gsize len, const gchar *path, GError **error)
 {
-	RsvgHandle *handle =
-		rsvg_handle_new_from_data((const guint8 *) data, len, error);
+	GFile *base_file = g_file_new_for_path(path);
+	GInputStream *is = g_memory_input_stream_new_from_data(data, len, NULL);
+	RsvgHandle *handle = rsvg_handle_new_from_stream_sync(is, base_file,
+		RSVG_HANDLE_FLAG_KEEP_IMAGE_DATA, NULL, error);
+	g_object_unref(base_file);
+	g_object_unref(is);
 	if (!handle)
 		return NULL;
 
@@ -481,13 +485,14 @@ fastiv_io_open(const gchar *path, GError **error)
 	if (!g_file_get_contents(path, &data, &len, error))
 		return NULL;
 
-	cairo_surface_t *surface = fastiv_io_open_from_data(data, len, error);
+	cairo_surface_t *surface = fastiv_io_open_from_data(data, len, path, error);
 	free(data);
 	return surface;
 }
 
 cairo_surface_t *
-fastiv_io_open_from_data(const char *data, size_t len, GError **error)
+fastiv_io_open_from_data(const char *data, size_t len, const gchar *path,
+	GError **error)
 {
 	wuffs_base__slice_u8 prefix =
 		wuffs_base__make_slice_u8((uint8_t *) data, len);
@@ -524,7 +529,7 @@ fastiv_io_open_from_data(const char *data, size_t len, GError **error)
 		g_clear_error(error);
 #endif  // HAVE_LIBRAW ---------------------------------------------------------
 #ifdef HAVE_LIBRSVG  // --------------------------------------------------------
-		if ((surface = open_librsvg(data, len, error)))
+		if ((surface = open_librsvg(data, len, path, error)))
 			break;
 
 		// XXX: It doesn't look like librsvg can return sensible errors.
