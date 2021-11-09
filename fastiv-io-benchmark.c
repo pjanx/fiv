@@ -15,10 +15,11 @@
 // CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 //
 
+#include <gdk/gdk.h>
 #include <gdk-pixbuf/gdk-pixbuf.h>
 #include <time.h>
 
-#include "fastiv-view.h"
+#include "fastiv-io.h"
 
 static double
 timestamp(void)
