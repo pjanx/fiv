@@ -29,22 +29,28 @@ struct _FastivView {
 
 G_DEFINE_TYPE(FastivView, fastiv_view, GTK_TYPE_WIDGET)
 
-static int
-get_display_width(FastivView *self)
+static void
+get_display_dimensions(FastivView *self, int *width, int *height)
 {
+	*width = *height = 0;
 	if (!self->surface)
-		return 0;
+		return;
 
-	return ceil(cairo_image_surface_get_width(self->surface) * self->scale);
-}
+	cairo_rectangle_t extents = {};
+	switch (cairo_surface_get_type(self->surface)) {
+	case CAIRO_SURFACE_TYPE_IMAGE:
+		extents.width = cairo_image_surface_get_width(self->surface);
+		extents.height = cairo_image_surface_get_height(self->surface);
+		break;
+	case CAIRO_SURFACE_TYPE_RECORDING:
+		(void) cairo_recording_surface_get_extents(self->surface, &extents);
+		break;
+	default:
+		g_assert_not_reached();
+	}
 
-static int
-get_display_height(FastivView *self)
-{
-	if (!self->surface)
-		return 0;
-
-	return ceil(cairo_image_surface_get_height(self->surface) * self->scale);
+	*width = ceil(extents.width * self->scale);
+	*height = ceil(extents.height * self->scale);
 }
 
 static void
@@ -60,15 +66,17 @@ static void
 fastiv_view_get_preferred_height(
 	GtkWidget *widget, gint *minimum, gint *natural)
 {
-	FastivView *self = FASTIV_VIEW(widget);
-	*minimum = *natural = get_display_height(self);
+	int width, height;
+	get_display_dimensions(FASTIV_VIEW(widget), &width, &height);
+	*minimum = *natural = height;
 }
 
 static void
 fastiv_view_get_preferred_width(GtkWidget *widget, gint *minimum, gint *natural)
 {
-	FastivView *self = FASTIV_VIEW(widget);
-	*minimum = *natural = get_display_width(self);
+	int width, height;
+	get_display_dimensions(FASTIV_VIEW(widget), &width, &height);
+	*minimum = *natural = width;
 }
 
 static void
@@ -115,8 +123,8 @@ fastiv_view_draw(GtkWidget *widget, cairo_t *cr)
 	gtk_render_background(gtk_widget_get_style_context(widget), cr, 0, 0,
 		allocation.width, allocation.height);
 
-	int w = get_display_width(self);
-	int h = get_display_height(self);
+	int w, h;
+	get_display_dimensions(self, &w, &h);
 
 	double x = 0;
 	double y = 0;
@@ -124,6 +132,23 @@ fastiv_view_draw(GtkWidget *widget, cairo_t *cr)
 		x = round((allocation.width - w) / 2.);
 	if (h < allocation.height)
 		y = round((allocation.height - h) / 2.);
+
+	// FIXME: Recording surfaces do not work well with CAIRO_SURFACE_TYPE_XLIB,
+	// we always get a shitty pixmap, where transparency contains junk.
+	if (cairo_surface_get_type(self->surface) == CAIRO_SURFACE_TYPE_RECORDING) {
+		cairo_surface_t *image =
+			cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+		cairo_t *tcr = cairo_create(image);
+		cairo_scale(tcr, self->scale, self->scale);
+		cairo_set_source_surface(tcr, self->surface, 0, 0);
+		cairo_paint(tcr);
+		cairo_destroy(tcr);
+
+		cairo_set_source_surface(cr, image, x, y);
+		cairo_paint(cr);
+		cairo_surface_destroy(image);
+		return TRUE;
+	}
 
 	// XXX: The rounding together with padding may result in up to
 	// a pixel's worth of made-up picture data.

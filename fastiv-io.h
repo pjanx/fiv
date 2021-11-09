@@ -23,4 +23,6 @@
 extern const char *fastiv_io_supported_media_types[];
 
 cairo_surface_t *fastiv_io_open(const gchar *path, GError **error);
+cairo_surface_t *fastiv_io_open_from_data(
+	const char *data, size_t len, GError **error);
 cairo_surface_t *fastiv_io_lookup_thumbnail(const gchar *target);

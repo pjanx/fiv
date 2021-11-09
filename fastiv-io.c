@@ -23,6 +23,9 @@
 #ifdef HAVE_LIBRAW
 #include <libraw.h>
 #endif  // HAVE_LIBRAW
+#ifdef HAVE_LIBRSVG
+#include <librsvg/rsvg.h>
+#endif  // HAVE_LIBRSVG
 
 #define WUFFS_IMPLEMENTATION
 #define WUFFS_CONFIG__MODULES
@@ -38,6 +41,7 @@
 #include "wuffs-mirror-release-c/release/c/wuffs-v0.3.c"
 
 #include "xdg.h"
+#include "fastiv-io.h"
 
 // A subset of shared-mime-info that produces an appropriate list of
 // file extensions. Chiefly motivated by the suckiness of RAW images:
@@ -50,6 +54,9 @@ const char *fastiv_io_supported_media_types[] = {
 #ifdef HAVE_LIBRAW
 	"image/x-dcraw",
 #endif  // HAVE_LIBRAW
+#ifdef HAVE_LIBRSVG
+	"image/svg+xml",
+#endif  // HAVE_LIBRSVG
 	NULL
 };
 
@@ -384,6 +391,81 @@ open_libraw(const gchar *data, gsize len, GError **error)
 }
 
 #endif  // HAVE_LIBRAW ---------------------------------------------------------
+#ifdef HAVE_LIBRSVG  // --------------------------------------------------------
+
+#ifdef FASTIV_RSVG_DEBUG
+#include <cairo/cairo-script.h>
+#include <cairo/cairo-svg.h>
+#endif
+
+// FIXME: librsvg rasterizes filters, so this method isn't fully appropriate.
+static cairo_surface_t *
+open_librsvg(const gchar *data, gsize len, GError **error)
+{
+	RsvgHandle *handle =
+		rsvg_handle_new_from_data((const guint8 *) data, len, error);
+	if (!handle)
+		return NULL;
+
+	// TODO(p): Acquire this from somewhere else.
+	rsvg_handle_set_dpi(handle, 96);
+
+	double w = 0, h = 0;
+	if (!rsvg_handle_get_intrinsic_size_in_pixels(handle, &w, &h)) {
+		set_error(error, "cannot compute pixel dimensions");
+		g_object_unref(handle);
+		return NULL;
+	}
+
+	cairo_rectangle_t extents = {
+		.x = 0, .y = 0, .width = ceil(w), .height = ceil(h)};
+	cairo_surface_t *surface =
+		cairo_recording_surface_create(CAIRO_CONTENT_COLOR_ALPHA, &extents);
+
+#ifdef FASTIV_RSVG_DEBUG
+	cairo_device_t *script = cairo_script_create("cairo.script");
+	cairo_surface_t *tee =
+		cairo_script_surface_create_for_target(script, surface);
+	cairo_t *cr = cairo_create(tee);
+	cairo_device_destroy(script);
+	cairo_surface_destroy(tee);
+#else
+	cairo_t *cr = cairo_create(surface);
+#endif
+
+	RsvgRectangle viewport = {.x = 0, .y = 0, .width = w, .height = h};
+	if (!rsvg_handle_render_document(handle, cr, &viewport, error)) {
+		cairo_surface_destroy(surface);
+		cairo_destroy(cr);
+		g_object_unref(handle);
+		return NULL;
+	}
+
+	cairo_destroy(cr);
+	g_object_unref(handle);
+
+#ifdef FASTIV_RSVG_DEBUG
+	cairo_surface_t *svg = cairo_svg_surface_create("cairo.svg", w, h);
+	cr = cairo_create(svg);
+	cairo_set_source_surface(cr, surface, 0, 0);
+	cairo_paint(cr);
+	cairo_destroy(cr);
+	cairo_surface_destroy(svg);
+
+	cairo_surface_t *png =
+		cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w * 10, h * 10);
+	cr = cairo_create(png);
+	cairo_scale(cr, 10, 10);
+	cairo_set_source_surface(cr, surface, 0, 0);
+	cairo_paint(cr);
+	cairo_destroy(cr);
+	cairo_surface_write_to_png(png, "cairo.png");
+	cairo_surface_destroy(png);
+#endif
+	return surface;
+}
+
+#endif  // HAVE_LIBRSVG --------------------------------------------------------
 
 cairo_surface_t *
 fastiv_io_open(const gchar *path, GError **error)
@@ -399,6 +481,14 @@ fastiv_io_open(const gchar *path, GError **error)
 	if (!g_file_get_contents(path, &data, &len, error))
 		return NULL;
 
+	cairo_surface_t *surface = fastiv_io_open_from_data(data, len, error);
+	free(data);
+	return surface;
+}
+
+cairo_surface_t *
+fastiv_io_open_from_data(const char *data, size_t len, GError **error)
+{
 	wuffs_base__slice_u8 prefix =
 		wuffs_base__make_slice_u8((uint8_t *) data, len);
 
@@ -433,11 +523,17 @@ fastiv_io_open(const gchar *path, GError **error)
 		// notably only continue with LIBRAW_FILE_UNSUPPORTED.
 		g_clear_error(error);
 #endif  // HAVE_LIBRAW ---------------------------------------------------------
+#ifdef HAVE_LIBRSVG  // --------------------------------------------------------
+		if ((surface = open_librsvg(data, len, error)))
+			break;
+
+		// XXX: It doesn't look like librsvg can return sensible errors.
+		g_clear_error(error);
+#endif  // HAVE_LIBRSVG --------------------------------------------------------
 
 		// TODO(p): Integrate gdk-pixbuf as a fallback (optional dependency).
 		set_error(error, "unsupported file type");
 	}
-	free(data);
 	return surface;
 }
 
