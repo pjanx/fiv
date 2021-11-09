@@ -328,9 +328,19 @@ fastiv_browser_draw(GtkWidget *widget, cairo_t *cr)
 	gtk_render_background(gtk_widget_get_style_context(widget), cr, 0, 0,
 		allocation.width, allocation.height);
 
+	GdkRectangle clip = {};
+	gboolean have_clip = gdk_cairo_get_clip_rectangle(cr, &clip);
+
 	for (guint i = 0; i < self->layouted_rows->len; i++) {
-		// TODO(p): Test whether we need to render the row first.
-		draw_row(self, cr, &g_array_index(self->layouted_rows, Row, i));
+		const Row *row = &g_array_index(self->layouted_rows, Row, i);
+		GdkRectangle extents = {
+			.x = 0,
+			.y = row->y_offset,
+			.width = allocation.width,
+			.height = g_row_height + 2 * g_item_border,
+		};
+		if (!have_clip || gdk_rectangle_intersect(&clip, &extents, NULL))
+			draw_row(self, cr, row);
 	}
 	return TRUE;
 }
