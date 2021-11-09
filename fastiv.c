@@ -63,6 +63,7 @@ struct {
 	GtkWidget *window;
 	GtkWidget *stack;
 	GtkWidget *view;
+	GtkWidget *view_scroller;
 	GtkWidget *browser;
 	GtkWidget *browser_scroller;
 } g;
@@ -149,7 +150,7 @@ open(const gchar *path)
 	}
 
 	gtk_window_set_title(GTK_WINDOW(g.window), path);
-	gtk_stack_set_visible_child(GTK_STACK(g.stack), g.view);
+	gtk_stack_set_visible_child(GTK_STACK(g.stack), g.view_scroller);
 
 	gchar *basename = g_path_get_basename(path);
 	g_free(g.basename);
@@ -281,9 +282,10 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEvent *event,
 		case GDK_KEY_Tab:
 		case GDK_KEY_Return:
 			gtk_stack_set_visible_child(GTK_STACK(g.stack),
-				gtk_stack_get_visible_child(GTK_STACK(g.stack)) == g.view
+				gtk_stack_get_visible_child(GTK_STACK(g.stack)) ==
+						g.view_scroller
 					? g.browser_scroller
-					: g.view);
+					: g.view_scroller);
 			return TRUE;
 		}
 	}
@@ -328,8 +330,12 @@ main(int argc, char *argv[])
 	gtk_style_context_add_provider_for_screen(gdk_screen_get_default(),
 		GTK_STYLE_PROVIDER(provider), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
 
+	g.view_scroller = gtk_scrolled_window_new(NULL, NULL);
 	g.view = g_object_new(FASTIV_TYPE_VIEW, NULL);
-	gtk_widget_show_all(g.view);
+	gtk_widget_set_vexpand(g.view, TRUE);
+	gtk_widget_set_hexpand(g.view, TRUE);
+	gtk_container_add(GTK_CONTAINER(g.view_scroller), g.view);
+	gtk_widget_show_all(g.view_scroller);
 
 	g.browser_scroller = gtk_scrolled_window_new(NULL, NULL);
 	g.browser = g_object_new(FASTIV_TYPE_BROWSER, NULL);
@@ -344,7 +350,7 @@ main(int argc, char *argv[])
 	g.stack = gtk_stack_new();
 	gtk_stack_set_transition_type(
 		GTK_STACK(g.stack), GTK_STACK_TRANSITION_TYPE_NONE);
-	gtk_container_add(GTK_CONTAINER(g.stack), g.view);
+	gtk_container_add(GTK_CONTAINER(g.stack), g.view_scroller);
 	gtk_container_add(GTK_CONTAINER(g.stack), g.browser_scroller);
 
 	g.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);

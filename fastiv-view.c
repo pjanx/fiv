@@ -60,21 +60,15 @@ static void
 fastiv_view_get_preferred_height(
 	GtkWidget *widget, gint *minimum, gint *natural)
 {
-	*minimum = 0;
-	*natural = 0;
-
 	FastivView *self = FASTIV_VIEW(widget);
-	*natural = get_display_height(self);
+	*minimum = *natural = get_display_height(self);
 }
 
 static void
 fastiv_view_get_preferred_width(GtkWidget *widget, gint *minimum, gint *natural)
 {
-	*minimum = 0;
-	*natural = 0;
-
 	FastivView *self = FASTIV_VIEW(widget);
-	*natural = get_display_width(self);
+	*minimum = *natural = get_display_width(self);
 }
 
 static void
@@ -207,6 +201,7 @@ fastiv_view_open(FastivView *self, const gchar *path, GError **error)
 		cairo_surface_destroy(self->surface);
 
 	self->surface = surface;
+	self->scale = 1.0;
 	gtk_widget_queue_resize(GTK_WIDGET(self));
 	return TRUE;
 }
