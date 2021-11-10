@@ -529,5 +529,5 @@ fastiv_browser_load(FastivBrowser *self, const char *path)
 	g_dir_close(dir);
 
 	// TODO(p): Sort the entries.
-	gtk_widget_queue_draw(GTK_WIDGET(self));
+	gtk_widget_queue_resize(GTK_WIDGET(self));
 }
