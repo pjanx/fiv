@@ -152,6 +152,7 @@ open(const gchar *path)
 		return;
 	}
 
+	gtk_recent_manager_add_item(gtk_recent_manager_get_default(), path);
 	gtk_window_set_title(GTK_WINDOW(g.window), path);
 	gtk_stack_set_visible_child(GTK_STACK(g.stack), g.view_scroller);
 
