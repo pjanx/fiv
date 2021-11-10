@@ -248,7 +248,6 @@ draw_row(FastivBrowser *self, cairo_t *cr, const Row *row)
 			border.left + extents.width + border.right,
 			border.top + extents.height + border.bottom);
 
-		// TODO(p): See if a mild checkerboard pattern would not look nice.
 		gtk_render_background(
 			style, cr, border.left, border.top, extents.width, extents.height);
 
