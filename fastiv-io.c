@@ -416,9 +416,18 @@ open_librsvg(const gchar *data, gsize len, const gchar *path, GError **error)
 
 	double w = 0, h = 0;
 	if (!rsvg_handle_get_intrinsic_size_in_pixels(handle, &w, &h)) {
-		set_error(error, "cannot compute pixel dimensions");
-		g_object_unref(handle);
-		return NULL;
+		RsvgRectangle viewbox = {};
+		gboolean has_viewport = FALSE;
+		rsvg_handle_get_intrinsic_dimensions(handle, NULL, NULL, NULL, NULL,
+			&has_viewport, &viewbox);
+		if (!has_viewport) {
+			set_error(error, "cannot compute pixel dimensions");
+			g_object_unref(handle);
+			return NULL;
+		}
+
+		w = viewbox.width;
+		h = viewbox.height;
 	}
 
 	cairo_rectangle_t extents = {
@@ -526,14 +535,20 @@ fastiv_io_open_from_data(const char *data, size_t len, const gchar *path,
 
 		// TODO(p): We should try to pass actual processing errors through,
 		// notably only continue with LIBRAW_FILE_UNSUPPORTED.
-		g_clear_error(error);
+		if (error) {
+			g_debug("%s", (*error)->message);
+			g_clear_error(error);
+		}
 #endif  // HAVE_LIBRAW ---------------------------------------------------------
 #ifdef HAVE_LIBRSVG  // --------------------------------------------------------
 		if ((surface = open_librsvg(data, len, path, error)))
 			break;
 
 		// XXX: It doesn't look like librsvg can return sensible errors.
-		g_clear_error(error);
+		if (error) {
+			g_debug("%s", (*error)->message);
+			g_clear_error(error);
+		}
 #endif  // HAVE_LIBRSVG --------------------------------------------------------
 
 		// TODO(p): Integrate gdk-pixbuf as a fallback (optional dependency).
