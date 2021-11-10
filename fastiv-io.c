@@ -26,6 +26,10 @@
 #ifdef HAVE_LIBRSVG
 #include <librsvg/rsvg.h>
 #endif  // HAVE_LIBRSVG
+#ifdef HAVE_GDKPIXBUF
+#include <gdk/gdk.h>
+#include <gdk-pixbuf/gdk-pixbuf.h>
+#endif  // HAVE_GDKPIXBUF
 
 #define WUFFS_IMPLEMENTATION
 #define WUFFS_CONFIG__MODULES
@@ -479,6 +483,24 @@ open_librsvg(const gchar *data, gsize len, const gchar *path, GError **error)
 }
 
 #endif  // HAVE_LIBRSVG --------------------------------------------------------
+#ifdef HAVE_GDKPIXBUF  // ------------------------------------------------------
+
+static cairo_surface_t *
+open_gdkpixbuf(const gchar *data, gsize len, GError **error)
+{
+	GInputStream *is = g_memory_input_stream_new_from_data(data, len, NULL);
+	GdkPixbuf *pixbuf = gdk_pixbuf_new_from_stream(is, NULL, error);
+	g_object_unref(is);
+	if (!pixbuf)
+		return NULL;
+
+	cairo_surface_t *surface =
+		gdk_cairo_surface_create_from_pixbuf(pixbuf, 1, NULL);
+	g_object_unref(pixbuf);
+	return surface;
+}
+
+#endif  // HAVE_GDKPIXBUF ------------------------------------------------------
 
 cairo_surface_t *
 fastiv_io_open(const gchar *path, GError **error)
@@ -550,6 +572,17 @@ fastiv_io_open_from_data(const char *data, size_t len, const gchar *path,
 			g_clear_error(error);
 		}
 #endif  // HAVE_LIBRSVG --------------------------------------------------------
+#ifdef HAVE_GDKPIXBUF  // ------------------------------------------------------
+		// This is only used as a last resort, the rest above is special-cased.
+		if ((surface = open_gdkpixbuf(data, len, error)) ||
+			(error && (*error)->code != GDK_PIXBUF_ERROR_UNKNOWN_TYPE))
+			break;
+
+		if (error) {
+			g_debug("%s", (*error)->message);
+			g_clear_error(error);
+		}
+#endif  // HAVE_GDKPIXBUF ------------------------------------------------------
 
 		// TODO(p): Integrate gdk-pixbuf as a fallback (optional dependency).
 		set_error(error, "unsupported file type");

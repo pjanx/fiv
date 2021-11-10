@@ -2,7 +2,7 @@ fastiv
 ======
 
 'fastiv' is a fast image viewer, supporting BMP, PNG, GIF, JPEG, and optionally
-RAW and SVG pictures.  Currently, it's not particularly usable.
+RAW and SVG pictures, or whatever gdk-pixbuf loads.  Currently, it's very basic.
 
 Non-goals
 ---------

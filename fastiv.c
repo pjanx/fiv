@@ -182,10 +182,12 @@ on_open(void)
 		"_Cancel", GTK_RESPONSE_CANCEL,
 		"_Open", GTK_RESPONSE_ACCEPT, NULL);
 
-	// NOTE: gdk-pixbuf has gtk_file_filter_add_pixbuf_formats().
 	GtkFileFilter *filter = gtk_file_filter_new();
 	for (const char **p = fastiv_io_supported_media_types; *p; p++)
 		gtk_file_filter_add_mime_type(filter, *p);
+#ifdef HAVE_GDKPIXBUF
+	gtk_file_filter_add_pixbuf_formats(filter);
+#endif  // HAVE_GDKPIXBUF
 	gtk_file_filter_set_name(filter, "Supported images");
 	gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dialog), filter);
 
@@ -389,6 +391,7 @@ main(int argc, char *argv[])
 		G_CALLBACK(on_key_press), NULL);
 	gtk_container_add(GTK_CONTAINER(g.window), g.stack);
 
+	// TODO(p): Also milk gdk-pixbuf, if linked in, needs to be done in runtime.
 	g.supported_globs = extract_mime_globs(fastiv_io_supported_media_types);
 	g.files = g_ptr_array_new_full(16, g_free);
 	gchar *cwd = g_get_current_dir();

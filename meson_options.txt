@@ -2,3 +2,5 @@ option('libraw', type : 'feature', value : 'auto',
     description : 'Build with RAW support, requires LibRaw')
 option('librsvg', type : 'feature', value : 'auto',
 	description : 'Build with SVG support, requires librsvg')
+option('gdk-pixbuf', type : 'feature', value : 'auto',
+	description : 'Build with a fallback to the gdk-pixbuf library')
