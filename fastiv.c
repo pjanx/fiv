@@ -145,7 +145,10 @@ open(const gchar *path)
 
 	GError *error = NULL;
 	if (!fastiv_view_open(FASTIV_VIEW(g.view), path, &error)) {
+		char *base = g_filename_display_basename(path);
+		g_prefix_error(&error, "%s: ", base);
 		show_error_dialog(error);
+		g_free(base);
 		return;
 	}
 
@@ -253,6 +256,14 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEvent *event,
 		case GDK_KEY_o:
 			on_open();
 			return TRUE;
+		case GDK_KEY_n: {
+			char *argv[] = {PROJECT_NAME, g.directory, NULL};
+			GError *error = NULL;
+			g_spawn_async(NULL, argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL,
+				NULL, &error);
+			g_clear_error(&error);
+			return TRUE;
+		}
 		}
 		break;
 	case 0:
