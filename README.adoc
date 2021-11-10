@@ -19,7 +19,8 @@ Building and Running
 --------------------
 Build dependencies: Meson, pkg-config +
 Runtime dependencies: gtk+-3.0, pixman-1, shared-mime-info, libpng>=1.5.4,
-libturbojpeg, LibRaw (optional), librsvg-2.0 (optional)
+libturbojpeg, LibRaw (optional), librsvg-2.0 (optional),
+gdk-pixbuf-2.0 (optional)
 
  $ git clone --recursive https://git.janouch.name/p/fastiv.git
  $ meson builddir
