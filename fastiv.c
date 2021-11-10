@@ -336,7 +336,9 @@ main(int argc, char *argv[])
 	gtk_window_set_default_icon_name(PROJECT_NAME);
 
 	const char *style = "fastiv-view, fastiv-browser { background: #222; }"
-		"fastiv-browser { padding: 5px; }";
+		"fastiv-browser { padding: 5px; } fastiv-browser.item {"
+			"border: 1px solid rgba(255, 255, 255, 0.5); "
+			"margin: 10px; color: #000; background: #444; }";
 	GtkCssProvider *provider = gtk_css_provider_new();
 	gtk_css_provider_load_from_data(provider, style, strlen(style), NULL);
 	gtk_style_context_add_provider_for_screen(gdk_screen_get_default(),

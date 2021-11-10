@@ -35,6 +35,8 @@
 //                    │    s  p  a  c  i  n  g
 //                    │   ╭┄┄┄┄┄┄┄┄┄┄┄┄╮   ╭┄┄┄┄┄┄┄┄┄┄┄┄
 //
+// The glow is actually a glowing margin, the border is rendered in two parts.
+//
 
 struct _FastivBrowser {
 	GtkWidget parent_instance;
@@ -44,6 +46,8 @@ struct _FastivBrowser {
 	int selected;
 
 	cairo_surface_t *glow;              ///< CAIRO_FORMAT_A8 mask
+	int item_border_x;                  ///< L/R .item margin + border
+	int item_border_y;                  ///< T/B .item margin + border
 };
 
 typedef struct entry Entry;
@@ -56,9 +60,6 @@ static const double g_permitted_width_multiplier = 2;
 // Could be split out to also-idiomatic row-spacing/column-spacing properties.
 // TODO(p): Make a property for this.
 static const int g_item_spacing = 1;
-
-// All around, from the primary colour to transparency.
-static const int g_item_border = 10;
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
@@ -84,8 +85,8 @@ struct item {
 
 struct row {
 	Item *items;                        ///< Ends with a NULL entry
-	int x_offset;                       ///< Start position including padding
-	int y_offset;                       ///< Start position including padding
+	int x_offset;                       ///< Start position outside borders
+	int y_offset;                       ///< Start position inside borders
 };
 
 static void
@@ -102,7 +103,7 @@ append_row(FastivBrowser *self, int *y, int x, GArray *items_array)
 	if (self->layouted_rows->len)
 		*y += g_item_spacing;
 
-	*y += g_item_border;
+	*y += self->item_border_y;
 	g_array_append_val(self->layouted_rows, ((Row) {
 		.items = g_array_steal(items_array, NULL),
 		.x_offset = x,
@@ -111,17 +112,17 @@ append_row(FastivBrowser *self, int *y, int x, GArray *items_array)
 
 	// Not trying to pack them vertically, but this would be the place to do it.
 	*y += g_row_height;
-	*y += g_item_border;
+	*y += self->item_border_y;
 }
 
 static int
 relayout(FastivBrowser *self, int width)
 {
 	GtkWidget *widget = GTK_WIDGET(self);
-	GtkStyleContext *context = gtk_widget_get_style_context(widget);
+	GtkStyleContext *style = gtk_widget_get_style_context(widget);
 
 	GtkBorder padding = {};
-	gtk_style_context_get_padding(context, GTK_STATE_FLAG_NORMAL, &padding);
+	gtk_style_context_get_padding(style, GTK_STATE_FLAG_NORMAL, &padding);
 	int available_width = width - padding.left - padding.right;
 
 	g_array_set_size(self->layouted_rows, 0);
@@ -133,8 +134,8 @@ relayout(FastivBrowser *self, int width)
 		if (!entry->thumbnail)
 			continue;
 
-		int width =
-			cairo_image_surface_get_width(entry->thumbnail) + 2 * g_item_border;
+		int width = cairo_image_surface_get_width(entry->thumbnail) +
+			2 * self->item_border_x;
 		if (!items->len) {
 			// Just insert it, whether or not there's any space.
 		} else if (x + g_item_spacing + width <= available_width) {
@@ -145,8 +146,8 @@ relayout(FastivBrowser *self, int width)
 			x = 0;
 		}
 
-		g_array_append_val(
-			items, ((Item){.entry = entry, .x_offset = x + g_item_border}));
+		g_array_append_val(items,
+			((Item) {.entry = entry, .x_offset = x + self->item_border_x}));
 		x += width;
 	}
 	if (items->len) {
@@ -159,22 +160,23 @@ relayout(FastivBrowser *self, int width)
 }
 
 static void
-draw_item_border(FastivBrowser *self, cairo_t *cr, int width, int height)
+draw_outer_border(FastivBrowser *self, cairo_t *cr, int width, int height)
 {
-	cairo_set_source_rgb(cr, .75, .75, .75);
+	int offset_x = cairo_image_surface_get_width(self->glow);
+	int offset_y = cairo_image_surface_get_height(self->glow);
 	cairo_pattern_t *mask = cairo_pattern_create_for_surface(self->glow);
 	cairo_matrix_t matrix;
 
 	cairo_pattern_set_extend(mask, CAIRO_EXTEND_PAD);
 	cairo_save(cr);
-	cairo_translate(cr, -g_item_border, -g_item_border);
-	cairo_rectangle(cr, 0, 0, g_item_border + width, g_item_border + height);
+	cairo_translate(cr, -offset_x, -offset_y);
+	cairo_rectangle(cr, 0, 0, offset_x + width, offset_y + height);
 	cairo_clip(cr);
 	cairo_mask(cr, mask);
 	cairo_restore(cr);
 	cairo_save(cr);
-	cairo_translate(cr, width + g_item_border, height + g_item_border);
-	cairo_rectangle(cr, 0, 0, -g_item_border - width, -g_item_border - height);
+	cairo_translate(cr, width + offset_x, height + offset_y);
+	cairo_rectangle(cr, 0, 0, -offset_x - width, -offset_y - height);
 	cairo_clip(cr);
 	cairo_scale(cr, -1, -1);
 	cairo_mask(cr, mask);
@@ -182,20 +184,13 @@ draw_item_border(FastivBrowser *self, cairo_t *cr, int width, int height)
 
 	cairo_pattern_set_extend(mask, CAIRO_EXTEND_NONE);
 	cairo_matrix_init_scale(&matrix, -1, 1);
-	cairo_matrix_translate(&matrix, -width - g_item_border, g_item_border);
+	cairo_matrix_translate(&matrix, -width - offset_x, offset_y);
 	cairo_pattern_set_matrix(mask, &matrix);
 	cairo_mask(cr, mask);
 	cairo_matrix_init_scale(&matrix, 1, -1);
-	cairo_matrix_translate(&matrix, g_item_border, -height - g_item_border);
+	cairo_matrix_translate(&matrix, offset_x, -height - offset_y);
 	cairo_pattern_set_matrix(mask, &matrix);
 	cairo_mask(cr, mask);
-
-	// TODO(p): Distinguish between an inner and outer border,
-	// don't override part of the glow.
-	cairo_rectangle(cr, -.5, -.5, width + 1, height + 1);
-	cairo_set_source_rgba(cr, 1, 1, 1, 0.75);
-	cairo_set_line_width(cr, 1);
-	cairo_stroke(cr);
 
 	cairo_pattern_destroy(mask);
 }
@@ -233,22 +228,40 @@ entry_at(FastivBrowser *self, int x, int y)
 static void
 draw_row(FastivBrowser *self, cairo_t *cr, const Row *row)
 {
-	for (Item *item = row->items; item->entry; item++) {
-		GdkRectangle extents = item_extents(item, row);
+	GtkStyleContext *style = gtk_widget_get_style_context(GTK_WIDGET(self));
+	gtk_style_context_save(style);
+	gtk_style_context_add_class(style, "item");
 
+	GdkRGBA glow_color = {};
+	GtkStateFlags state = gtk_style_context_get_state (style);
+	gtk_style_context_get_color(style, state, &glow_color);
+
+	GtkBorder border;
+	gtk_style_context_get_border(style, state, &border);
+	for (Item *item = row->items; item->entry; item++) {
 		cairo_save(cr);
-		cairo_translate(cr, extents.x, extents.y);
-		draw_item_border(self, cr, extents.width, extents.height);
+		GdkRectangle extents = item_extents(item, row);
+		cairo_translate(cr, extents.x - border.left, extents.y - border.top);
+
+		gdk_cairo_set_source_rgba(cr, &glow_color);
+		draw_outer_border(self, cr,
+			border.left + extents.width + border.right,
+			border.top + extents.height + border.bottom);
 
 		// TODO(p): See if a mild checkerboard pattern would not look nice.
-		cairo_rectangle(cr, 0, 0, extents.width, extents.height);
-		cairo_set_source_rgb(cr, .25, .25, .25);
-		cairo_fill(cr);
+		gtk_render_background(
+			style, cr, border.left, border.top, extents.width, extents.height);
 
-		cairo_set_source_surface(cr, item->entry->thumbnail, 0, 0);
+		gtk_render_frame(style, cr, 0, 0,
+			border.left + extents.width + border.right,
+			border.top + extents.height + border.bottom);
+
+		cairo_set_source_surface(
+			cr, item->entry->thumbnail, border.left, border.top);
 		cairo_paint(cr);
 		cairo_restore(cr);
 	}
+	gtk_style_context_restore(style);
 }
 
 // --- Boilerplate -------------------------------------------------------------
@@ -287,11 +300,13 @@ static void
 fastiv_browser_get_preferred_width(
 	GtkWidget *widget, gint *minimum, gint *natural)
 {
+	FastivBrowser *self = FASTIV_BROWSER(widget);
+	GtkStyleContext *style = gtk_widget_get_style_context(widget);
+
 	GtkBorder padding = {};
-	GtkStyleContext *context = gtk_widget_get_style_context(widget);
-	gtk_style_context_get_padding(context, GTK_STATE_FLAG_NORMAL, &padding);
+	gtk_style_context_get_padding(style, GTK_STATE_FLAG_NORMAL, &padding);
 	*minimum = *natural = g_permitted_width_multiplier * g_row_height +
-		padding.left + 2 * g_item_border + padding.right;
+		padding.left + 2 * self->item_border_x + padding.right;
 }
 
 static void
@@ -361,9 +376,9 @@ fastiv_browser_draw(GtkWidget *widget, cairo_t *cr)
 		const Row *row = &g_array_index(self->layouted_rows, Row, i);
 		GdkRectangle extents = {
 			.x = 0,
-			.y = row->y_offset,
+			.y = row->y_offset - self->item_border_y,
 			.width = allocation.width,
-			.height = g_row_height + 2 * g_item_border,
+			.height = g_row_height + 2 * self->item_border_y,
 		};
 		if (!have_clip || gdk_rectangle_intersect(&clip, &extents, NULL))
 			draw_row(self, cr, row);
@@ -388,6 +403,66 @@ fastiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 }
 
 static void
+fastiv_browser_style_updated(GtkWidget *widget)
+{
+	GTK_WIDGET_CLASS(fastiv_browser_parent_class)->style_updated(widget);
+
+	FastivBrowser *self = FASTIV_BROWSER(widget);
+	GtkStyleContext *style = gtk_widget_get_style_context(widget);
+	GtkBorder border = {}, margin = {};
+
+	// Using a pseudo-class, because GTK+ regions are deprecated.
+	gtk_style_context_save(style);
+	gtk_style_context_add_class(style, "item");
+	gtk_style_context_get_margin(style, GTK_STATE_FLAG_NORMAL, &margin);
+	gtk_style_context_get_border(style, GTK_STATE_FLAG_NORMAL, &border);
+	gtk_style_context_restore(style);
+
+	const int glow_w = (margin.left + margin.right) / 2;
+	const int glow_h = (margin.top + margin.bottom) / 2;
+
+	// Don't set different opposing sides, it will misrender, your problem.
+	// When the style of the class changes, this virtual method isn't invoked,
+	// so the update check is mildly pointless.
+	int item_border_x = glow_w + (border.left + border.right) / 2;
+	int item_border_y = glow_h + (border.top + border.bottom) / 2;
+	if (item_border_x != self->item_border_x ||
+		item_border_y != self->item_border_y) {
+		self->item_border_x = item_border_x;
+		self->item_border_y = item_border_y;
+		gtk_widget_queue_resize(widget);
+	}
+
+	if (self->glow)
+		cairo_surface_destroy(self->glow);
+	if (glow_w <= 0 || glow_h <= 0) {
+		self->glow = cairo_image_surface_create(CAIRO_FORMAT_A1, 0, 0);
+		return;
+	}
+
+	self->glow =
+		cairo_image_surface_create(CAIRO_FORMAT_A8, glow_w, glow_h);
+	unsigned char *data = cairo_image_surface_get_data(self->glow);
+	int stride = cairo_image_surface_get_stride(self->glow);
+
+	// Smooth out the curve, so that the edge of the glow isn't too jarring.
+	const double fade_factor = 1.5;
+
+	const int x_max = glow_w - 1;
+	const int y_max = glow_h - 1;
+	const double x_scale = 1. / MAX(1, x_max);
+	const double y_scale = 1. / MAX(1, y_max);
+	for (int y = 0; y <= y_max; y++)
+		for (int x = 0; x <= x_max; x++) {
+			const double xn = x_scale * (x_max - x);
+			const double yn = y_scale * (y_max - y);
+			double v = MIN(sqrt(xn * xn + yn * yn), 1);
+			data[y * stride + x] = round(pow(1 - v, fade_factor) * 255);
+		}
+	cairo_surface_mark_dirty(self->glow);
+}
+
+static void
 fastiv_browser_class_init(FastivBrowserClass *klass)
 {
 	GObjectClass *object_class = G_OBJECT_CLASS(klass);
@@ -402,6 +477,7 @@ fastiv_browser_class_init(FastivBrowserClass *klass)
 	widget_class->draw = fastiv_browser_draw;
 	widget_class->size_allocate = fastiv_browser_size_allocate;
 	widget_class->button_press_event = fastiv_browser_button_press_event;
+	widget_class->style_updated = fastiv_browser_style_updated;
 
 	browser_signals[ITEM_ACTIVATED] =
 		g_signal_new("item-activated", G_TYPE_FROM_CLASS(klass), 0, 0,
@@ -423,24 +499,7 @@ fastiv_browser_init(FastivBrowser *self)
 	g_array_set_clear_func(self->layouted_rows, (GDestroyNotify) row_free);
 
 	self->selected = -1;
-
-	self->glow = cairo_image_surface_create(
-		CAIRO_FORMAT_A8, g_item_border, g_item_border);
-	unsigned char *data = cairo_image_surface_get_data(self->glow);
-	int stride = cairo_image_surface_get_stride(self->glow);
-
-	// Smooth out the curve, so that the edge of the glow doesn't stand out
-	const double fade_factor = 1.5;
-
-	const int max = g_item_border - 1;
-	for (int y = 0; y <= max; y++)
-		for (int x = 0; x <= max; x++) {
-			int xn = max - x;
-			int yn = max - y;
-			double v = MIN(sqrt(xn * xn + yn * yn) / max, 1);
-			data[y * stride + x] = round(pow(1 - v, fade_factor) * 255);
-		}
-	cairo_surface_mark_dirty(self->glow);
+	self->glow = cairo_image_surface_create(CAIRO_FORMAT_A1, 0, 0);
 }
 
 static cairo_surface_t *
