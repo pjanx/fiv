@@ -99,7 +99,8 @@ fastiv_view_realize(GtkWidget *widget)
 		// Assuming here that we can't ask for a higher-precision Visual
 		// than what we get automatically.
 		.visual = gtk_widget_get_visual(widget),
-		.event_mask = gtk_widget_get_events(widget) | GDK_SCROLL_MASK,
+		.event_mask = gtk_widget_get_events(widget) | GDK_SCROLL_MASK |
+			GDK_KEY_PRESS_MASK,
 	};
 
 	// We need this window to receive input events at all.
@@ -189,6 +190,22 @@ fastiv_view_scroll_event(GtkWidget *widget, GdkEventScroll *event)
 	}
 }
 
+static gboolean
+fastiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
+{
+	FastivView *self = FASTIV_VIEW(widget);
+	if (event->state & gtk_accelerator_get_default_mod_mask())
+		return FALSE;
+
+	switch (event->keyval) {
+	case GDK_KEY_1:
+		self->scale = 1;
+		gtk_widget_queue_resize(widget);
+		return TRUE;
+	}
+	return FALSE;
+}
+
 static void
 fastiv_view_class_init(FastivViewClass *klass)
 {
@@ -201,6 +218,7 @@ fastiv_view_class_init(FastivViewClass *klass)
 	widget_class->realize = fastiv_view_realize;
 	widget_class->draw = fastiv_view_draw;
 	widget_class->scroll_event = fastiv_view_scroll_event;
+	widget_class->key_press_event = fastiv_view_key_press_event;
 
 	// TODO(p): Later override "screen_changed", recreate Pango layouts there,
 	// if we get to have any, or otherwise reflect DPI changes.
@@ -210,6 +228,8 @@ fastiv_view_class_init(FastivViewClass *klass)
 static void
 fastiv_view_init(FastivView *self)
 {
+	gtk_widget_set_can_focus(GTK_WIDGET(self), TRUE);
+
 	self->scale = 1.0;
 }
 
