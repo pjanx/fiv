@@ -603,53 +603,48 @@ fastiv_io_open_from_data(const char *data, size_t len, const gchar *path,
 // NOTE: "It is important to note that when an image with an alpha channel is
 // scaled, linear encoded, pre-multiplied component values must be used!"
 #include <glib/gstdio.h>
-#include <png.h>
+#include <spng.h>
 
-static void
-redirect_png_error(png_structp pngp, const char *error)
-{
-	set_error(png_get_error_ptr(pngp), error);
-	png_longjmp(pngp, 1);
-}
-
-static void
-discard_png_warning(png_structp pngp, const char *warning)
-{
-	(void) pngp;
-	(void) warning;
-}
-
-static int
-check_png_thumbnail(
-	png_structp pngp, png_infop infop, const gchar *target, time_t mtime)
+static int  // tri-state
+check_spng_thumbnail_texts(struct spng_text *texts, uint32_t texts_len,
+	const gchar *target, time_t mtime)
 {
 	// May contain Thumb::Image::Width Thumb::Image::Height,
 	// but those aren't interesting currently (would be for fast previews).
-	int texts_len = 0;
-	png_textp texts = NULL;
-	png_get_text(pngp, infop, &texts, &texts_len);
-
-	gboolean need_uri = TRUE, need_mtime = TRUE;
-	for (int i = 0; i < texts_len; i++) {
-		png_textp text = texts + i;
-		if (!strcmp(text->key, "Thumb::URI")) {
-			need_uri = FALSE;
+	bool need_uri = true, need_mtime = true;
+	for (uint32_t i = 0; i < texts_len; i++) {
+		struct spng_text *text = texts + i;
+		if (!strcmp(text->keyword, "Thumb::URI")) {
+			need_uri = false;
 			if (strcmp(target, text->text))
-				return FALSE;
+				return false;
 		}
-		if (!strcmp(text->key, "Thumb::MTime")) {
-			need_mtime = FALSE;
+		if (!strcmp(text->keyword, "Thumb::MTime")) {
+			need_mtime = false;
 			if (atol(text->text) != mtime)
-				return FALSE;
+				return false;
 		}
 	}
-	return need_uri || need_mtime ? -1 : TRUE;
+	return need_uri || need_mtime ? -1 : true;
 }
 
-// TODO(p): Support spng as well (it can't premultiply alpha by itself,
-// but at least it won't gamma-adjust it for us).
+static int  // tri-state
+check_spng_thumbnail(spng_ctx *ctx, const gchar *target, time_t mtime, int *err)
+{
+	uint32_t texts_len = 0;
+	if ((*err = spng_get_text(ctx, NULL, &texts_len)))
+		return false;
+
+	int result = false;
+	struct spng_text *texts = g_malloc0_n(texts_len, sizeof *texts);
+	if (!(*err = spng_get_text(ctx, texts, &texts_len)))
+		result = check_spng_thumbnail_texts(texts, texts_len, target, mtime);
+	g_free(texts);
+	return result;
+}
+
 static cairo_surface_t *
-read_png_thumbnail(
+read_spng_thumbnail(
 	const gchar *path, const gchar *uri, time_t mtime, GError **error)
 {
 	FILE *fp;
@@ -658,96 +653,92 @@ read_png_thumbnail(
 		return NULL;
 	}
 
-	cairo_surface_t *volatile surface = NULL;
-	png_structp pngp = png_create_read_struct(
-		PNG_LIBPNG_VER_STRING, error, redirect_png_error, discard_png_warning);
-	png_infop infop = png_create_info_struct(pngp);
-	if (!infop) {
+	cairo_surface_t *result = NULL;
+	errno = 0;
+	spng_ctx *ctx = spng_ctx_new(0);
+	if (!ctx) {
 		set_error(error, g_strerror(errno));
-		goto fail_preread;
+		goto fail_init;
 	}
 
-	volatile png_bytepp row_pointers = NULL;
-	if (setjmp(png_jmpbuf(pngp))) {
-		if (surface) {
-			cairo_surface_destroy(surface);
-			surface = NULL;
-		}
+	int err;
+	size_t size = 0;
+	if ((err = spng_set_png_file(ctx, fp)) ||
+		(err = spng_set_image_limits(ctx, INT16_MAX, INT16_MAX)) ||
+		(err = spng_decoded_image_size(ctx, SPNG_FMT_RGBA8, &size))) {
+		set_error(error, spng_strerror(err));
+		goto fail;
+	}
+	if (check_spng_thumbnail(ctx, uri, mtime, &err) == false) {
+		set_error(error, err ? spng_strerror(err) : "mismatch");
 		goto fail;
 	}
 
-	png_init_io(pngp, fp);
-
-	// XXX: libpng will premultiply with the alpha, but it also gamma-adjust it.
-	png_set_alpha_mode(pngp, PNG_ALPHA_BROKEN, PNG_DEFAULT_sRGB);
-	png_read_info(pngp, infop);
-	if (check_png_thumbnail(pngp, infop, uri, mtime) == FALSE)
-		png_error(pngp, "mismatch");
-
-	// Asking for at least 8-bit channels. This call is a superset of:
-	//  - png_set_palette_to_rgb(),
-	//  - png_set_tRNS_to_alpha(),
-	//  - png_set_expand_gray_1_2_4_to_8().
-	png_set_expand(pngp);
-
-	// Reduce the possibilities further to RGB or RGBA...
-	png_set_gray_to_rgb(pngp);
-
-	// ...and /exactly/ 8-bit channels.
-	// Alternatively, use png_set_expand_16() above to obtain 16-bit channels.
-	png_set_scale_16(pngp);
-
-	// PNG uses RGBA order, we want either ARGB (BE) or BGRA (LE).
-	if (G_BYTE_ORDER == G_LITTLE_ENDIAN) {
-		png_set_bgr(pngp);
-		png_set_add_alpha(pngp, 0xFFFF, PNG_FILLER_AFTER);
-		png_set_swap(pngp);
-	} else {
-		// This doesn't change a row's `color_type` in png_do_read_filler(),
-		// and the following transformation thus ignores it.
-		png_set_add_alpha(pngp, 0xFFFF, PNG_FILLER_BEFORE);
-		png_set_swap_alpha(pngp);
+	uint32_t *data = g_malloc0(size);
+	if ((err = spng_decode_image(ctx, data, size, SPNG_FMT_RGBA8,
+		SPNG_DECODE_TRNS | SPNG_DECODE_GAMMA))) {
+		set_error(error, spng_strerror(err));
+		goto fail_data;
 	}
-
-	(void) png_set_interlace_handling(pngp);
-	png_read_update_info(pngp, infop);
-
-	png_uint_32 w = png_get_image_width(pngp, infop);
-	png_uint_32 h = png_get_image_height(pngp, infop);
-	if (w > INT16_MAX || h > INT16_MAX)
-		png_error(pngp, "the image is too large");
-
-	surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
-	cairo_status_t surface_status = cairo_surface_status(surface);
-	if (surface_status != CAIRO_STATUS_SUCCESS)
-		png_error(pngp, cairo_status_to_string(surface_status));
-
-	size_t row_bytes = png_get_rowbytes(pngp, infop);
-	g_assert((size_t) cairo_image_surface_get_stride(surface) == row_bytes);
-
-	unsigned char *buffer = cairo_image_surface_get_data(surface);
-	png_uint_32 height = png_get_image_height(pngp, infop);
-	if (!(row_pointers = calloc(height, sizeof *row_pointers)))
-		png_error(pngp, g_strerror(errno));
-	for (size_t y = 0; y < height; y++)
-		row_pointers[y] = buffer + y * row_bytes;
-
-	cairo_surface_flush(surface);
-	png_read_image(pngp, row_pointers);
-	cairo_surface_mark_dirty(surface);
 
 	// The specification does not say where the required metadata should be,
 	// it could very well be broken up into two parts.
-	png_read_end(pngp, infop);
-	if (check_png_thumbnail(pngp, infop, uri, mtime) != TRUE)
-		png_error(pngp, "mismatch or not a thumbnail");
+	if (check_spng_thumbnail(ctx, uri, mtime, &err) != true) {
+		set_error(
+			error, err ? spng_strerror(err) : "mismatch or not a thumbnail");
+		goto fail_data;
+	}
 
+	struct spng_ihdr ihdr = {};
+	spng_get_ihdr(ctx, &ihdr);
+	cairo_surface_t *surface = cairo_image_surface_create(
+		CAIRO_FORMAT_ARGB32, ihdr.width, ihdr.height);
+
+	cairo_status_t surface_status = cairo_surface_status(surface);
+	if (surface_status != CAIRO_STATUS_SUCCESS) {
+		set_error(error, cairo_status_to_string(surface_status));
+		cairo_surface_destroy(surface);
+		goto fail_data;
+	}
+
+	g_assert((size_t) cairo_image_surface_get_stride(surface) *
+		cairo_image_surface_get_height(surface) == size);
+
+	// pixman can be mildly abused to do this operation, but it won't be faster.
+	uint32_t *output = (uint32_t *) cairo_image_surface_get_data(surface);
+	cairo_surface_flush(surface);
+
+	struct spng_trns trns = {};
+	if (ihdr.color_type == SPNG_COLOR_TYPE_GRAYSCALE_ALPHA ||
+		ihdr.color_type == SPNG_COLOR_TYPE_TRUECOLOR_ALPHA ||
+		!spng_get_trns(ctx, &trns)) {
+		for (size_t i = size / sizeof *output; i--; ) {
+			uint8_t *unit = (uint8_t *) &data[i],
+				a = unit[3],
+				b = unit[2] * a / 255,
+				g = unit[1] * a / 255,
+				r = unit[0] * a / 255;
+			output[i] = a << 24 | r << 16 | g << 8 | b;
+		}
+	} else {
+		for (size_t i = size / sizeof *output; i--; ) {
+			uint8_t *unit = (uint8_t *) &data[i],
+				a = unit[3],
+				b = unit[2],
+				g = unit[1],
+				r = unit[0];
+			output[i] = a << 24 | r << 16 | g << 8 | b;
+		}
+	}
+
+	cairo_surface_mark_dirty((result = surface));
+fail_data:
+	free(data);
 fail:
-	free(row_pointers);
-fail_preread:
-	png_destroy_read_struct(&pngp, &infop, NULL);
+	spng_ctx_free(ctx);
+fail_init:
 	fclose(fp);
-	return surface;
+	return result;
 }
 
 cairo_surface_t *
@@ -772,7 +763,7 @@ fastiv_io_lookup_thumbnail(const gchar *target)
 	for (gsize i = 0; !result && i < G_N_ELEMENTS(sizes); i++) {
 		gchar *path = g_strdup_printf(
 			"%s/thumbnails/%s/%s.png", cache_dir, sizes[i], sum);
-		result = read_png_thumbnail(path, uri, st.st_mtim.tv_sec, &error);
+		result = read_spng_thumbnail(path, uri, st.st_mtim.tv_sec, &error);
 		if (error) {
 			g_debug("%s: %s", path, error->message);
 			g_clear_error(&error);
