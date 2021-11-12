@@ -250,12 +250,12 @@ on_item_activated(G_GNUC_UNUSED FastivBrowser *browser, const char *path,
 // g_signal_connect{,after}(), or overriding the handler and either tactically
 // chaining up or using gtk_window_propagate_key_event().
 static gboolean
-on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEvent *event,
+on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 	G_GNUC_UNUSED gpointer data)
 {
-	switch (event->key.state & gtk_accelerator_get_default_mod_mask()) {
+	switch (event->state & gtk_accelerator_get_default_mod_mask()) {
 	case GDK_CONTROL_MASK:
-		switch (event->key.keyval) {
+		switch (event->keyval) {
 		case GDK_KEY_o:
 			on_open();
 			return TRUE;
@@ -270,7 +270,7 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEvent *event,
 		}
 		break;
 	case 0:
-		switch (event->key.keyval) {
+		switch (event->keyval) {
 		case GDK_KEY_Escape:
 		case GDK_KEY_q:
 			gtk_main_quit();
