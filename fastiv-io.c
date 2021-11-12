@@ -506,11 +506,19 @@ cairo_surface_t *
 fastiv_io_open(const gchar *path, GError **error)
 {
 	// TODO(p): Don't always load everything into memory, test type first,
-	// for which we only need the first 16 bytes right now.
-	// Though LibRaw poses an issue--we may want to try to map RAW formats
-	// to FourCC values--many of them are compliant TIFF files.
-	// We might want to employ a more generic way of magic identification,
-	// and with some luck, it could even be integrated into Wuffs.
+	// so that we can reject non-pictures early.  Wuffs only needs the first
+	// 16 bytes to make a guess right now.
+	//
+	// LibRaw poses an issue--there is no good registry for identification
+	// of supported files.  Many of them are compliant TIFF files.
+	// The only good filtering method for RAWs are currently file extensions
+	// extracted from shared-mime-info.
+	//
+	// SVG is also problematic, an unbounded search for its root element.
+	// But problematic files can be assumed to be crafted.
+	//
+	// gdk-pixbuf exposes its detection data through gdk_pixbuf_get_formats().
+	// This may also be unbounded, as per format_check().
 	gchar *data = NULL;
 	gsize len = 0;
 	if (!g_file_get_contents(path, &data, &len, error))
@@ -594,8 +602,6 @@ fastiv_io_open_from_data(const char *data, size_t len, const gchar *path,
 
 // NOTE: "It is important to note that when an image with an alpha channel is
 // scaled, linear encoded, pre-multiplied component values must be used!"
-//
-// We can use the pixman library to scale, PIXMAN_a8r8g8b8_sRGB.
 #include <glib/gstdio.h>
 #include <png.h>
 
