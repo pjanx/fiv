@@ -120,6 +120,7 @@ switch_to_view(const char *path)
 {
 	gtk_window_set_title(GTK_WINDOW(g.window), path);
 	gtk_stack_set_visible_child(GTK_STACK(g.stack), g.view_scroller);
+	gtk_widget_grab_focus(g.view);
 }
 
 static void

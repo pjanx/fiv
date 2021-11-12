@@ -276,6 +276,20 @@ fastiv_view_draw(GtkWidget *widget, cairo_t *cr)
 	return TRUE;
 }
 
+static gboolean
+fastiv_view_button_press_event(GtkWidget *widget, GdkEventButton *event)
+{
+	GTK_WIDGET_CLASS(fastiv_view_parent_class)
+		->button_press_event(widget, event);
+
+	if (event->button == GDK_BUTTON_PRIMARY &&
+		gtk_widget_get_focus_on_click(widget))
+		gtk_widget_grab_focus(widget);
+
+	// TODO(p): Use for left button scroll drag, which may rather be a gesture.
+	return FALSE;
+}
+
 #define SCALE_STEP 1.4
 
 static gboolean
@@ -361,6 +375,7 @@ fastiv_view_class_init(FastivViewClass *klass)
 	widget_class->size_allocate = fastiv_view_size_allocate;
 	widget_class->realize = fastiv_view_realize;
 	widget_class->draw = fastiv_view_draw;
+	widget_class->button_press_event = fastiv_view_button_press_event;
 	widget_class->scroll_event = fastiv_view_scroll_event;
 	widget_class->key_press_event = fastiv_view_key_press_event;
 

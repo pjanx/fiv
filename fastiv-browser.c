@@ -614,7 +614,8 @@ fastiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 	FastivBrowser *self = FASTIV_BROWSER(widget);
 	if (event->type != GDK_BUTTON_PRESS || event->state != 0)
 		return FALSE;
-	if (event->button == GDK_BUTTON_PRIMARY)
+	if (event->button == GDK_BUTTON_PRIMARY &&
+		gtk_widget_get_focus_on_click(widget))
 		gtk_widget_grab_focus(widget);
 
 	const Entry *entry = entry_at(self, event->x, event->y);
