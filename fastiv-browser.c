@@ -561,6 +561,14 @@ rescale_thumbnail(cairo_surface_t *thumbnail)
 	return scaled;
 }
 
+static void
+entry_add_thumbnail(gpointer data, G_GNUC_UNUSED gpointer user_data)
+{
+	Entry *self = data;
+	self->thumbnail =
+		rescale_thumbnail(fastiv_io_lookup_thumbnail(self->filename));
+}
+
 void
 fastiv_browser_load(FastivBrowser *self, const char *path)
 {
@@ -577,14 +585,16 @@ fastiv_browser_load(FastivBrowser *self, const char *path)
 			continue;
 
 		gchar *subpath = g_build_filename(path, filename, NULL);
-		g_array_append_val(self->entries,
-			((Entry){
-				.thumbnail =
-					rescale_thumbnail(fastiv_io_lookup_thumbnail(subpath)),
-				.filename = subpath,
-			}));
+		g_array_append_val(
+			self->entries, ((Entry) {.thumbnail = NULL, .filename = subpath}));
 	}
 	g_dir_close(dir);
+
+	GThreadPool *pool = g_thread_pool_new(
+		entry_add_thumbnail, NULL, g_get_num_processors(), FALSE, NULL);
+	for (guint i = 0; i < self->entries->len; i++)
+		g_thread_pool_push(pool, &g_array_index(self->entries, Entry, i), NULL);
+	g_thread_pool_free(pool, FALSE, TRUE);
 
 	// TODO(p): Sort the entries.
 	gtk_widget_queue_resize(GTK_WIDGET(self));
