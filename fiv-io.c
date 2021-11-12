@@ -3451,34 +3451,40 @@ fiv_io_orientation_apply(const FivIoImage *image,
 	FivIoOrientation orientation, double *width, double *height)
 {
 	fiv_io_orientation_dimensions(image, orientation, width, height);
+	return fiv_io_orientation_matrix(orientation, *width, *height);
+}
 
+cairo_matrix_t
+fiv_io_orientation_matrix(
+	FivIoOrientation orientation, double width, double height)
+{
 	cairo_matrix_t matrix = {};
 	cairo_matrix_init_identity(&matrix);
 	switch (orientation) {
 	case FivIoOrientation90:
 		cairo_matrix_rotate(&matrix, -M_PI_2);
-		cairo_matrix_translate(&matrix, -*width, 0);
+		cairo_matrix_translate(&matrix, -width, 0);
 		break;
 	case FivIoOrientation180:
 		cairo_matrix_scale(&matrix, -1, -1);
-		cairo_matrix_translate(&matrix, -*width, -*height);
+		cairo_matrix_translate(&matrix, -width, -height);
 		break;
 	case FivIoOrientation270:
 		cairo_matrix_rotate(&matrix, +M_PI_2);
-		cairo_matrix_translate(&matrix, 0, -*height);
+		cairo_matrix_translate(&matrix, 0, -height);
 		break;
 	case FivIoOrientationMirror0:
 		cairo_matrix_scale(&matrix, -1, +1);
-		cairo_matrix_translate(&matrix, -*width, 0);
+		cairo_matrix_translate(&matrix, -width, 0);
 		break;
 	case FivIoOrientationMirror90:
 		cairo_matrix_rotate(&matrix, +M_PI_2);
 		cairo_matrix_scale(&matrix, -1, +1);
-		cairo_matrix_translate(&matrix, -*width, -*height);
+		cairo_matrix_translate(&matrix, -width, -height);
 		break;
 	case FivIoOrientationMirror180:
 		cairo_matrix_scale(&matrix, +1, -1);
-		cairo_matrix_translate(&matrix, 0, -*height);
+		cairo_matrix_translate(&matrix, 0, -height);
 		break;
 	case FivIoOrientationMirror270:
 		cairo_matrix_rotate(&matrix, -M_PI_2);

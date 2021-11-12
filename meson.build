@@ -36,6 +36,7 @@ gdkpixbuf = dependency('gdk-pixbuf-2.0', required : get_option('gdk-pixbuf'))
 dependencies = [
 	dependency('gtk+-3.0'),
 	dependency('pixman-1'),
+	dependency('epoxy'),
 
 	dependency('libjpeg'),
 	dependency('libturbojpeg'),

@@ -13,7 +13,7 @@ Features
    photos, HEIC, AVIF, SVG, X11 cursors and TIFF, or whatever your gdk-pixbuf
    modules manage to load.
  - Employs high-performance file format libraries: Wuffs and libjpeg-turbo.
- - Makes use of 30-bit X.org visuals, whenever it's possible and appropriate.
+ - Can make use of 30-bit X.org visuals, under certain conditions.
  - Has a notion of pages, and tries to load all included content within files.
  - Can keep the zoom and position when browsing, to help with comparing
    zoomed-in images.
@@ -43,7 +43,7 @@ Building and Running
 Build-only dependencies:
  Meson, pkg-config, asciidoctor or asciidoc (recommended but optional) +
 Runtime dependencies: gtk+-3.0, glib>=2.64, pixman-1, shared-mime-info,
- libturbojpeg, libwebp, librsvg-2.0 (for icons) +
+ libturbojpeg, libwebp, libepoxy, librsvg-2.0 (for icons) +
 Optional dependencies: lcms2, Little CMS fast float plugin,
  LibRaw, librsvg-2.0, xcursor, libheif, libtiff, ExifTool,
  resvg (unstable API, needs to be requested explicitly) +

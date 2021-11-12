@@ -1,7 +1,7 @@
 //
 // fiv-view.c: image viewing widget
 //
-// Copyright (c) 2021 - 2022, Přemysl Eric Janouch <p@janouch.name>
+// Copyright (c) 2021 - 2024, Přemysl Eric Janouch <p@janouch.name>
 //
 // Permission to use, copy, modify, and/or distribute this software for any
 // purpose with or without fee is hereby granted.
@@ -24,6 +24,7 @@
 #include <math.h>
 #include <stdbool.h>
 
+#include <epoxy/gl.h>
 #include <gtk/gtk.h>
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
@@ -83,6 +84,10 @@ struct _FivView {
 	int remaining_loops;                ///< Greater than zero if limited
 	gint64 frame_time;                  ///< Current frame's start, µs precision
 	gulong frame_update_connection;     ///< GdkFrameClock::update
+
+	GdkGLContext *gl_context;           ///< OpenGL context
+	bool gl_initialized;                ///< Objects have been created
+	GLuint gl_program;                  ///< Linked render program
 };
 
 G_DEFINE_TYPE_EXTENDED(FivView, fiv_view, GTK_TYPE_WIDGET, 0,
@@ -160,6 +165,147 @@ enum {
 
 // Globals are, sadly, the canonical way of storing signal numbers.
 static guint view_signals[LAST_SIGNAL];
+
+// --- OpenGL ------------------------------------------------------------------
+// While GTK+ 3 technically still supports legacy desktop OpenGL 2.0[1],
+// we will pick the 3.3 core profile, which is fairly old by now.
+// It doesn't seem to make any sense to go below 3.2.
+//
+// [1] https://stackoverflow.com/a/37923507/76313
+//
+// OpenGL ES
+//
+// Currently, we do not support OpenGL ES at all--it needs its own shaders
+// (if only because of different #version statements), and also further analysis
+// as to what is our minimum version requirement. While GTK+ 3 can again go
+// down as low as OpenGL ES 2.0, this might be too much of a hassle to support.
+//
+// ES can be forced via GDK_GL=gles, if gdk_gl_context_set_required_version()
+// doesn't stand in the way.
+//
+// Let's not forget that this is a desktop image viewer first and foremost.
+
+static const char *
+gl_error_string(GLenum err)
+{
+	switch (err) {
+	case GL_NO_ERROR:
+		return "no error";
+	case GL_CONTEXT_LOST:
+		return "context lost";
+	case GL_INVALID_ENUM:
+		return "invalid enum";
+	case GL_INVALID_VALUE:
+		return "invalid value";
+	case GL_INVALID_OPERATION:
+		return "invalid operation";
+	case GL_INVALID_FRAMEBUFFER_OPERATION:
+		return "invalid framebuffer operation";
+	case GL_OUT_OF_MEMORY:
+		return "out of memory";
+	case GL_STACK_UNDERFLOW:
+		return "stack underflow";
+	case GL_STACK_OVERFLOW:
+		return "stack overflow";
+	default:
+		return NULL;
+	}
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+static const char *gl_vertex =
+	"#version 330\n"
+	"layout(location = 0) in vec4 position;\n"
+	"out vec2 coordinates;\n"
+	"void main() {\n"
+	"\tcoordinates = position.zw;\n"
+	"\tgl_Position = vec4(position.xy, 0., 1.);\n"
+	"}\n";
+
+static const char *gl_fragment =
+	"#version 330\n"
+	"in vec2 coordinates;\n"
+	"layout(location = 0) out vec4 color;\n"
+	"uniform sampler2D picture;\n"
+	"uniform bool checkerboard;\n"
+	"\n"
+	"vec3 checker() {\n"
+	"\tvec2 xy = gl_FragCoord.xy / 20.;\n"
+	"\tif (checkerboard && (int(floor(xy.x) + floor(xy.y)) & 1) == 0)\n"
+	"\t\treturn vec3(0.98);\n"
+	"\telse\n"
+	"\t\treturn vec3(1.00);\n"
+	"}\n"
+	"\n"
+	"void main() {\n"
+	"\tvec3 c = checker();\n"
+	"\tvec4 t = texture(picture, coordinates);\n"
+	"\t// Premultiplied blending with a solid background.\n"
+	"\t// XXX: This is only correct for linear components.\n"
+	"\tcolor = vec4(c * (1. - t.a) + t.rgb, 1.);\n"
+	"}\n";
+
+static GLuint
+gl_make_shader(int type, const char *glsl)
+{
+	GLuint shader = glCreateShader(type);
+	glShaderSource(shader, 1, &glsl, NULL);
+	glCompileShader(shader);
+
+	GLint status = 0;
+	glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
+	if (!status) {
+		GLint len = 0;
+		glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &len);
+
+		GLchar *buffer = g_malloc0(len + 1);
+		glGetShaderInfoLog(shader, len, NULL, buffer);
+		g_warning("GL shader compilation failed: %s", buffer);
+		g_free(buffer);
+
+		glDeleteShader(shader);
+		return 0;
+	}
+	return shader;
+}
+
+static GLuint
+gl_make_program(void)
+{
+	GLuint vertex = gl_make_shader(GL_VERTEX_SHADER, gl_vertex);
+	GLuint fragment = gl_make_shader(GL_FRAGMENT_SHADER, gl_fragment);
+	if (!vertex || !fragment) {
+		glDeleteShader(vertex);
+		glDeleteShader(fragment);
+		return 0;
+	}
+
+	GLuint program = glCreateProgram();
+	glAttachShader(program, vertex);
+	glAttachShader(program, fragment);
+	glLinkProgram(program);
+	glDeleteShader(vertex);
+	glDeleteShader(fragment);
+
+	GLint status = 0;
+	glGetProgramiv(program, GL_LINK_STATUS, &status);
+	if (!status) {
+		GLint len = 0;
+		glGetProgramiv(program, GL_INFO_LOG_LENGTH, &len);
+
+		GLchar *buffer = g_malloc0(len + 1);
+		glGetProgramInfoLog(program, len, NULL, buffer);
+		g_warning("GL program linking failed: %s", buffer);
+		g_free(buffer);
+
+		glDeleteProgram(program);
+		return 0;
+	}
+	return program;
+}
+
+// -----------------------------------------------------------------------------
 
 static void
 on_adjustment_value_changed(
@@ -562,6 +708,9 @@ fiv_view_realize(GtkWidget *widget)
 	GdkWindow *window = gdk_window_new(gtk_widget_get_parent_window(widget),
 		&attributes, GDK_WA_X | GDK_WA_Y | GDK_WA_VISUAL);
 
+	GSettings *settings = g_settings_new(PROJECT_NS PROJECT_NAME);
+	gboolean opengl = g_settings_get_boolean(settings, "opengl");
+
 	// Without the following call, or the rendering mode set to "recording",
 	// RGB30 degrades to RGB24, because gdk_window_begin_paint_internal()
 	// creates backing stores using cairo_content_t constants.
@@ -571,20 +720,268 @@ fiv_view_realize(GtkWidget *widget)
 	// Note that this disables double buffering, and sometimes causes artefacts,
 	// see: https://gitlab.gnome.org/GNOME/gtk/-/issues/2560
 	//
-	// If GTK+'s OpenGL integration fails to deliver, we need to use the window
-	// directly, sidestepping the toolkit entirely.
-	GSettings *settings = g_settings_new(PROJECT_NS PROJECT_NAME);
+	// GTK+'s OpenGL integration is terrible, so we may need to use
+	// the X11 subwindow directly, sidestepping the toolkit entirely.
 	if (GDK_IS_X11_WINDOW(window) &&
 		g_settings_get_boolean(settings, "native-view-window"))
 		gdk_window_ensure_native(window);
-	g_object_unref(settings);
 #endif  // GDK_WINDOWING_X11
+	g_object_unref(settings);
 
 	gtk_widget_register_window(widget, window);
 	gtk_widget_set_window(widget, window);
 	gtk_widget_set_realized(widget, TRUE);
 
 	reload_screen_cms_profile(FIV_VIEW(widget), window);
+
+	FivView *self = FIV_VIEW(widget);
+	g_clear_object(&self->gl_context);
+	if (!opengl)
+		return;
+
+	GError *error = NULL;
+	GdkGLContext *gl_context = gdk_window_create_gl_context(window, &error);
+	if (!gl_context) {
+		g_warning("GL: %s", error->message);
+		g_error_free(error);
+		return;
+	}
+
+	gdk_gl_context_set_use_es(gl_context, FALSE);
+	gdk_gl_context_set_required_version(gl_context, 3, 3);
+	gdk_gl_context_set_debug_enabled(gl_context, TRUE);
+
+	if (!gdk_gl_context_realize(gl_context, &error)) {
+		g_warning("GL: %s", error->message);
+		g_error_free(error);
+		g_object_unref(gl_context);
+		return;
+	}
+
+	self->gl_context = gl_context;
+}
+
+static void GLAPIENTRY
+gl_on_message(G_GNUC_UNUSED GLenum source, GLenum type, G_GNUC_UNUSED GLuint id,
+	G_GNUC_UNUSED GLenum severity, G_GNUC_UNUSED GLsizei length,
+	const GLchar *message, G_GNUC_UNUSED const void *user_data)
+{
+	if (type == GL_DEBUG_TYPE_ERROR)
+		g_warning("GL: error: %s", message);
+	else
+		g_debug("GL: %s", message);
+}
+
+static void
+fiv_view_unrealize(GtkWidget *widget)
+{
+	FivView *self = FIV_VIEW(widget);
+	if (self->gl_context) {
+		if (self->gl_initialized) {
+			gdk_gl_context_make_current(self->gl_context);
+			glDeleteProgram(self->gl_program);
+		}
+		if (self->gl_context == gdk_gl_context_get_current())
+			gdk_gl_context_clear_current();
+
+		g_clear_object(&self->gl_context);
+	}
+
+	GTK_WIDGET_CLASS(fiv_view_parent_class)->unrealize(widget);
+}
+
+static bool
+gl_draw(FivView *self, cairo_t *cr)
+{
+	gdk_gl_context_make_current(self->gl_context);
+
+	if (!self->gl_initialized) {
+		GLuint program = gl_make_program();
+		if (!program)
+			return false;
+
+		glDisable(GL_SCISSOR_TEST);
+		glDisable(GL_STENCIL_TEST);
+		glDisable(GL_DEPTH_TEST);
+		glDisable(GL_CULL_FACE);
+		glDisable(GL_BLEND);
+		if (epoxy_has_gl_extension("GL_ARB_debug_output")) {
+			glEnable(GL_DEBUG_OUTPUT);
+			glDebugMessageCallback(gl_on_message, NULL);
+		}
+
+		self->gl_program = program;
+		self->gl_initialized = true;
+	}
+
+	// This limit is always less than that of Cairo/pixman,
+	// and we'd have to figure out tiling.
+	GLint max = 0;
+	glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max);
+	if (max < (GLint) self->frame->width ||
+		max < (GLint) self->frame->height) {
+		g_warning("OpenGL max. texture size is too small");
+		return false;
+	}
+
+	GtkAllocation allocation;
+	gtk_widget_get_allocation(GTK_WIDGET(self), &allocation);
+	int dw = 0, dh = 0, dx = 0, dy = 0;
+	get_display_dimensions(self, &dw, &dh);
+
+	int clipw = dw, cliph = dh;
+	double x1 = 0., y1 = 0., x2 = 1., y2 = 1.;
+	if (self->hadjustment)
+		x1 = floor(gtk_adjustment_get_value(self->hadjustment)) / dw;
+	if (self->vadjustment)
+		y1 = floor(gtk_adjustment_get_value(self->vadjustment)) / dh;
+
+	if (dw <= allocation.width) {
+		dx = round((allocation.width - dw) / 2.);
+	} else {
+		x2 = x1 + (double) allocation.width / dw;
+		clipw = allocation.width;
+	}
+
+	if (dh <= allocation.height) {
+		dy = round((allocation.height - dh) / 2.);
+	} else {
+		y2 = y1 + (double) allocation.height / dh;
+		cliph = allocation.height;
+	}
+
+	enum { SRC, DEST };
+	GLuint textures[2] = {};
+	glGenTextures(2, textures);
+
+	// https://stackoverflow.com/questions/25157306 0..1
+	// GL_TEXTURE_RECTANGLE seems kind-of useful
+	glBindTexture(GL_TEXTURE_2D, textures[SRC]);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	if (self->filter) {
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	} else {
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	}
+
+	// GL_UNPACK_ALIGNMENT is initially 4, which is fine for these.
+	// Texture swizzling is OpenGL 3.3.
+	if (self->frame->format == CAIRO_FORMAT_ARGB32) {
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
+			self->frame->width, self->frame->height,
+			0, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, self->frame->data);
+	} else if (self->frame->format == CAIRO_FORMAT_RGB24) {
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, GL_ONE);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
+			self->frame->width, self->frame->height,
+			0, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, self->frame->data);
+	} else if (self->frame->format == CAIRO_FORMAT_RGB30) {
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, GL_ONE);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
+			self->frame->width, self->frame->height,
+			0, GL_BGRA, GL_UNSIGNED_INT_2_10_10_10_REV, self->frame->data);
+	} else {
+		g_warning("GL: unsupported bitmap format");
+	}
+
+	// GtkGLArea creates textures like this.
+	glBindTexture(GL_TEXTURE_2D, textures[DEST]);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, clipw, cliph, 0, GL_BGRA,
+		GL_UNSIGNED_BYTE, NULL);
+
+	glViewport(0, 0, clipw, cliph);
+
+	GLuint vao = 0;
+	glGenVertexArrays(1, &vao);
+
+	GLuint frame_buffer = 0;
+	glGenFramebuffers(1, &frame_buffer);
+	glBindFramebuffer(GL_FRAMEBUFFER, frame_buffer);
+	glFramebufferTexture2D(
+		GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, textures[DEST], 0);
+
+	glClearColor(0., 0., 0., 1.);
+	glClear(GL_COLOR_BUFFER_BIT);
+
+	GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+	if (status != GL_FRAMEBUFFER_COMPLETE)
+		g_warning("GL framebuffer status: %u", status);
+
+	glUseProgram(self->gl_program);
+	GLint position_location = glGetAttribLocation(
+		self->gl_program, "position");
+	GLint picture_location = glGetUniformLocation(
+		self->gl_program, "picture");
+	GLint checkerboard_location = glGetUniformLocation(
+		self->gl_program, "checkerboard");
+
+	glUniform1i(picture_location, 0);
+	glUniform1i(checkerboard_location, self->checkerboard);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, textures[SRC]);
+
+	// Note that the Y axis is flipped in the table.
+	double vertices[][4] = {
+		{-1., -1., x1, y2},
+		{+1., -1., x2, y2},
+		{+1., +1., x2, y1},
+		{-1., +1., x1, y1},
+	};
+
+	cairo_matrix_t matrix = fiv_io_orientation_matrix(self->orientation, 1, 1);
+	cairo_matrix_transform_point(&matrix, &vertices[0][2], &vertices[0][3]);
+	cairo_matrix_transform_point(&matrix, &vertices[1][2], &vertices[1][3]);
+	cairo_matrix_transform_point(&matrix, &vertices[2][2], &vertices[2][3]);
+	cairo_matrix_transform_point(&matrix, &vertices[3][2], &vertices[3][3]);
+
+	GLuint vertex_buffer = 0;
+	glGenBuffers(1, &vertex_buffer);
+	glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer);
+	glBufferData(GL_ARRAY_BUFFER, sizeof vertices, vertices, GL_STATIC_DRAW);
+	glBindVertexArray(vao);
+	glVertexAttribPointer(position_location,
+		G_N_ELEMENTS(vertices[0]), GL_DOUBLE, GL_FALSE, sizeof vertices[0], 0);
+	glEnableVertexAttribArray(position_location);
+	glDrawArrays(GL_TRIANGLE_FAN, 0, G_N_ELEMENTS(vertices));
+	glDisableVertexAttribArray(position_location);
+	glBindVertexArray(0);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	glUseProgram(0);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+	// XXX: Native GdkWindows send this to the software fallback path.
+	// XXX: This only reliably alpha blends when using the software fallback,
+	// such as with a native window, because 7237f5d in GTK+ 3 is a regression.
+	// We had to resort to rendering the checkerboard pattern in the shader.
+	// Unfortunately, it is hard to retrieve the theme colours from CSS.
+	GdkWindow *window = gtk_widget_get_window(GTK_WIDGET(self));
+	cairo_translate(cr, dx, dy);
+	gdk_cairo_draw_from_gl(
+		cr, window, textures[DEST], GL_TEXTURE, 1, 0, 0, clipw, cliph);
+	gdk_gl_context_make_current(self->gl_context);
+
+	glDeleteBuffers(1, &vertex_buffer);
+	glDeleteTextures(2, textures);
+	glDeleteVertexArrays(1, &vao);
+	glDeleteFramebuffers(1, &frame_buffer);
+
+	// TODO(p): Possibly use this clue as a hint to use Cairo rendering.
+	GLenum err = 0;
+	while ((err = glGetError()) != GL_NO_ERROR) {
+		const char *string = gl_error_string(err);
+		if (string)
+			g_warning("GL: error: %s", string);
+		else
+			g_warning("GL: error: %u", err);
+	}
+
+	gdk_gl_context_clear_current();
+	return true;
 }
 
 static gboolean
@@ -601,8 +998,10 @@ fiv_view_draw(GtkWidget *widget, cairo_t *cr)
 	if (!self->image ||
 		!gtk_cairo_should_draw_window(cr, gtk_widget_get_window(widget)))
 		return TRUE;
+	if (self->gl_context && gl_draw(self, cr))
+		return TRUE;
 
-	int dw, dh;
+	int dw = 0, dh = 0;
 	get_display_dimensions(self, &dw, &dh);
 
 	double x = 0;
@@ -1296,6 +1695,7 @@ fiv_view_class_init(FivViewClass *klass)
 	widget_class->map = fiv_view_map;
 	widget_class->unmap = fiv_view_unmap;
 	widget_class->realize = fiv_view_realize;
+	widget_class->unrealize = fiv_view_unrealize;
 	widget_class->draw = fiv_view_draw;
 	widget_class->button_press_event = fiv_view_button_press_event;
 	widget_class->scroll_event = fiv_view_scroll_event;

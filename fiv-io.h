@@ -185,6 +185,8 @@ FivIoImage *fiv_io_open_png_thumbnail(const char *path, GError **error);
 /// and its target dimensions.
 cairo_matrix_t fiv_io_orientation_apply(const FivIoImage *image,
 	FivIoOrientation orientation, double *width, double *height);
+cairo_matrix_t fiv_io_orientation_matrix(
+	FivIoOrientation orientation, double width, double height);
 void fiv_io_orientation_dimensions(const FivIoImage *image,
 	FivIoOrientation orientation, double *width, double *height);
 
