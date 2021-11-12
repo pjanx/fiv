@@ -12,6 +12,7 @@ dependencies = [
 	dependency('pixman-1'),
 	libraw,
 	librsvg,
+	gdkpixbuf,
 	meson.get_compiler('c').find_library('m', required : false),
 ]
 
