@@ -7,7 +7,8 @@ gdkpixbuf = dependency('gdk-pixbuf-2.0', required : get_option('gdk-pixbuf'))
 dependencies = [
 	dependency('gtk+-3.0'),
 	dependency('libturbojpeg'),
-	dependency('spng', version : '>=0.7.0'),
+	dependency('spng', version : '>=0.7.0',
+		default_options: 'default_library=static'),
 	dependency('pixman-1'),
 	libraw,
 	librsvg,
