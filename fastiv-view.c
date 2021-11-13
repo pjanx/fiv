@@ -16,6 +16,7 @@
 //
 
 #include <math.h>
+#include <stdbool.h>
 
 #include "fastiv-io.h"
 #include "fastiv-view.h"
@@ -23,14 +24,14 @@
 struct _FastivView {
 	GtkWidget parent_instance;
 	cairo_surface_t *surface;
-	// TODO(p): Zoom-to-fit indication.
+	bool scale_to_fit;
 	double scale;
 };
 
 G_DEFINE_TYPE(FastivView, fastiv_view, GTK_TYPE_WIDGET)
 
 static void
-get_display_dimensions(FastivView *self, int *width, int *height)
+get_surface_dimensions(FastivView *self, double *width, double *height)
 {
 	*width = *height = 0;
 	if (!self->surface)
@@ -39,18 +40,27 @@ get_display_dimensions(FastivView *self, int *width, int *height)
 	cairo_rectangle_t extents = {};
 	switch (cairo_surface_get_type(self->surface)) {
 	case CAIRO_SURFACE_TYPE_IMAGE:
-		extents.width = cairo_image_surface_get_width(self->surface);
-		extents.height = cairo_image_surface_get_height(self->surface);
-		break;
+		*width = cairo_image_surface_get_width(self->surface);
+		*height = cairo_image_surface_get_height(self->surface);
+		return;
 	case CAIRO_SURFACE_TYPE_RECORDING:
 		(void) cairo_recording_surface_get_extents(self->surface, &extents);
-		break;
+		*width = extents.width;
+		*height = extents.height;
+		return;
 	default:
 		g_assert_not_reached();
 	}
+}
 
-	*width = ceil(extents.width * self->scale);
-	*height = ceil(extents.height * self->scale);
+static void
+get_display_dimensions(FastivView *self, int *width, int *height)
+{
+	double w, h;
+	get_surface_dimensions(self, &w, &h);
+
+	*width = ceil(w * self->scale);
+	*height = ceil(h * self->scale);
 }
 
 static void
@@ -66,17 +76,53 @@ static void
 fastiv_view_get_preferred_height(
 	GtkWidget *widget, gint *minimum, gint *natural)
 {
-	int width, height;
-	get_display_dimensions(FASTIV_VIEW(widget), &width, &height);
-	*minimum = *natural = height;
+	FastivView *self = FASTIV_VIEW(widget);
+	if (self->scale_to_fit) {
+		double sw, sh;
+		get_surface_dimensions(self, &sw, &sh);
+		*natural = ceil(sh);
+		*minimum = 1;
+	} else {
+		int dw, dh;
+		get_display_dimensions(self, &dw, &dh);
+		*minimum = *natural = dh;
+	}
 }
 
 static void
 fastiv_view_get_preferred_width(GtkWidget *widget, gint *minimum, gint *natural)
 {
-	int width, height;
-	get_display_dimensions(FASTIV_VIEW(widget), &width, &height);
-	*minimum = *natural = width;
+	FastivView *self = FASTIV_VIEW(widget);
+	if (self->scale_to_fit) {
+		double sw, sh;
+		get_surface_dimensions(self, &sw, &sh);
+		*natural = ceil(sw);
+		*minimum = 1;
+	} else {
+		int dw, dh;
+		get_display_dimensions(self, &dw, &dh);
+		*minimum = *natural = dw;
+	}
+}
+
+static void
+fastiv_view_size_allocate(GtkWidget *widget, GtkAllocation *allocation)
+{
+	GTK_WIDGET_CLASS(fastiv_view_parent_class)
+		->size_allocate(widget, allocation);
+
+	FastivView *self = FASTIV_VIEW(widget);
+	if (!self->surface || !self->scale_to_fit)
+		return;
+
+	double w, h;
+	get_surface_dimensions(self, &w, &h);
+
+	self->scale = 1;
+	if (ceil(w * self->scale) > allocation->width)
+		self->scale = allocation->width / w;
+	if (ceil(h * self->scale) > allocation->height)
+		self->scale = allocation->height / h;
 }
 
 static void
@@ -172,6 +218,14 @@ fastiv_view_draw(GtkWidget *widget, cairo_t *cr)
 #define SCALE_STEP 1.4
 
 static gboolean
+on_scale_updated(FastivView *self)
+{
+	self->scale_to_fit = false;
+	gtk_widget_queue_resize(GTK_WIDGET(self));
+	return TRUE;
+}
+
+static gboolean
 fastiv_view_scroll_event(GtkWidget *widget, GdkEventScroll *event)
 {
 	FastivView *self = FASTIV_VIEW(widget);
@@ -181,12 +235,10 @@ fastiv_view_scroll_event(GtkWidget *widget, GdkEventScroll *event)
 	switch (event->direction) {
 	case GDK_SCROLL_UP:
 		self->scale *= SCALE_STEP;
-		gtk_widget_queue_resize(widget);
-		return TRUE;
+		return on_scale_updated(self);
 	case GDK_SCROLL_DOWN:
 		self->scale /= SCALE_STEP;
-		gtk_widget_queue_resize(widget);
-		return TRUE;
+		return on_scale_updated(self);
 	default:
 		return FALSE;
 	}
@@ -202,16 +254,16 @@ fastiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 	switch (event->keyval) {
 	case GDK_KEY_1:
 		self->scale = 1;
-		gtk_widget_queue_resize(widget);
-		return TRUE;
+		return on_scale_updated(self);
 	case GDK_KEY_plus:
 		self->scale *= SCALE_STEP;
-		gtk_widget_queue_resize(widget);
-		return TRUE;
+		return on_scale_updated(self);
 	case GDK_KEY_minus:
 		self->scale /= SCALE_STEP;
-		gtk_widget_queue_resize(widget);
-		return TRUE;
+		return on_scale_updated(self);
+	case GDK_KEY_f:
+		self->scale_to_fit = !self->scale_to_fit;
+		gtk_widget_queue_resize(GTK_WIDGET(self));
 	}
 	return FALSE;
 }
@@ -225,6 +277,7 @@ fastiv_view_class_init(FastivViewClass *klass)
 	GtkWidgetClass *widget_class = GTK_WIDGET_CLASS(klass);
 	widget_class->get_preferred_height = fastiv_view_get_preferred_height;
 	widget_class->get_preferred_width = fastiv_view_get_preferred_width;
+	widget_class->size_allocate = fastiv_view_size_allocate;
 	widget_class->realize = fastiv_view_realize;
 	widget_class->draw = fastiv_view_draw;
 	widget_class->scroll_event = fastiv_view_scroll_event;
@@ -257,6 +310,7 @@ fastiv_view_open(FastivView *self, const gchar *path, GError **error)
 
 	self->surface = surface;
 	self->scale = 1.0;
+	self->scale_to_fit = true;
 	gtk_widget_queue_resize(GTK_WIDGET(self));
 	return TRUE;
 }
