@@ -32,10 +32,10 @@ executable('fastiv', 'fastiv.c', 'fastiv-view.c', 'fastiv-io.c',
 	install : true,
 	dependencies : [dependencies])
 
-if gdk_pixbuf.found()
+if gdkpixbuf.found()
 	executable('io-benchmark', 'fastiv-io-benchmark.c', 'fastiv-io.c', 'xdg.c',
 		build_by_default : false,
-		dependencies : [dependencies, gdk_pixbuf])
+		dependencies : [dependencies, gdkpixbuf])
 endif
 
 install_data('fastiv.desktop',

@@ -335,7 +335,7 @@ fastiv_browser_realize(GtkWidget *widget)
 
 		.visual = gtk_widget_get_visual(widget),
 		.event_mask = gtk_widget_get_events(widget) | GDK_KEY_PRESS_MASK |
-			GDK_BUTTON_PRESS_MASK,
+			GDK_POINTER_MOTION_MASK | GDK_BUTTON_PRESS_MASK,
 	};
 
 	// We need this window to receive input events at all.
@@ -398,6 +398,26 @@ fastiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 		return FALSE;
 
 	g_signal_emit(widget, browser_signals[ITEM_ACTIVATED], 0, entry->filename);
+	return TRUE;
+}
+
+gboolean
+fastiv_browser_motion_notify_event(GtkWidget *widget, GdkEventMotion *event)
+{
+	FastivBrowser *self = FASTIV_BROWSER(widget);
+	if (event->state != 0)
+		return FALSE;
+
+	const Entry *entry = entry_at(self, event->x, event->y);
+	GdkWindow *window = gtk_widget_get_window(widget);
+	if (entry) {
+		GdkCursor *cursor =
+			gdk_cursor_new_from_name(gdk_window_get_display(window), "pointer");
+		gdk_window_set_cursor(window, cursor);
+		g_object_unref(cursor);
+	} else {
+		gdk_window_set_cursor(window, NULL);
+	}
 	return TRUE;
 }
 
@@ -476,6 +496,7 @@ fastiv_browser_class_init(FastivBrowserClass *klass)
 	widget_class->draw = fastiv_browser_draw;
 	widget_class->size_allocate = fastiv_browser_size_allocate;
 	widget_class->button_press_event = fastiv_browser_button_press_event;
+	widget_class->motion_notify_event = fastiv_browser_motion_notify_event;
 	widget_class->style_updated = fastiv_browser_style_updated;
 
 	browser_signals[ITEM_ACTIVATED] =
