@@ -32,8 +32,6 @@ executable('fastiv', 'fastiv.c', 'fastiv-view.c', 'fastiv-io.c',
 	install : true,
 	dependencies : [dependencies])
 
-# TODO(p): See fastiv_io_open(), consider optionally integrating this.
-gdk_pixbuf = dependency('gdk-pixbuf-2.0', required : false)
 if gdk_pixbuf.found()
 	executable('io-benchmark', 'fastiv-io-benchmark.c', 'fastiv-io.c', 'xdg.c',
 		build_by_default : false,

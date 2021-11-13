@@ -44,6 +44,9 @@
 #define WUFFS_CONFIG__MODULE__ZLIB
 #include "wuffs-mirror-release-c/release/c/wuffs-v0.3.c"
 
+#include <glib/gstdio.h>
+#include <spng.h>
+
 #include "xdg.h"
 #include "fastiv-io.h"
 
@@ -592,18 +595,12 @@ fastiv_io_open_from_data(const char *data, size_t len, const gchar *path,
 		}
 #endif  // HAVE_GDKPIXBUF ------------------------------------------------------
 
-		// TODO(p): Integrate gdk-pixbuf as a fallback (optional dependency).
 		set_error(error, "unsupported file type");
 	}
 	return surface;
 }
 
 // --- Thumbnails --------------------------------------------------------------
-
-// NOTE: "It is important to note that when an image with an alpha channel is
-// scaled, linear encoded, pre-multiplied component values must be used!"
-#include <glib/gstdio.h>
-#include <spng.h>
 
 static int  // tri-state
 check_spng_thumbnail_texts(struct spng_text *texts, uint32_t texts_len,

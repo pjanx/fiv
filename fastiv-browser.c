@@ -501,6 +501,8 @@ fastiv_browser_init(FastivBrowser *self)
 	self->glow = cairo_image_surface_create(CAIRO_FORMAT_A1, 0, 0);
 }
 
+// NOTE: "It is important to note that when an image with an alpha channel is
+// scaled, linear encoded, pre-multiplied component values must be used!"
 static cairo_surface_t *
 rescale_thumbnail(cairo_surface_t *thumbnail)
 {
