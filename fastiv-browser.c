@@ -45,6 +45,7 @@ struct _FastivBrowser {
 	GArray *layouted_rows;              ///< [Row]
 	int selected;
 
+	GdkCursor *pointer;                 ///< Cached pointer cursor
 	cairo_surface_t *glow;              ///< CAIRO_FORMAT_A8 mask
 	int item_border_x;                  ///< L/R .item margin + border
 	int item_border_y;                  ///< T/B .item margin + border
@@ -285,6 +286,7 @@ fastiv_browser_finalize(GObject *gobject)
 	g_array_free(self->entries, TRUE);
 	g_array_free(self->layouted_rows, TRUE);
 	cairo_surface_destroy(self->glow);
+	g_clear_object(&self->pointer);
 
 	G_OBJECT_CLASS(fastiv_browser_parent_class)->finalize(gobject);
 }
@@ -345,6 +347,11 @@ fastiv_browser_realize(GtkWidget *widget)
 	gtk_widget_register_window(widget, window);
 	gtk_widget_set_window(widget, window);
 	gtk_widget_set_realized(widget, TRUE);
+
+	FastivBrowser *self = FASTIV_BROWSER(widget);
+	g_clear_object(&self->pointer);
+	self->pointer =
+		gdk_cursor_new_from_name(gdk_window_get_display(window), "pointer");
 }
 
 static void
@@ -410,14 +417,7 @@ fastiv_browser_motion_notify_event(GtkWidget *widget, GdkEventMotion *event)
 
 	const Entry *entry = entry_at(self, event->x, event->y);
 	GdkWindow *window = gtk_widget_get_window(widget);
-	if (entry) {
-		GdkCursor *cursor =
-			gdk_cursor_new_from_name(gdk_window_get_display(window), "pointer");
-		gdk_window_set_cursor(window, cursor);
-		g_object_unref(cursor);
-	} else {
-		gdk_window_set_cursor(window, NULL);
-	}
+	gdk_window_set_cursor(window, entry ? self->pointer : NULL);
 	return TRUE;
 }
 
