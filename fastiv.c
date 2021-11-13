@@ -280,6 +280,26 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 			on_open();
 			return TRUE;
 
+		case GDK_KEY_Tab:
+		case GDK_KEY_Return:
+			gtk_stack_set_visible_child(GTK_STACK(g.stack),
+				gtk_stack_get_visible_child(GTK_STACK(g.stack)) ==
+						g.view_scroller
+					? g.browser_scroller
+					: g.view_scroller);
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
+static gboolean
+on_key_press_view(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
+	G_GNUC_UNUSED gpointer data)
+{
+	switch (event->state & gtk_accelerator_get_default_mod_mask()) {
+	case 0:
+		switch (event->keyval) {
 		case GDK_KEY_Left:
 		case GDK_KEY_Up:
 		case GDK_KEY_Page_Up:
@@ -291,15 +311,6 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 		case GDK_KEY_Page_Down:
 		case GDK_KEY_space:
 			on_next();
-			return TRUE;
-
-		case GDK_KEY_Tab:
-		case GDK_KEY_Return:
-			gtk_stack_set_visible_child(GTK_STACK(g.stack),
-				gtk_stack_get_visible_child(GTK_STACK(g.stack)) ==
-						g.view_scroller
-					? g.browser_scroller
-					: g.view_scroller);
 			return TRUE;
 		}
 	}
@@ -364,6 +375,8 @@ main(int argc, char *argv[])
 	g.view = g_object_new(FASTIV_TYPE_VIEW, NULL);
 	gtk_widget_set_vexpand(g.view, TRUE);
 	gtk_widget_set_hexpand(g.view, TRUE);
+	g_signal_connect(g.view, "key-press-event",
+		G_CALLBACK(on_key_press_view), NULL);
 	gtk_container_add(GTK_CONTAINER(g.view_scroller), g.view);
 	gtk_widget_show_all(g.view_scroller);
 
