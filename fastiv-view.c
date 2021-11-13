@@ -100,7 +100,7 @@ fastiv_view_realize(GtkWidget *widget)
 		// than what we get automatically.
 		.visual = gtk_widget_get_visual(widget),
 		.event_mask = gtk_widget_get_events(widget) | GDK_SCROLL_MASK |
-			GDK_KEY_PRESS_MASK,
+			GDK_KEY_PRESS_MASK | GDK_BUTTON_PRESS_MASK,
 	};
 
 	// We need this window to receive input events at all.

@@ -317,6 +317,17 @@ on_key_press_view(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 	return FALSE;
 }
 
+static gboolean
+on_button_press_view(G_GNUC_UNUSED GtkWidget *widget, GdkEventButton *event)
+{
+	if (!(event->state & gtk_accelerator_get_default_mod_mask()) &&
+		event->button == 8 /* back */) {
+		gtk_stack_set_visible_child(GTK_STACK(g.stack), g.browser_scroller);
+		return TRUE;
+	}
+	return FALSE;
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -377,6 +388,8 @@ main(int argc, char *argv[])
 	gtk_widget_set_hexpand(g.view, TRUE);
 	g_signal_connect(g.view, "key-press-event",
 		G_CALLBACK(on_key_press_view), NULL);
+	g_signal_connect(g.view, "button-press-event",
+		G_CALLBACK(on_button_press_view), NULL);
 	gtk_container_add(GTK_CONTAINER(g.view_scroller), g.view);
 	gtk_widget_show_all(g.view_scroller);
 
