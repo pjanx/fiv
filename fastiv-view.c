@@ -169,6 +169,8 @@ fastiv_view_draw(GtkWidget *widget, cairo_t *cr)
 	return TRUE;
 }
 
+#define SCALE_STEP 1.4
+
 static gboolean
 fastiv_view_scroll_event(GtkWidget *widget, GdkEventScroll *event)
 {
@@ -178,11 +180,11 @@ fastiv_view_scroll_event(GtkWidget *widget, GdkEventScroll *event)
 
 	switch (event->direction) {
 	case GDK_SCROLL_UP:
-		self->scale *= 1.4;
+		self->scale *= SCALE_STEP;
 		gtk_widget_queue_resize(widget);
 		return TRUE;
 	case GDK_SCROLL_DOWN:
-		self->scale /= 1.4;
+		self->scale /= SCALE_STEP;
 		gtk_widget_queue_resize(widget);
 		return TRUE;
 	default:
@@ -200,6 +202,14 @@ fastiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 	switch (event->keyval) {
 	case GDK_KEY_1:
 		self->scale = 1;
+		gtk_widget_queue_resize(widget);
+		return TRUE;
+	case GDK_KEY_plus:
+		self->scale *= SCALE_STEP;
+		gtk_widget_queue_resize(widget);
+		return TRUE;
+	case GDK_KEY_minus:
+		self->scale /= SCALE_STEP;
 		gtk_widget_queue_resize(widget);
 		return TRUE;
 	}
