@@ -312,7 +312,7 @@ fastiv_view_class_init(FastivViewClass *klass)
 		"scale", "Scale", "Zoom level",
 		0, G_MAXDOUBLE, 1.0, G_PARAM_READABLE);
 	view_properties[PROP_SCALE_TO_FIT] = g_param_spec_boolean(
-		"scale-to-fit", "Scale to fit", "Scale images doewn to fit the window",
+		"scale-to-fit", "Scale to fit", "Scale images down to fit the window",
 		TRUE, G_PARAM_READABLE);
 	g_object_class_install_properties(
 		object_class, N_PROPERTIES, view_properties);
