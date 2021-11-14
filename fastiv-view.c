@@ -30,6 +30,40 @@ struct _FastivView {
 
 G_DEFINE_TYPE(FastivView, fastiv_view, GTK_TYPE_WIDGET)
 
+enum {
+	PROP_SCALE = 1,
+	PROP_SCALE_TO_FIT,
+	N_PROPERTIES
+};
+
+static GParamSpec *view_properties[N_PROPERTIES];
+
+static void
+fastiv_view_finalize(GObject *gobject)
+{
+	FastivView *self = FASTIV_VIEW(gobject);
+	cairo_surface_destroy(self->surface);
+
+	G_OBJECT_CLASS(fastiv_view_parent_class)->finalize(gobject);
+}
+
+static void
+fastiv_view_get_property(
+	GObject *object, guint property_id, GValue *value, GParamSpec *pspec)
+{
+	FastivView *self = FASTIV_VIEW(object);
+	switch (property_id) {
+	case PROP_SCALE:
+		g_value_set_double(value, self->scale);
+		break;
+	case PROP_SCALE_TO_FIT:
+		g_value_set_boolean(value, self->scale_to_fit);
+		break;
+	default:
+		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
+	}
+}
+
 static void
 get_surface_dimensions(FastivView *self, double *width, double *height)
 {
@@ -61,15 +95,6 @@ get_display_dimensions(FastivView *self, int *width, int *height)
 
 	*width = ceil(w * self->scale);
 	*height = ceil(h * self->scale);
-}
-
-static void
-fastiv_view_finalize(GObject *gobject)
-{
-	FastivView *self = FASTIV_VIEW(gobject);
-	cairo_surface_destroy(self->surface);
-
-	G_OBJECT_CLASS(fastiv_view_parent_class)->finalize(gobject);
 }
 
 static void
@@ -123,6 +148,7 @@ fastiv_view_size_allocate(GtkWidget *widget, GtkAllocation *allocation)
 		self->scale = allocation->width / w;
 	if (ceil(h * self->scale) > allocation->height)
 		self->scale = allocation->height / h;
+	g_object_notify_by_pspec(G_OBJECT(widget), view_properties[PROP_SCALE]);
 }
 
 static void
@@ -218,11 +244,23 @@ fastiv_view_draw(GtkWidget *widget, cairo_t *cr)
 #define SCALE_STEP 1.4
 
 static gboolean
-on_scale_updated(FastivView *self)
+set_scale_to_fit(FastivView *self, bool scale_to_fit)
 {
-	self->scale_to_fit = false;
+	self->scale_to_fit = scale_to_fit;
+
 	gtk_widget_queue_resize(GTK_WIDGET(self));
+	g_object_notify_by_pspec(
+		G_OBJECT(self), view_properties[PROP_SCALE_TO_FIT]);
 	return TRUE;
+}
+
+static gboolean
+set_scale(FastivView *self, double scale)
+{
+	self->scale = scale;
+	g_object_notify_by_pspec(
+		G_OBJECT(self), view_properties[PROP_SCALE]);
+	return set_scale_to_fit(self, false);
 }
 
 static gboolean
@@ -234,11 +272,9 @@ fastiv_view_scroll_event(GtkWidget *widget, GdkEventScroll *event)
 
 	switch (event->direction) {
 	case GDK_SCROLL_UP:
-		self->scale *= SCALE_STEP;
-		return on_scale_updated(self);
+		return set_scale(self, self->scale * SCALE_STEP);
 	case GDK_SCROLL_DOWN:
-		self->scale /= SCALE_STEP;
-		return on_scale_updated(self);
+		return set_scale(self, self->scale / SCALE_STEP);
 	default:
 		return FALSE;
 	}
@@ -253,17 +289,14 @@ fastiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 
 	switch (event->keyval) {
 	case GDK_KEY_1:
-		self->scale = 1;
-		return on_scale_updated(self);
+		return set_scale(self, 1.0);
 	case GDK_KEY_plus:
 		self->scale *= SCALE_STEP;
-		return on_scale_updated(self);
+		return set_scale(self, self->scale * SCALE_STEP);
 	case GDK_KEY_minus:
-		self->scale /= SCALE_STEP;
-		return on_scale_updated(self);
+		return set_scale(self, self->scale / SCALE_STEP);
 	case GDK_KEY_f:
-		self->scale_to_fit = !self->scale_to_fit;
-		gtk_widget_queue_resize(GTK_WIDGET(self));
+		return set_scale_to_fit(self, !self->scale_to_fit);
 	}
 	return FALSE;
 }
@@ -273,6 +306,16 @@ fastiv_view_class_init(FastivViewClass *klass)
 {
 	GObjectClass *object_class = G_OBJECT_CLASS(klass);
 	object_class->finalize = fastiv_view_finalize;
+	object_class->get_property = fastiv_view_get_property;
+
+	view_properties[PROP_SCALE] = g_param_spec_double(
+		"scale", "Scale", "Zoom level",
+		0, G_MAXDOUBLE, 1.0, G_PARAM_READABLE);
+	view_properties[PROP_SCALE_TO_FIT] = g_param_spec_boolean(
+		"scale-to-fit", "Scale to fit", "Scale images doewn to fit the window",
+		TRUE, G_PARAM_READABLE);
+	g_object_class_install_properties(
+		object_class, N_PROPERTIES, view_properties);
 
 	GtkWidgetClass *widget_class = GTK_WIDGET_CLASS(klass);
 	widget_class->get_preferred_height = fastiv_view_get_preferred_height;
@@ -309,8 +352,6 @@ fastiv_view_open(FastivView *self, const gchar *path, GError **error)
 		cairo_surface_destroy(self->surface);
 
 	self->surface = surface;
-	self->scale = 1.0;
-	self->scale_to_fit = true;
-	gtk_widget_queue_resize(GTK_WIDGET(self));
+	set_scale_to_fit(self, true);
 	return TRUE;
 }
