@@ -269,6 +269,8 @@ fastiv_view_scroll_event(GtkWidget *widget, GdkEventScroll *event)
 	FastivView *self = FASTIV_VIEW(widget);
 	if (!self->surface)
 		return FALSE;
+	if (event->state & gtk_accelerator_get_default_mod_mask())
+		return FALSE;
 
 	switch (event->direction) {
 	case GDK_SCROLL_UP:
