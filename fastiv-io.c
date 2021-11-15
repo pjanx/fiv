@@ -50,6 +50,10 @@
 #include "xdg.h"
 #include "fastiv-io.h"
 
+#if CAIRO_VERSION >= 11702 && X11_ACTUALLY_SUPPORTS_RGBA128F_OR_WE_USE_OPENGL
+#define FASTIV_CAIRO_RGBA128F
+#endif
+
 // A subset of shared-mime-info that produces an appropriate list of
 // file extensions. Chiefly motivated by the suckiness of RAW images:
 // someone else will maintain the list of file extensions for us.
@@ -112,27 +116,52 @@ open_wuffs(
 		return NULL;
 	}
 
+	// Wuffs maps tRNS to BGRA in `decoder.decode_trns?`, we should be fine.
+	// wuffs_base__pixel_format__transparency() doesn't reflect the image file.
+	bool opaque = wuffs_base__image_config__first_frame_is_opaque(&cfg);
+
+	// Wuffs' API is kind of awful--we want to catch deep RGB and deep grey.
+	wuffs_base__pixel_format srcfmt =
+		wuffs_base__pixel_config__pixel_format(&cfg.pixcfg);
+	uint32_t bpp = wuffs_base__pixel_format__bits_per_pixel(&srcfmt);
+
+	// Cairo doesn't support transparency with RGB30, so no premultiplication.
+	bool pack_16_10 = opaque && (bpp > 24 || (bpp < 24 && bpp > 8));
+#ifdef FASTIV_CAIRO_RGBA128F
+	bool expand_16_float = !opaque && (bpp > 24 || (bpp < 24 && bpp > 8));
+#endif  // FASTIV_CAIRO_RGBA128F
+
+	// In Wuffs, /doc/note/pixel-formats.md declares "memory order", which,
+	// for our purposes, means big endian, and BGRA results in 32-bit ARGB
+	// on most machines.
+	//
+	// XXX: WUFFS_BASE__PIXEL_FORMAT__ARGB_PREMUL is not expressible, only RGBA.
+	// Wuffs doesn't support big-endian architectures at all, we might want to
+	// fall back to spng in such cases, or do a second conversion.
+	uint32_t wuffs_format = WUFFS_BASE__PIXEL_FORMAT__BGRA_PREMUL;
+
 	// CAIRO_FORMAT_ARGB32: "The 32-bit quantities are stored native-endian.
-	//   Pre-multiplied alpha is used."
-	// CAIRO_FORMAT_RGB{24,30}: analogous, not going to use these so far.
-	//
-	// Wuffs: /doc/note/pixel-formats.md specifies it as "memory order", which,
-	// for our purposes, means big endian.  Currently useful formats, as per
-	// support within wuffs_base__pixel_swizzler__prepare__*():
-	//  - WUFFS_BASE__PIXEL_FORMAT__ARGB_PREMUL: big-endian
-	//  - WUFFS_BASE__PIXEL_FORMAT__BGRA_PREMUL: little-endian
-	//  - WUFFS_BASE__PIXEL_FORMAT__XRGB: big-endian
-	//  - WUFFS_BASE__PIXEL_FORMAT__BGRX: little-endian
-	//
-	// TODO(p): Make Wuffs support RGB30 as a destination format,
-	// so far we only have WUFFS_BASE__PIXEL_FORMAT__BGRA_NONPREMUL_4X16LE
-	// and in general, 16-bit depth swizzlers are stubbed.
-	wuffs_base__pixel_config__set(&cfg.pixcfg,
-#if G_BYTE_ORDER == G_LITTLE_ENDIAN
-		WUFFS_BASE__PIXEL_FORMAT__BGRA_PREMUL,
-#else
-		WUFFS_BASE__PIXEL_FORMAT__ARGB_PREMUL,
-#endif
+	// Pre-multiplied alpha is used." CAIRO_FORMAT_RGB{24,30} are analogous.
+	cairo_format_t cairo_format = CAIRO_FORMAT_ARGB32;
+
+#ifdef FASTIV_CAIRO_RGBA128F
+	if (expand_16_float) {
+		wuffs_format = WUFFS_BASE__PIXEL_FORMAT__BGRA_NONPREMUL_4X16LE;
+		cairo_format = CAIRO_FORMAT_RGBA128F;
+	} else
+#endif  // FASTIV_CAIRO_RGBA128F
+	if (pack_16_10) {
+		// TODO(p): Make Wuffs support RGB30 as a destination format;
+		// in general, 16-bit depth swizzlers are stubbed.
+		// See also wuffs_base__pixel_swizzler__prepare__*().
+		wuffs_format = WUFFS_BASE__PIXEL_FORMAT__BGRA_NONPREMUL_4X16LE;
+		cairo_format = CAIRO_FORMAT_RGB30;
+	} else if (opaque) {
+		wuffs_format = WUFFS_BASE__PIXEL_FORMAT__BGRX;
+		cairo_format = CAIRO_FORMAT_RGB24;
+	}
+
+	wuffs_base__pixel_config__set(&cfg.pixcfg, wuffs_format,
 		WUFFS_BASE__PIXEL_SUBSAMPLING__NONE, width, height);
 
 	wuffs_base__slice_u8 workbuf = {0};
@@ -146,29 +175,42 @@ open_wuffs(
 		}
 	}
 
-	cairo_surface_t *surface =
-		cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
+	unsigned char *targetbuf = NULL;
+	cairo_surface_t *result = NULL, *surface =
+		cairo_image_surface_create(cairo_format, width, height);
 	cairo_status_t surface_status = cairo_surface_status(surface);
 	if (surface_status != CAIRO_STATUS_SUCCESS) {
 		set_error(error, cairo_status_to_string(surface_status));
-		cairo_surface_destroy(surface);
-		free(workbuf.ptr);
-		return NULL;
+		goto fail;
 	}
 
 	// CAIRO_STRIDE_ALIGNMENT is 4 bytes, so there will be no padding with
 	// ARGB/BGR/XRGB/BGRX.  This function does not support a stride different
 	// from the width, maybe Wuffs internals do not either.
+	unsigned char *surface_data = cairo_image_surface_get_data(surface);
+	int surface_stride = cairo_image_surface_get_stride(surface);
 	wuffs_base__pixel_buffer pb = {0};
-	status = wuffs_base__pixel_buffer__set_from_slice(&pb, &cfg.pixcfg,
-		wuffs_base__make_slice_u8(cairo_image_surface_get_data(surface),
-			cairo_image_surface_get_stride(surface) *
-				cairo_image_surface_get_height(surface)));
+#ifdef FASTIV_CAIRO_RGBA128F
+	if (expand_16_float) {
+		uint32_t targetbuf_size = height * width * 64;
+		targetbuf = g_malloc(targetbuf_size);
+		status = wuffs_base__pixel_buffer__set_from_slice(&pb, &cfg.pixcfg,
+			wuffs_base__make_slice_u8(targetbuf, targetbuf_size));
+	} else
+#endif  // FASTIV_CAIRO_RGBA128F
+	if (pack_16_10) {
+		uint32_t targetbuf_size = height * width * 16;
+		targetbuf = g_malloc(targetbuf_size);
+		status = wuffs_base__pixel_buffer__set_from_slice(&pb, &cfg.pixcfg,
+			wuffs_base__make_slice_u8(targetbuf, targetbuf_size));
+	} else {
+		status = wuffs_base__pixel_buffer__set_from_slice(&pb, &cfg.pixcfg,
+			wuffs_base__make_slice_u8(surface_data,
+				surface_stride * cairo_image_surface_get_height(surface)));
+	}
 	if (!wuffs_base__status__is_ok(&status)) {
 		set_error(error, wuffs_base__status__message(&status));
-		cairo_surface_destroy(surface);
-		free(workbuf.ptr);
-		return NULL;
+		goto fail;
 	}
 
 #if 0  // We're not using this right now.
@@ -176,9 +218,7 @@ open_wuffs(
 	status = wuffs_png__decoder__decode_frame_config(&dec, &fc, &src);
 	if (!wuffs_base__status__is_ok(&status)) {
 		set_error(error, wuffs_base__status__message(&status));
-		cairo_surface_destroy(surface);
-		free(workbuf.ptr);
-		return NULL;
+		goto fail;
 	}
 #endif
 
@@ -189,16 +229,49 @@ open_wuffs(
 		dec, &pb, &src, WUFFS_BASE__PIXEL_BLEND__SRC, workbuf, NULL);
 	if (!wuffs_base__status__is_ok(&status)) {
 		set_error(error, wuffs_base__status__message(&status));
-		cairo_surface_destroy(surface);
-		free(workbuf.ptr);
-		return NULL;
+		goto fail;
+	}
+
+#ifdef FASTIV_CAIRO_RGBA128F
+	if (expand_16_float) {
+		g_debug("Wuffs to Cairo RGBA128F");
+		uint16_t *in = (uint16_t *) targetbuf;
+		float *out = (float *) surface_data;
+		for (uint32_t y = 0; y < height; y++) {
+			for (uint32_t x = 0; x < width; x++) {
+				float b = *in++ / 65535., g = *in++ / 65535.,
+					r = *in++ / 65535., a = *in++ / 65535.;
+				*out++ = r * a;
+				*out++ = g * a;
+				*out++ = b * a;
+				*out++ = a;
+			}
+		}
+	} else
+#endif  // FASTIV_CAIRO_RGBA128F
+	if (pack_16_10) {
+		g_debug("Wuffs to Cairo RGB30");
+		uint16_t *in = (uint16_t *) targetbuf;
+		uint32_t *out = (uint32_t *) surface_data;
+		for (uint32_t y = 0; y < height; y++) {
+			for (uint32_t x = 0; x < width; x++) {
+				uint16_t b = *in++, g = *in++, r = *in++, x = *in++;
+				*out++ = (x >> 14) << 30 |
+					(r >> 6) << 20 | (g >> 6) << 10 | (b >> 6);
+			}
+		}
 	}
 
 	// Pixel data has been written, need to let Cairo know.
-	cairo_surface_mark_dirty(surface);
+	cairo_surface_mark_dirty((result = surface));
 
+fail:
+	if (!result)
+		cairo_surface_destroy(surface);
+
+	g_free(targetbuf);
 	free(workbuf.ptr);
-	return surface;
+	return result;
 }
 
 static cairo_surface_t *

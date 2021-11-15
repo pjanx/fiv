@@ -181,6 +181,10 @@ fastiv_view_realize(GtkWidget *widget)
 	gtk_widget_register_window(widget, window);
 	gtk_widget_set_window(widget, window);
 	gtk_widget_set_realized(widget, TRUE);
+
+	// Without the following call, or the rendering mode set to "recording",
+	// RGB30 degrades to RGB24.
+	gdk_window_ensure_native(window);
 }
 
 static gboolean
