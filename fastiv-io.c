@@ -645,12 +645,12 @@ read_spng_thumbnail(
 	const gchar *path, const gchar *uri, time_t mtime, GError **error)
 {
 	FILE *fp;
+	cairo_surface_t *result = NULL;
 	if (!(fp = fopen(path, "rb"))) {
 		set_error(error, g_strerror(errno));
 		return NULL;
 	}
 
-	cairo_surface_t *result = NULL;
 	errno = 0;
 	spng_ctx *ctx = spng_ctx_new(0);
 	if (!ctx) {
@@ -671,7 +671,22 @@ read_spng_thumbnail(
 		goto fail;
 	}
 
-	uint32_t *data = g_malloc0(size);
+	struct spng_ihdr ihdr = {};
+	spng_get_ihdr(ctx, &ihdr);
+	cairo_surface_t *surface = cairo_image_surface_create(
+		CAIRO_FORMAT_ARGB32, ihdr.width, ihdr.height);
+
+	cairo_status_t surface_status = cairo_surface_status(surface);
+	if (surface_status != CAIRO_STATUS_SUCCESS) {
+		set_error(error, cairo_status_to_string(surface_status));
+		goto fail_data;
+	}
+
+	uint32_t *data = (uint32_t *) cairo_image_surface_get_data(surface);
+	g_assert((size_t) cairo_image_surface_get_stride(surface) *
+		cairo_image_surface_get_height(surface) == size);
+
+	cairo_surface_flush(surface);
 	if ((err = spng_decode_image(ctx, data, size, SPNG_FMT_RGBA8,
 		SPNG_DECODE_TRNS | SPNG_DECODE_GAMMA))) {
 		set_error(error, spng_strerror(err));
@@ -686,47 +701,31 @@ read_spng_thumbnail(
 		goto fail_data;
 	}
 
-	struct spng_ihdr ihdr = {};
-	spng_get_ihdr(ctx, &ihdr);
-	cairo_surface_t *surface = cairo_image_surface_create(
-		CAIRO_FORMAT_ARGB32, ihdr.width, ihdr.height);
-
-	cairo_status_t surface_status = cairo_surface_status(surface);
-	if (surface_status != CAIRO_STATUS_SUCCESS) {
-		set_error(error, cairo_status_to_string(surface_status));
-		cairo_surface_destroy(surface);
-		goto fail_data;
-	}
-
-	g_assert((size_t) cairo_image_surface_get_stride(surface) *
-		cairo_image_surface_get_height(surface) == size);
-
 	// pixman can be mildly abused to do this operation, but it won't be faster.
-	uint32_t *output = (uint32_t *) cairo_image_surface_get_data(surface);
-	cairo_surface_flush(surface);
-
 	struct spng_trns trns = {};
 	if (ihdr.color_type == SPNG_COLOR_TYPE_GRAYSCALE_ALPHA ||
 		ihdr.color_type == SPNG_COLOR_TYPE_TRUECOLOR_ALPHA ||
 		!spng_get_trns(ctx, &trns)) {
-		for (size_t i = size / sizeof *output; i--; ) {
+		for (size_t i = size / sizeof *data; i--; ) {
 			const uint8_t *unit = (const uint8_t *) &data[i],
 				a = unit[3],
 				b = unit[2] * a / 255,
 				g = unit[1] * a / 255,
 				r = unit[0] * a / 255;
-			output[i] = a << 24 | r << 16 | g << 8 | b;
+			data[i] = a << 24 | r << 16 | g << 8 | b;
 		}
 	} else {
-		for (size_t i = size / sizeof *output; i--; ) {
-			uint32_t x = g_ntohl(data[i]);
-			output[i] = x << 24 | x >> 8;
+		for (size_t i = size / sizeof *data; i--; ) {
+			uint32_t rgba = g_ntohl(data[i]);
+			data[i] = rgba << 24 | rgba >> 8;
 		}
 	}
 
 	cairo_surface_mark_dirty((result = surface));
+
 fail_data:
-	free(data);
+	if (!result)
+		cairo_surface_destroy(surface);
 fail:
 	spng_ctx_free(ctx);
 fail_init:
