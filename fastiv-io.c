@@ -710,7 +710,7 @@ read_spng_thumbnail(
 		ihdr.color_type == SPNG_COLOR_TYPE_TRUECOLOR_ALPHA ||
 		!spng_get_trns(ctx, &trns)) {
 		for (size_t i = size / sizeof *output; i--; ) {
-			uint8_t *unit = (uint8_t *) &data[i],
+			const uint8_t *unit = (const uint8_t *) &data[i],
 				a = unit[3],
 				b = unit[2] * a / 255,
 				g = unit[1] * a / 255,
@@ -719,12 +719,8 @@ read_spng_thumbnail(
 		}
 	} else {
 		for (size_t i = size / sizeof *output; i--; ) {
-			uint8_t *unit = (uint8_t *) &data[i],
-				a = unit[3],
-				b = unit[2],
-				g = unit[1],
-				r = unit[0];
-			output[i] = a << 24 | r << 16 | g << 8 | b;
+			uint32_t x = g_ntohl(data[i]);
+			output[i] = x << 24 | x >> 8;
 		}
 	}
 
