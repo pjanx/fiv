@@ -188,8 +188,16 @@ fastiv_view_realize(GtkWidget *widget)
 		&attributes, GDK_WA_X | GDK_WA_Y | GDK_WA_VISUAL);
 
 	// Without the following call, or the rendering mode set to "recording",
-	// RGB30 degrades to RGB24. It completely breaks the Quartz backend.
+	// RGB30 degrades to RGB24, because gdk_window_begin_paint_internal()
+	// creates backing stores using cairo_content_t constants.
+	//
+	// It completely breaks the Quartz backend, so limit it to X11.
 #ifdef GDK_WINDOWING_X11
+	// FIXME: This causes some flicker while scrolling, because it disables
+	// double buffering, see: https://gitlab.gnome.org/GNOME/gtk/-/issues/2560
+	//
+	// If GTK+'s OpenGL integration fails to deliver, we need to use the window
+	// directly, sidestepping the toolkit entirely.
 	if (GDK_IS_X11_WINDOW(window))
 		gdk_window_ensure_native(window);
 #endif  // GDK_WINDOWING_X11

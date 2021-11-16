@@ -394,6 +394,12 @@ main(int argc, char *argv[])
 	gtk_container_add(GTK_CONTAINER(g.view_scroller), g.view);
 	gtk_widget_show_all(g.view_scroller);
 
+	// Maybe our custom widgets should derive colours from the theme instead.
+	gtk_scrolled_window_set_overlay_scrolling(
+		GTK_SCROLLED_WINDOW(g.view_scroller), FALSE);
+	g_object_set(gtk_settings_get_default(),
+		"gtk-application-prefer-dark-theme", TRUE, NULL);
+
 	g.browser_scroller = gtk_scrolled_window_new(NULL, NULL);
 	g.browser = g_object_new(FASTIV_TYPE_BROWSER, NULL);
 	gtk_widget_set_vexpand(g.browser, TRUE);
