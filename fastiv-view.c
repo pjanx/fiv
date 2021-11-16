@@ -18,6 +18,14 @@
 #include <math.h>
 #include <stdbool.h>
 
+#include <gtk/gtk.h>
+#ifdef GDK_WINDOWING_X11
+#include <gdk/gdkx.h>
+#endif  // GDK_WINDOWING_X11
+#ifdef GDK_WINDOWING_QUARTZ
+#include <gdk/gdkquartz.h>
+#endif  // GDK_WINDOWING_QUARTZ
+
 #include "fastiv-io.h"
 #include "fastiv-view.h"
 
@@ -178,13 +186,17 @@ fastiv_view_realize(GtkWidget *widget)
 	// We need this window to receive input events at all.
 	GdkWindow *window = gdk_window_new(gtk_widget_get_parent_window(widget),
 		&attributes, GDK_WA_X | GDK_WA_Y | GDK_WA_VISUAL);
+
+	// Without the following call, or the rendering mode set to "recording",
+	// RGB30 degrades to RGB24. It completely breaks the Quartz backend.
+#ifdef GDK_WINDOWING_X11
+	if (GDK_IS_X11_WINDOW(window))
+		gdk_window_ensure_native(window);
+#endif  // GDK_WINDOWING_X11
+
 	gtk_widget_register_window(widget, window);
 	gtk_widget_set_window(widget, window);
 	gtk_widget_set_realized(widget, TRUE);
-
-	// Without the following call, or the rendering mode set to "recording",
-	// RGB30 degrades to RGB24.
-	gdk_window_ensure_native(window);
 }
 
 static gboolean
@@ -240,6 +252,12 @@ fastiv_view_draw(GtkWidget *widget, cairo_t *cr)
 	cairo_pattern_set_extend(pattern, CAIRO_EXTEND_PAD);
 	// TODO(p): Prescale it ourselves to an off-screen bitmap, gamma-correctly.
 	cairo_pattern_set_filter(pattern, CAIRO_FILTER_GOOD);
+
+#ifdef GDK_WINDOWING_QUARTZ
+	// Not supported there. Acts a bit like repeating, but weirdly offset.
+	if (GDK_IS_QUARTZ_WINDOW(gtk_widget_get_window(widget)))
+		cairo_pattern_set_extend(pattern, CAIRO_EXTEND_NONE);
+#endif  // GDK_WINDOWING_QUARTZ
 
 	cairo_paint(cr);
 	return TRUE;

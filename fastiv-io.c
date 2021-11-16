@@ -18,7 +18,11 @@
 #include "config.h"
 
 #include <cairo.h>
+#include <errno.h>
 #include <glib.h>
+#include <glib/gstdio.h>
+
+#include <spng.h>
 #include <turbojpeg.h>
 #ifdef HAVE_LIBRAW
 #include <libraw.h>
@@ -43,9 +47,6 @@
 #define WUFFS_CONFIG__MODULE__PNG
 #define WUFFS_CONFIG__MODULE__ZLIB
 #include "wuffs-mirror-release-c/release/c/wuffs-v0.3.c"
-
-#include <glib/gstdio.h>
-#include <spng.h>
 
 #include "xdg.h"
 #include "fastiv-io.h"
@@ -495,7 +496,13 @@ open_librsvg(const gchar *data, gsize len, const gchar *path, GError **error)
 	rsvg_handle_set_dpi(handle, 96);
 
 	double w = 0, h = 0;
+#if LIBRSVG_CHECK_VERSION(2, 51, 0)
 	if (!rsvg_handle_get_intrinsic_size_in_pixels(handle, &w, &h)) {
+#else
+	RsvgDimensionData dd = {};
+	rsvg_handle_get_dimensions(handle, &dd);
+	if ((w = dd.width) <= 0 || (h = dd.height) <= 0) {
+#endif
 		RsvgRectangle viewbox = {};
 		gboolean has_viewport = FALSE;
 		rsvg_handle_get_intrinsic_dimensions(handle, NULL, NULL, NULL, NULL,
@@ -674,6 +681,10 @@ fastiv_io_open_from_data(const char *data, size_t len, const gchar *path,
 }
 
 // --- Thumbnails --------------------------------------------------------------
+
+#ifndef __linux__
+#define st_mtim st_mtimespec
+#endif  // ! __linux__
 
 static int  // tri-state
 check_spng_thumbnail_texts(struct spng_text *texts, uint32_t texts_len,
