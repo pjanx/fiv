@@ -316,14 +316,13 @@ static gboolean
 fastiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 {
 	FastivView *self = FASTIV_VIEW(widget);
-	if (event->state & gtk_accelerator_get_default_mod_mask())
+	if (event->state & ~GDK_SHIFT_MASK & gtk_accelerator_get_default_mod_mask())
 		return FALSE;
 
 	switch (event->keyval) {
 	case GDK_KEY_1:
 		return set_scale(self, 1.0);
 	case GDK_KEY_plus:
-		self->scale *= SCALE_STEP;
 		return set_scale(self, self->scale * SCALE_STEP);
 	case GDK_KEY_minus:
 		return set_scale(self, self->scale / SCALE_STEP);
