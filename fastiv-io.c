@@ -30,6 +30,9 @@
 #ifdef HAVE_LIBRSVG
 #include <librsvg/rsvg.h>
 #endif  // HAVE_LIBRSVG
+#ifdef HAVE_XCURSOR
+#include <X11/Xcursor/Xcursor.h>
+#endif  // HAVE_XCURSOR
 #ifdef HAVE_GDKPIXBUF
 #include <gdk/gdk.h>
 #include <gdk-pixbuf/gdk-pixbuf.h>
@@ -69,6 +72,9 @@ const char *fastiv_io_supported_media_types[] = {
 #ifdef HAVE_LIBRSVG
 	"image/svg+xml",
 #endif  // HAVE_LIBRSVG
+#ifdef HAVE_XCURSOR
+	"image/x-xcursor",
+#endif  // HAVE_XCURSOR
 	NULL
 };
 
@@ -566,6 +572,132 @@ open_librsvg(const gchar *data, gsize len, const gchar *path, GError **error)
 }
 
 #endif  // HAVE_LIBRSVG --------------------------------------------------------
+#ifdef HAVE_XCURSOR  //---------------------------------------------------------
+
+// fmemopen is part of POSIX-1.2008, this exercise is technically unnecessary.
+// libXcursor checks for EOF rather than -1, it may eat your hamster.
+struct fastiv_io_xcursor {
+	XcursorFile parent;
+	unsigned char *data;
+	long position, len;
+};
+
+static int
+fastiv_io_xcursor_read(XcursorFile *file, unsigned char *buf, int len)
+{
+	struct fastiv_io_xcursor *fix = (struct fastiv_io_xcursor *) file;
+	if (fix->position < 0 || fix->position > fix->len) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	long n = MIN(fix->len - fix->position, len);
+	if (n > G_MAXINT) {
+		errno = EIO;
+		return -1;
+	}
+	memcpy(buf, fix->data + fix->position, n);
+	fix->position += n;
+	return n;
+}
+
+static int
+fastiv_io_xcursor_write(G_GNUC_UNUSED XcursorFile *file,
+	G_GNUC_UNUSED unsigned char *buf, G_GNUC_UNUSED int len)
+{
+	errno = EBADF;
+	return -1;
+}
+
+static int
+fastiv_io_xcursor_seek(XcursorFile *file, long offset, int whence)
+{
+	struct fastiv_io_xcursor *fix = (struct fastiv_io_xcursor *) file;
+	switch (whence) {
+	case SEEK_SET:
+		fix->position = offset;
+		break;
+	case SEEK_CUR:
+		fix->position += offset;
+		break;
+	case SEEK_END:
+		fix->position = fix->len + offset;
+		break;
+	default:
+		errno = EINVAL;
+		return -1;
+	}
+	// This is technically too late for fseek(), but libXcursor doesn't care.
+	if (fix->position < 0) {
+		errno = EINVAL;
+		return -1;
+	}
+	return fix->position;
+}
+
+static const XcursorFile fastiv_io_xcursor_adaptor = {
+	.closure = NULL,
+	.read    = fastiv_io_xcursor_read,
+	.write   = fastiv_io_xcursor_write,
+	.seek    = fastiv_io_xcursor_seek,
+};
+
+static cairo_surface_t *
+open_xcursor(const gchar *data, gsize len, GError **error)
+{
+	if (len > G_MAXLONG) {
+		set_error(error, "size overflow");
+		return NULL;
+	}
+
+	struct fastiv_io_xcursor file = {
+		.parent = fastiv_io_xcursor_adaptor,
+		.data = (unsigned char *) data,
+		.position = 0,
+		.len = len,
+	};
+
+	XcursorImages *images = XcursorXcFileLoadAllImages(&file.parent);
+	if (!images) {
+		set_error(error, "general failure");
+		return NULL;
+	}
+
+	// Let's just arrange the pixel data in a recording surface.
+	static cairo_user_data_key_t key = {};
+	cairo_surface_t *recording =
+		cairo_recording_surface_create(CAIRO_CONTENT_COLOR_ALPHA, NULL);
+	cairo_surface_set_user_data(
+		recording, &key, images, (cairo_destroy_func_t) XcursorImagesDestroy);
+	cairo_t *cr = cairo_create(recording);
+
+	// Unpack horizontally by animation, vertically by size.
+	XcursorDim last_nominal = -1;
+	int x = 0, y = 0, row_height = 0;
+	for (int i = 0; i < images->nimage; i++) {
+		XcursorImage *image = images->images[i];
+		if (image->size != last_nominal) {
+			x = 0;
+			y += row_height;
+			row_height = 0;
+			last_nominal = image->size;
+		}
+
+		// TODO(p): Byte-swap if on big-endian. Wuffs doesn't even build there.
+		cairo_surface_t *source = cairo_image_surface_create_for_data(
+			(unsigned char *) image->pixels, CAIRO_FORMAT_ARGB32,
+			image->width, image->height, image->width * sizeof *image->pixels);
+		cairo_set_source_surface(cr, source, x, y);
+		cairo_surface_destroy(source);
+		cairo_paint(cr);
+
+		x += image->width;
+		row_height = MAX(row_height, (int) image->height);
+	}
+	cairo_destroy(cr);
+	return recording;
+}
+
+#endif  // HAVE_XCURSOR --------------------------------------------------------
 #ifdef HAVE_GDKPIXBUF  // ------------------------------------------------------
 
 static cairo_surface_t *
@@ -663,6 +795,14 @@ fastiv_io_open_from_data(const char *data, size_t len, const gchar *path,
 			g_clear_error(error);
 		}
 #endif  // HAVE_LIBRSVG --------------------------------------------------------
+#ifdef HAVE_XCURSOR  //---------------------------------------------------------
+		if ((surface = open_xcursor(data, len, error)))
+			break;
+		if (error) {
+			g_debug("%s", (*error)->message);
+			g_clear_error(error);
+		}
+#endif  // HAVE_XCURSOR --------------------------------------------------------
 #ifdef HAVE_GDKPIXBUF  // ------------------------------------------------------
 		// This is only used as a last resort, the rest above is special-cased.
 		if ((surface = open_gdkpixbuf(data, len, error)) ||

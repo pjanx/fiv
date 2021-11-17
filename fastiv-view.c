@@ -86,7 +86,10 @@ get_surface_dimensions(FastivView *self, double *width, double *height)
 		*height = cairo_image_surface_get_height(self->surface);
 		return;
 	case CAIRO_SURFACE_TYPE_RECORDING:
-		(void) cairo_recording_surface_get_extents(self->surface, &extents);
+		if (!cairo_recording_surface_get_extents(self->surface, &extents))
+			cairo_recording_surface_ink_extents(self->surface,
+				&extents.x, &extents.y, &extents.width, &extents.height);
+
 		*width = extents.width;
 		*height = extents.height;
 		return;
