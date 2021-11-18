@@ -155,7 +155,7 @@ open(const gchar *path)
 
 	gchar *uri = g_filename_to_uri(path, NULL, NULL);
 	if (uri) {
-		gtk_recent_manager_add_item(gtk_recent_manager_get_default(), path);
+		gtk_recent_manager_add_item(gtk_recent_manager_get_default(), uri);
 		g_free(uri);
 	}
 
