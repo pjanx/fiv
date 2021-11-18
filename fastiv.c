@@ -518,7 +518,6 @@ main(int argc, char *argv[])
 	gtk_container_add(GTK_CONTAINER(g.stack), g.browser_paned);
 
 	g.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-	gtk_window_set_default_size (GTK_WINDOW (g.window), 800, 600);
 	g_signal_connect(g.window, "destroy",
 		G_CALLBACK(gtk_main_quit), NULL);
 	g_signal_connect(g.window, "key-press-event",
@@ -554,6 +553,23 @@ main(int argc, char *argv[])
 		gtk_stack_set_visible_child(GTK_STACK(g.stack), g.browser_paned);
 		gtk_widget_grab_focus(g.browser_scroller);
 	}
+
+	// Try to get half of the screen vertically, in 4:3 aspect ratio.
+	//
+	// We need the GdkMonitor before the GtkWindow has a GdkWindow (i.e.,
+	// before it is realized). Take the smallest dimensions, out of desperation.
+	GdkDisplay *display = gtk_widget_get_display(g.window);
+	int unit = G_MAXINT;
+	for (int i = gdk_display_get_n_monitors(display); i--; ) {
+		GdkRectangle geometry = {};
+		gdk_monitor_get_geometry(
+			gdk_display_get_monitor(display, i), &geometry);
+		unit = MIN(unit, MIN(geometry.width, geometry.height) / 6);
+	}
+
+	// Ask for at least 800x600, to cover ridiculously heterogenous setups.
+	unit = MAX(200, unit);
+	gtk_window_set_default_size(GTK_WINDOW(g.window), 4 * unit, 3 * unit);
 
 	gtk_widget_show_all(g.window);
 	gtk_main();
