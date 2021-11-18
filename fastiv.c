@@ -338,13 +338,13 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 				gtk_widget_show(g.browser_sidebar);
 			return TRUE;
 
-		case GDK_KEY_Tab:
-		case GDK_KEY_Return:
-			gtk_stack_set_visible_child(GTK_STACK(g.stack),
-				gtk_stack_get_visible_child(GTK_STACK(g.stack)) ==
-						g.view_scroller
-					? g.browser_paned
-					: g.view_scroller);
+		case GDK_KEY_F11:
+		case GDK_KEY_f:
+			if (gdk_window_get_state(gtk_widget_get_window(g.window)) &
+				GDK_WINDOW_STATE_FULLSCREEN)
+				gtk_window_unfullscreen(GTK_WINDOW(g.window));
+			else
+				gtk_window_fullscreen(GTK_WINDOW(g.window));
 			return TRUE;
 		}
 	}
@@ -371,6 +371,11 @@ on_key_press_view(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 			on_next();
 			return TRUE;
 		}
+
+		case GDK_KEY_Tab:
+		case GDK_KEY_Return:
+			gtk_stack_set_visible_child(GTK_STACK(g.stack), g.browser_paned);
+			return TRUE;
 	}
 	return FALSE;
 }
