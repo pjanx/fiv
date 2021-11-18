@@ -29,6 +29,7 @@
 #include "config.h"
 #include "fastiv-browser.h"
 #include "fastiv-io.h"
+#include "fastiv-sidebar.h"
 #include "fastiv-view.h"
 #include "xdg.h"
 
@@ -106,20 +107,21 @@ show_error_dialog(GError *error)
 static void
 load_directory(const gchar *dirname)
 {
-	free(g.directory);
-	g.directory = g_strdup(dirname);
+	if (dirname) {
+		free(g.directory);
+		g.directory = g_strdup(dirname);
+	}
+
 	g_ptr_array_set_size(g.files, 0);
 	g.files_index = -1;
 
-	GFile *file = g_file_new_for_path(dirname);
-	gtk_places_sidebar_set_location(
-		GTK_PLACES_SIDEBAR(g.browser_sidebar), file);
+	GFile *file = g_file_new_for_path(g.directory);
+	fastiv_sidebar_set_location(FASTIV_SIDEBAR(g.browser_sidebar), file);
 	g_object_unref(file);
-
-	fastiv_browser_load(FASTIV_BROWSER(g.browser), dirname);
+	fastiv_browser_load(FASTIV_BROWSER(g.browser), g.directory);
 
 	GError *error = NULL;
-	GDir *dir = g_dir_open(dirname, 0, &error);
+	GDir *dir = g_dir_open(g.directory, 0, &error);
 	if (dir) {
 		for (const gchar *name = NULL; (name = g_dir_read_name(dir)); ) {
 			// This really wants to make you use readdir() directly.
@@ -280,6 +282,30 @@ spawn_path(const char *path)
 	g_clear_error(&error);
 }
 
+static gboolean
+open_any_path(const char *path)
+{
+	GStatBuf st;
+	gchar *canonical = g_canonicalize_filename(path, g.directory);
+	gboolean success = !g_stat(canonical, &st);
+	if (!success)
+		show_error_dialog(g_error_new(G_FILE_ERROR,
+			g_file_error_from_errno(errno), "%s: %s", path, g_strerror(errno)));
+	else if (S_ISDIR(st.st_mode))
+		load_directory(canonical);
+	else
+		open(canonical);
+
+	g_free(canonical);
+	if (g.files_index < 0) {
+		gtk_stack_set_visible_child(GTK_STACK(g.stack), g.browser_paned);
+		gtk_widget_grab_focus(g.browser_scroller);
+	} else {
+		gtk_stack_set_visible_child(GTK_STACK(g.stack), g.view_scroller);
+	}
+	return success;
+}
+
 static void
 on_open_location(G_GNUC_UNUSED GtkPlacesSidebar *sidebar, GFile *location,
 	G_GNUC_UNUSED GtkPlacesOpenFlags flags, G_GNUC_UNUSED gpointer user_data)
@@ -289,7 +315,7 @@ on_open_location(G_GNUC_UNUSED GtkPlacesSidebar *sidebar, GFile *location,
 		if (flags & GTK_PLACES_OPEN_NEW_WINDOW)
 			spawn_path(path);
 		else
-			load_directory(path);
+			open_any_path(path);
 		g_free(path);
 	}
 }
@@ -315,6 +341,10 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 		case GDK_KEY_o:
 			on_open();
 			return TRUE;
+		case GDK_KEY_l:
+			fastiv_sidebar_show_enter_location(
+				FASTIV_SIDEBAR(g.browser_sidebar));
+			return TRUE;
 		case GDK_KEY_n:
 			spawn_path(g.directory);
 			return TRUE;
@@ -332,12 +362,9 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 			return TRUE;
 
 		case GDK_KEY_F5:
-		case GDK_KEY_r: {
-			char *copy = g_strdup(g.directory);
-			load_directory(copy);
-			g_free(copy);
+		case GDK_KEY_r:
+			load_directory(NULL);
 			return TRUE;
-		}
 
 		case GDK_KEY_F9:
 			if (gtk_widget_is_visible(g.browser_sidebar))
@@ -506,16 +533,11 @@ main(int argc, char *argv[])
 		G_CALLBACK(on_button_press_browser), NULL);
 	gtk_container_add(GTK_CONTAINER(g.browser_scroller), g.browser);
 
-	// TODO(p): Put a GtkListBox underneath, but with subdirectories.
-	//  - Set the scrolled window's vertical policy to nope,
-	//    and put it inside another scrolled window.
-	g.browser_sidebar = gtk_places_sidebar_new();
-	gtk_places_sidebar_set_show_recent(
-		GTK_PLACES_SIDEBAR(g.browser_sidebar), FALSE);
-	gtk_places_sidebar_set_show_trash(
-		GTK_PLACES_SIDEBAR(g.browser_sidebar), FALSE);
-	gtk_places_sidebar_set_open_flags(GTK_PLACES_SIDEBAR(g.browser_sidebar),
-		GTK_PLACES_OPEN_NORMAL | GTK_PLACES_OPEN_NEW_WINDOW);
+	// TODO(p): As with GtkFileChooserWidget, bind:
+	//  - C-h to filtering,
+	//  - M-Up to going a level above,
+	//  - mayhaps forward the rest to the sidebar, somehow.
+	g.browser_sidebar = g_object_new(FASTIV_TYPE_SIDEBAR, NULL);
 	g_signal_connect(g.browser_sidebar, "open-location",
 		G_CALLBACK(on_open_location), NULL);
 
@@ -544,30 +566,9 @@ main(int argc, char *argv[])
 	g_strfreev(types);
 
 	g.files = g_ptr_array_new_full(16, g_free);
-	gchar *cwd = g_get_current_dir();
-
-	GStatBuf st;
-	if (!path_arg) {
-		load_directory(cwd);
-	} else if (g_stat(path_arg, &st)) {
-		show_error_dialog(
-			g_error_new(G_FILE_ERROR, g_file_error_from_errno(errno), "%s: %s",
-				path_arg, g_strerror(errno)));
-		load_directory(cwd);
-	} else {
-		gchar *path_arg_absolute = g_canonicalize_filename(path_arg, cwd);
-		if (S_ISDIR(st.st_mode))
-			load_directory(path_arg_absolute);
-		else
-			open(path_arg_absolute);
-		g_free(path_arg_absolute);
-	}
-	g_free(cwd);
-
-	if (g.files_index < 0) {
-		gtk_stack_set_visible_child(GTK_STACK(g.stack), g.browser_paned);
-		gtk_widget_grab_focus(g.browser_scroller);
-	}
+	g.directory = g_get_current_dir();
+	if (!path_arg || !open_any_path(path_arg))
+		open_any_path(g.directory);
 
 	// Try to get half of the screen vertically, in 4:3 aspect ratio.
 	//
