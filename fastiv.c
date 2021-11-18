@@ -187,8 +187,8 @@ open(const gchar *path)
 	g_free(dirname);
 }
 
-static void
-on_open(void)
+static GtkWidget *
+create_open_dialog(void)
 {
 	GtkWidget *dialog = gtk_file_chooser_dialog_new("Open file",
 		GTK_WINDOW(g.window), GTK_FILE_CHOOSER_ACTION_OPEN,
@@ -208,15 +208,34 @@ on_open(void)
 	gtk_file_filter_set_name(all_files, "All files");
 	gtk_file_filter_add_pattern(all_files, "*");
 	gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dialog), all_files);
+	return dialog;
+}
+
+static void
+on_open(void)
+{
+	static GtkWidget *dialog;
+	if (!dialog)
+		dialog = create_open_dialog();
+
+	// Apparently, just keeping the dialog around doesn't mean
+	// that it will remember its last location.
+	gtk_file_chooser_set_current_folder(GTK_FILE_CHOOSER(dialog), g.directory);
 
 	// The default is local-only, single item. Paths are returned absolute.
-	if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
-		gchar *path = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
+	switch (gtk_dialog_run(GTK_DIALOG(dialog))) {
+		gchar *path;
+	case GTK_RESPONSE_ACCEPT:
+		path = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
 		open(path);
 		g_free(path);
+		break;
+	case GTK_RESPONSE_NONE:
+		dialog = NULL;
+		return;
 	}
 
-	gtk_widget_destroy(dialog);
+	gtk_widget_hide(dialog);
 }
 
 static void
