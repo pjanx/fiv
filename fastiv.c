@@ -67,6 +67,8 @@ struct {
 	GtkWidget *view_scroller;
 	GtkWidget *browser;
 	GtkWidget *browser_scroller;
+	GtkWidget *browser_paned;
+	GtkWidget *browser_sidebar;
 } g;
 
 static gboolean
@@ -108,6 +110,11 @@ load_directory(const gchar *dirname)
 	g.directory = g_strdup(dirname);
 	g_ptr_array_set_size(g.files, 0);
 	g.files_index = -1;
+
+	GFile *file = g_file_new_for_path(dirname);
+	gtk_places_sidebar_set_location(
+		GTK_PLACES_SIDEBAR(g.browser_sidebar), file);
+	g_object_unref(file);
 
 	fastiv_browser_load(FASTIV_BROWSER(g.browser), dirname);
 
@@ -244,6 +251,15 @@ on_item_activated(G_GNUC_UNUSED FastivBrowser *browser, const char *path,
 	open(path);
 }
 
+static void
+on_open_location(G_GNUC_UNUSED GtkPlacesSidebar *sidebar, GFile *location,
+	G_GNUC_UNUSED GtkPlacesOpenFlags flags, G_GNUC_UNUSED gpointer user_data)
+{
+	gchar *path = g_file_get_path(location);
+	load_directory(path);
+	g_free(path);
+}
+
 // Cursor keys, e.g., simply cannot be bound through accelerators
 // (and GtkWidget::keynav-failed would arguably be an awful solution).
 //
@@ -286,12 +302,19 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 			on_open();
 			return TRUE;
 
+		case GDK_KEY_F9:
+			if (gtk_widget_is_visible(g.browser_sidebar))
+				gtk_widget_hide(g.browser_sidebar);
+			else
+				gtk_widget_show(g.browser_sidebar);
+			return TRUE;
+
 		case GDK_KEY_Tab:
 		case GDK_KEY_Return:
 			gtk_stack_set_visible_child(GTK_STACK(g.stack),
 				gtk_stack_get_visible_child(GTK_STACK(g.stack)) ==
 						g.view_scroller
-					? g.browser_scroller
+					? g.browser_paned
 					: g.view_scroller);
 			return TRUE;
 		}
@@ -328,7 +351,7 @@ on_button_press_view(G_GNUC_UNUSED GtkWidget *widget, GdkEventButton *event)
 {
 	if (!(event->state & gtk_accelerator_get_default_mod_mask()) &&
 		event->button == 8 /* back */) {
-		gtk_stack_set_visible_child(GTK_STACK(g.stack), g.browser_scroller);
+		gtk_stack_set_visible_child(GTK_STACK(g.stack), g.browser_paned);
 		return TRUE;
 	}
 	return FALSE;
@@ -412,14 +435,30 @@ main(int argc, char *argv[])
 	g_signal_connect(g.browser, "item-activated",
 		G_CALLBACK(on_item_activated), NULL);
 	gtk_container_add(GTK_CONTAINER(g.browser_scroller), g.browser);
+
+	// TODO(p): Put a GtkListBox underneath, but with subdirectories.
+	//  - Set the scrolled window's vertical policy to nope,
+	//    and put it inside another scrolled window.
+	g.browser_sidebar = gtk_places_sidebar_new();
+	gtk_places_sidebar_set_show_recent(
+		GTK_PLACES_SIDEBAR(g.browser_sidebar), FALSE);
+	gtk_places_sidebar_set_show_trash(
+		GTK_PLACES_SIDEBAR(g.browser_sidebar), FALSE);
+	g_signal_connect(g.browser_sidebar, "open-location",
+		G_CALLBACK(on_open_location), NULL);
+
+	g.browser_paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
+	gtk_paned_add1(GTK_PANED(g.browser_paned), g.browser_sidebar);
+	gtk_paned_add2(GTK_PANED(g.browser_paned), g.browser_scroller);
+
 	// TODO(p): Can we not do it here separately?
-	gtk_widget_show_all(g.browser_scroller);
+	gtk_widget_show_all(g.browser_paned);
 
 	g.stack = gtk_stack_new();
 	gtk_stack_set_transition_type(
 		GTK_STACK(g.stack), GTK_STACK_TRANSITION_TYPE_NONE);
 	gtk_container_add(GTK_CONTAINER(g.stack), g.view_scroller);
-	gtk_container_add(GTK_CONTAINER(g.stack), g.browser_scroller);
+	gtk_container_add(GTK_CONTAINER(g.stack), g.browser_paned);
 
 	g.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk_window_set_default_size (GTK_WINDOW (g.window), 800, 600);
@@ -452,8 +491,10 @@ main(int argc, char *argv[])
 	}
 	g_free(cwd);
 
-	if (g.files_index < 0)
-		gtk_stack_set_visible_child(GTK_STACK(g.stack), g.browser_scroller);
+	if (g.files_index < 0) {
+		gtk_stack_set_visible_child(GTK_STACK(g.stack), g.browser_paned);
+		gtk_widget_grab_focus(g.browser_scroller);
+	}
 
 	gtk_widget_show_all(g.window);
 	gtk_main();

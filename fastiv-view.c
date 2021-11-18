@@ -198,6 +198,7 @@ fastiv_view_realize(GtkWidget *widget)
 #ifdef GDK_WINDOWING_X11
 	// FIXME: This causes some flicker while scrolling, because it disables
 	// double buffering, see: https://gitlab.gnome.org/GNOME/gtk/-/issues/2560
+	// FIXME: It also breaks Tab-switching at the start of program.
 	//
 	// If GTK+'s OpenGL integration fails to deliver, we need to use the window
 	// directly, sidestepping the toolkit entirely.
