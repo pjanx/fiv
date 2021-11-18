@@ -271,12 +271,25 @@ on_item_activated(G_GNUC_UNUSED FastivBrowser *browser, const char *path,
 }
 
 static void
+spawn_path(const char *path)
+{
+	char *argv[] = {PROJECT_NAME, (char *) path, NULL};
+	GError *error = NULL;
+	g_spawn_async(NULL, argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL,
+		NULL, &error);
+	g_clear_error(&error);
+}
+
+static void
 on_open_location(G_GNUC_UNUSED GtkPlacesSidebar *sidebar, GFile *location,
 	G_GNUC_UNUSED GtkPlacesOpenFlags flags, G_GNUC_UNUSED gpointer user_data)
 {
 	gchar *path = g_file_get_path(location);
 	if (path) {
-		load_directory(path);
+		if (flags & GTK_PLACES_OPEN_NEW_WINDOW)
+			spawn_path(path);
+		else
+			load_directory(path);
 		g_free(path);
 	}
 }
@@ -302,14 +315,9 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 		case GDK_KEY_o:
 			on_open();
 			return TRUE;
-		case GDK_KEY_n: {
-			char *argv[] = {PROJECT_NAME, g.directory, NULL};
-			GError *error = NULL;
-			g_spawn_async(NULL, argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL,
-				NULL, &error);
-			g_clear_error(&error);
+		case GDK_KEY_n:
+			spawn_path(g.directory);
 			return TRUE;
-		}
 		}
 		break;
 	case 0:
@@ -506,6 +514,8 @@ main(int argc, char *argv[])
 		GTK_PLACES_SIDEBAR(g.browser_sidebar), FALSE);
 	gtk_places_sidebar_set_show_trash(
 		GTK_PLACES_SIDEBAR(g.browser_sidebar), FALSE);
+	gtk_places_sidebar_set_open_flags(GTK_PLACES_SIDEBAR(g.browser_sidebar),
+		GTK_PLACES_OPEN_NORMAL | GTK_PLACES_OPEN_NEW_WINDOW);
 	g_signal_connect(g.browser_sidebar, "open-location",
 		G_CALLBACK(on_open_location), NULL);
 
