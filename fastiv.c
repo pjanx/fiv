@@ -275,8 +275,10 @@ on_open_location(G_GNUC_UNUSED GtkPlacesSidebar *sidebar, GFile *location,
 	G_GNUC_UNUSED GtkPlacesOpenFlags flags, G_GNUC_UNUSED gpointer user_data)
 {
 	gchar *path = g_file_get_path(location);
-	load_directory(path);
-	g_free(path);
+	if (path) {
+		load_directory(path);
+		g_free(path);
+	}
 }
 
 // Cursor keys, e.g., simply cannot be bound through accelerators
@@ -320,6 +322,14 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 		case GDK_KEY_o:
 			on_open();
 			return TRUE;
+
+		case GDK_KEY_F5:
+		case GDK_KEY_r: {
+			char *copy = g_strdup(g.directory);
+			load_directory(copy);
+			g_free(copy);
+			return TRUE;
+		}
 
 		case GDK_KEY_F9:
 			if (gtk_widget_is_visible(g.browser_sidebar))
