@@ -164,7 +164,8 @@ open_wuffs(
 		wuffs_format = WUFFS_BASE__PIXEL_FORMAT__BGRA_NONPREMUL_4X16LE;
 		cairo_format = CAIRO_FORMAT_RGB30;
 	} else if (opaque) {
-		wuffs_format = WUFFS_BASE__PIXEL_FORMAT__BGRX;
+		// BGRX doesn't have as wide swizzler support, namely in GIF.
+		wuffs_format = WUFFS_BASE__PIXEL_FORMAT__BGRA_NONPREMUL;
 		cairo_format = CAIRO_FORMAT_RGB24;
 	}
 
