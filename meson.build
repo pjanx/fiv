@@ -30,7 +30,7 @@ configure_file(
 	configuration : conf,
 )
 
-executable('fastiv', 'fastiv.c', 'fastiv-view.c', 'fastiv-io.c',
+exe = executable('fastiv', 'fastiv.c', 'fastiv-view.c', 'fastiv-io.c',
 	'fastiv-browser.c', 'xdg.c',
 	install : true,
 	dependencies : [dependencies])
@@ -45,3 +45,14 @@ install_data('fastiv.desktop',
 	install_dir : get_option('datadir') + '/applications')
 install_data('fastiv.svg',
 	install_dir : get_option('datadir') + '/icons/hicolor/scalable/apps')
+
+# TODO(p): Replace this with custom_target().
+if not meson.is_cross_build()
+	meson.add_install_script(
+		'sh', '-c', '''sed -i "/^MimeType=/{c \\
+MimeType=$($1 --list-supported-media-types | tr "\\012" ";")
+}" "$MESON_INSTALL_DESTDIR_PREFIX/$2"''',
+		'sh',
+		exe.full_path(),
+		get_option('datadir') + '/applications/fastiv.desktop')
+endif
