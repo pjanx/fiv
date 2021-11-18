@@ -78,6 +78,28 @@ const char *fastiv_io_supported_media_types[] = {
 	NULL
 };
 
+char **
+fastiv_io_all_supported_media_types(void)
+{
+	GPtrArray *types = g_ptr_array_new();
+	for (const char **p = fastiv_io_supported_media_types; *p; p++)
+		g_ptr_array_add(types, g_strdup(*p));
+
+#ifdef HAVE_GDKPIXBUF
+	GSList *formats = gdk_pixbuf_get_formats();
+	for (GSList *iter = formats; iter; iter = iter->next) {
+		gchar **subtypes = gdk_pixbuf_format_get_mime_types(iter->data);
+		for (gchar **p = subtypes; *p; p++)
+			g_ptr_array_add(types, *p);
+		g_free(subtypes);
+	}
+	g_slist_free(formats);
+#endif  // HAVE_GDKPIXBUF
+
+	g_ptr_array_add(types, NULL);
+	return (char **) g_ptr_array_free(types, FALSE);
+}
+
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 #define FASTIV_IO_ERROR fastiv_io_error_quark()

@@ -396,24 +396,33 @@ on_button_press_browser(G_GNUC_UNUSED GtkWidget *widget, GdkEventButton *event)
 int
 main(int argc, char *argv[])
 {
-	gboolean show_version = FALSE;
+	gboolean show_version = FALSE, show_supported_media_types = FALSE;
 	gchar **path_args = NULL;
 	const GOptionEntry options[] = {
 		{G_OPTION_REMAINING, 0, 0, G_OPTION_ARG_FILENAME_ARRAY, &path_args,
 			NULL, "[FILE | DIRECTORY]"},
+		{"list-supported-media-types", 0, G_OPTION_FLAG_IN_MAIN,
+			G_OPTION_ARG_NONE, &show_supported_media_types,
+			"Output supported media types and exit", NULL},
 		{"version", 'V', G_OPTION_FLAG_IN_MAIN, G_OPTION_ARG_NONE,
-			&show_version, "output version information and exit", NULL},
+			&show_version, "Output version information and exit", NULL},
 		{},
 	};
 
 	GError *error = NULL;
-	if (!gtk_init_with_args(
-			&argc, &argv, " - fast image viewer", options, NULL, &error))
-		exit_fatal("%s", error->message);
+	gboolean initialized = gtk_init_with_args(
+		&argc, &argv, " - fast image viewer", options, NULL, &error);
 	if (show_version) {
 		printf(PROJECT_NAME " " PROJECT_VERSION "\n");
 		return 0;
 	}
+	if (show_supported_media_types) {
+		for (char **types = fastiv_io_all_supported_media_types(); *types; )
+			g_print("%s\n", *types++);
+		return 0;
+	}
+	if (!initialized)
+		exit_fatal("%s", error->message);
 
 	// NOTE: Firefox and Eye of GNOME both interpret multiple arguments
 	// in a special way. This is problematic, because one-element lists
@@ -506,8 +515,10 @@ main(int argc, char *argv[])
 		G_CALLBACK(on_key_press), NULL);
 	gtk_container_add(GTK_CONTAINER(g.window), g.stack);
 
-	// TODO(p): Also milk gdk-pixbuf, if linked in, needs to be done in runtime.
-	g.supported_globs = extract_mime_globs(fastiv_io_supported_media_types);
+	char **types = fastiv_io_all_supported_media_types();
+	g.supported_globs = extract_mime_globs((const char **) types);
+	g_strfreev(types);
+
 	g.files = g_ptr_array_new_full(16, g_free);
 	gchar *cwd = g_get_current_dir();
 

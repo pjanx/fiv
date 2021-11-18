@@ -22,6 +22,8 @@
 
 extern const char *fastiv_io_supported_media_types[];
 
+char **fastiv_io_all_supported_media_types(void);
+
 cairo_surface_t *fastiv_io_open(const gchar *path, GError **error);
 cairo_surface_t *fastiv_io_open_from_data(
 	const char *data, size_t len, const gchar *path, GError **error);
