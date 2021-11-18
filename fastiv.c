@@ -368,12 +368,29 @@ on_key_press_view(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 static gboolean
 on_button_press_view(G_GNUC_UNUSED GtkWidget *widget, GdkEventButton *event)
 {
-	if (!(event->state & gtk_accelerator_get_default_mod_mask()) &&
-		event->button == 8 /* back */) {
+	if ((event->state & gtk_accelerator_get_default_mod_mask()))
+		return FALSE;
+	switch (event->button) {
+	case 8:  // back
 		gtk_stack_set_visible_child(GTK_STACK(g.stack), g.browser_paned);
 		return TRUE;
+	default:
+		return FALSE;
 	}
-	return FALSE;
+}
+
+static gboolean
+on_button_press_browser(G_GNUC_UNUSED GtkWidget *widget, GdkEventButton *event)
+{
+	if ((event->state & gtk_accelerator_get_default_mod_mask()))
+		return FALSE;
+	switch (event->button) {
+	case 9:  // forward
+		gtk_stack_set_visible_child(GTK_STACK(g.stack), g.view_scroller);
+		return TRUE;
+	default:
+		return FALSE;
+	}
 }
 
 int
@@ -453,6 +470,8 @@ main(int argc, char *argv[])
 	gtk_widget_set_hexpand(g.browser, TRUE);
 	g_signal_connect(g.browser, "item-activated",
 		G_CALLBACK(on_item_activated), NULL);
+	g_signal_connect(g.browser, "button-press-event",
+		G_CALLBACK(on_button_press_browser), NULL);
 	gtk_container_add(GTK_CONTAINER(g.browser_scroller), g.browser);
 
 	// TODO(p): Put a GtkListBox underneath, but with subdirectories.
