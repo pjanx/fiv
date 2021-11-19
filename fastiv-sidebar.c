@@ -185,7 +185,9 @@ on_open_location(G_GNUC_UNUSED GtkPlacesSidebar *sidebar, GFile *location,
 static void
 complete_path(GFile *location, GtkListStore *model)
 {
-	GFile *parent =
+	// TODO(p): Do not enter directories unless followed by '/'.
+	// This information has already been stripped from `location`.
+	GFile *parent = G_FILE_TYPE_DIRECTORY ==
 		g_file_query_file_type(location, G_FILE_QUERY_INFO_NONE, NULL)
 		? g_object_ref(location)
 		: g_file_get_parent(location);
@@ -193,12 +195,13 @@ complete_path(GFile *location, GtkListStore *model)
 		return;
 
 	GFileEnumerator *enumerator = g_file_enumerate_children(parent,
-		G_FILE_ATTRIBUTE_STANDARD_NAME,
+		G_FILE_ATTRIBUTE_STANDARD_NAME
+		"," G_FILE_ATTRIBUTE_STANDARD_TYPE
+		"," G_FILE_ATTRIBUTE_STANDARD_IS_HIDDEN,
 		G_FILE_QUERY_INFO_NONE, NULL, NULL);
 	if (!enumerator)
 		goto fail_enumerator;
 
-	// TODO(p): Resolve ~ paths a bit better.
 	while (TRUE) {
 		GFileInfo *info = NULL;
 		GFile *child = NULL;
@@ -206,10 +209,14 @@ complete_path(GFile *location, GtkListStore *model)
 			!info)
 			break;
 
-		GtkTreeIter iter;
-		gtk_list_store_append(model, &iter);
-		gtk_list_store_set(
-			model, &iter, 0, g_file_get_parse_name(child), -1);
+		if (g_file_info_get_file_type(info) != G_FILE_TYPE_DIRECTORY ||
+			g_file_info_get_is_hidden(info))
+			continue;
+
+		// TODO(p): Resolve ~ paths a bit better.
+		char *parse_name = g_file_get_parse_name(child);
+		gtk_list_store_insert_with_values(model, NULL, -1, 0, parse_name, -1);
+		g_free(parse_name);
 	}
 
 	g_object_unref(enumerator);
@@ -217,38 +224,45 @@ fail_enumerator:
 	g_object_unref(parent);
 }
 
-static void
-on_enter_location_changed(GtkEntry *entry, G_GNUC_UNUSED gpointer user_data)
+static GFile *
+resolve_location(FastivSidebar *self, const char *text)
 {
-	const char *text = gtk_entry_get_text(entry);
-	GFile *location = g_file_parse_name(text);
-
-	// Don't touch the network, URIs are a no-no.
-	// FIXME: This uses a different relative root from the fastiv.c opener.
-	GtkStyleContext *style = gtk_widget_get_style_context(GTK_WIDGET(entry));
+	// Relative paths produce invalid GFile objects with this function.
+	// And even if they didn't, we have our own root for them.
+	GFile *file = g_file_parse_name(text);
 	if (g_uri_is_valid(text, G_URI_FLAGS_PARSE_RELAXED, NULL) ||
-		g_file_query_exists(location, NULL))
+		g_file_peek_path(file))
+		return file;
+
+	GFile *absolute =
+		g_file_get_child_for_display_name(self->location, text, NULL);
+	if (!absolute)
+		return file;
+
+	g_object_unref(file);
+	return absolute;
+}
+
+static void
+on_enter_location_changed(GtkEntry *entry, gpointer user_data)
+{
+	FastivSidebar *self = FASTIV_SIDEBAR(user_data);
+	const char *text = gtk_entry_get_text(entry);
+	GFile *location = resolve_location(self, text);
+
+	// Don't touch the network anywhere around here, URIs are a no-no.
+	GtkStyleContext *style = gtk_widget_get_style_context(GTK_WIDGET(entry));
+	if (!g_file_peek_path(location) || g_file_query_exists(location, NULL))
 		gtk_style_context_remove_class(style, GTK_STYLE_CLASS_WARNING);
 	else
 		gtk_style_context_add_class(style, GTK_STYLE_CLASS_WARNING);
 
-	GtkListStore *model = gtk_list_store_new(1, G_TYPE_STRING);
-	gtk_tree_sortable_set_sort_column_id(
-		GTK_TREE_SORTABLE(model), 0, GTK_SORT_ASCENDING);
-	if (!g_uri_is_valid(text, G_URI_FLAGS_PARSE_RELAXED, NULL))
-		complete_path(location, model);
-
-	// TODO(p): Try to make this not be as jumpy.
+	// XXX: For some reason, this jumps around with longer lists.
 	GtkEntryCompletion *completion = gtk_entry_get_completion(entry);
-	gtk_entry_completion_set_model(completion, NULL);
-	gtk_entry_completion_set_model(completion, GTK_TREE_MODEL(model));
-	gtk_entry_completion_set_text_column(completion, 0);
-	gtk_entry_completion_set_inline_completion(completion, TRUE);
-	gtk_entry_completion_set_match_func(
-		completion, (GtkEntryCompletionMatchFunc) gtk_true, NULL, NULL);
-	gtk_entry_completion_complete(completion);
-	g_object_unref(model);
-
+	GtkTreeModel *model = gtk_entry_completion_get_model(completion);
+	gtk_list_store_clear(GTK_LIST_STORE(model));
+	if (g_file_peek_path(location))
+		complete_path(location, GTK_LIST_STORE(model));
 	g_object_unref(location);
 }
 
@@ -263,8 +277,18 @@ on_show_enter_location(G_GNUC_UNUSED GtkPlacesSidebar *sidebar,
 			GTK_DIALOG_USE_HEADER_BAR,
 		"_Open", GTK_RESPONSE_ACCEPT, "_Cancel", GTK_RESPONSE_CANCEL, NULL);
 
-	GtkWidget *entry = gtk_entry_new();
+	GtkListStore *model = gtk_list_store_new(1, G_TYPE_STRING);
+	gtk_tree_sortable_set_sort_column_id(
+		GTK_TREE_SORTABLE(model), 0, GTK_SORT_ASCENDING);
+
 	GtkEntryCompletion *completion = gtk_entry_completion_new();
+	gtk_entry_completion_set_model(completion, GTK_TREE_MODEL(model));
+	gtk_entry_completion_set_text_column(completion, 0);
+	gtk_entry_completion_set_match_func(
+		completion, (GtkEntryCompletionMatchFunc) gtk_true, NULL, NULL);
+	g_object_unref(model);
+
+	GtkWidget *entry = gtk_entry_new();
 	gtk_entry_set_completion(GTK_ENTRY(entry), completion);
 	gtk_entry_set_activates_default(GTK_ENTRY(entry), TRUE);
 	g_signal_connect(entry, "changed",
@@ -274,19 +298,21 @@ on_show_enter_location(G_GNUC_UNUSED GtkPlacesSidebar *sidebar,
 	gtk_container_add(GTK_CONTAINER(content), entry);
 	gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_ACCEPT);
 	gtk_window_set_skip_taskbar_hint(GTK_WINDOW(dialog), TRUE);
-	gtk_widget_show_all(dialog);
+	gtk_window_set_default_size(GTK_WINDOW(dialog), 800, -1);
 
 	GdkGeometry geometry = {.max_width = G_MAXSHORT, .max_height = -1};
 	gtk_window_set_geometry_hints(
 		GTK_WINDOW(dialog), NULL, &geometry, GDK_HINT_MAX_SIZE);
+	gtk_widget_show_all(dialog);
 
 	if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
 		const char *text = gtk_entry_get_text(GTK_ENTRY(entry));
-		GFile *location = g_file_parse_name(text);
+		GFile *location = resolve_location(self, text);
 		g_signal_emit(self, sidebar_signals[OPEN_LOCATION], 0, location);
 		g_object_unref(location);
 	}
 	gtk_widget_destroy(dialog);
+	g_object_unref(completion);
 
 	// Deselect the item in GtkPlacesSidebar, if unsuccessful.
 	update_location(self, NULL);
