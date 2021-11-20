@@ -639,6 +639,7 @@ void
 fastiv_browser_load(FastivBrowser *self, const char *path)
 {
 	g_array_set_size(self->entries, 0);
+	g_array_set_size(self->layouted_rows, 0);
 
 	// TODO(p): Use opendir(), in order to get file type directly.
 	GDir *dir = g_dir_open(path, 0, NULL);
