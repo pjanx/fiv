@@ -405,12 +405,12 @@ on_key_press_view(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 		case GDK_KEY_space:
 			on_next();
 			return TRUE;
-		}
 
 		case GDK_KEY_Tab:
 		case GDK_KEY_Return:
 			gtk_stack_set_visible_child(GTK_STACK(g.stack), g.browser_paned);
 			return TRUE;
+		}
 	}
 	return FALSE;
 }

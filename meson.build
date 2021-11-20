@@ -1,4 +1,10 @@
-project('fastiv', 'c', default_options : ['c_std=gnu99'], version : '0.1.0')
+project('fastiv', 'c',
+	default_options : ['c_std=gnu99', 'warning_level=2'],
+	version : '0.1.0')
+add_project_arguments(
+	meson.get_compiler('c').get_supported_arguments('-Wno-cast-function-type'),
+	language: 'c',
+)
 
 # TODO(p): Use libraw_r later, when we start parallelizing/preloading.
 libraw = dependency('libraw', required : get_option('libraw'))
