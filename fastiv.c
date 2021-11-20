@@ -146,6 +146,10 @@ load_directory(const gchar *dirname)
 	// XXX: When something outside the filtered entries is open, the index is
 	// kept at -1, and browsing doesn't work. How to behave here?
 	// Should we add it to the pointer array as an exception?
+	if (dirname) {
+		gtk_stack_set_visible_child(GTK_STACK(g.stack), g.browser_paned);
+		gtk_widget_grab_focus(g.browser_scroller);
+	}
 }
 
 static void
@@ -168,9 +172,6 @@ open(const gchar *path)
 		g_free(uri);
 	}
 
-	gtk_window_set_title(GTK_WINDOW(g.window), path);
-	gtk_stack_set_visible_child(GTK_STACK(g.stack), g.view_scroller);
-
 	gchar *basename = g_path_get_basename(path);
 	g_free(g.basename);
 	g.basename = basename;
@@ -187,6 +188,9 @@ open(const gchar *path)
 		}
 	}
 	g_free(dirname);
+
+	gtk_window_set_title(GTK_WINDOW(g.window), path);
+	gtk_stack_set_visible_child(GTK_STACK(g.stack), g.view_scroller);
 }
 
 static GtkWidget *
@@ -298,14 +302,7 @@ open_any_path(const char *path)
 		load_directory(canonical);
 	else
 		open(canonical);
-
 	g_free(canonical);
-	if (g.files_index < 0) {
-		gtk_stack_set_visible_child(GTK_STACK(g.stack), g.browser_paned);
-		gtk_widget_grab_focus(g.browser_scroller);
-	} else {
-		gtk_stack_set_visible_child(GTK_STACK(g.stack), g.view_scroller);
-	}
 	return success;
 }
 

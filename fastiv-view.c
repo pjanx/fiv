@@ -198,7 +198,6 @@ fastiv_view_realize(GtkWidget *widget)
 #ifdef GDK_WINDOWING_X11
 	// FIXME: This causes some flicker while scrolling, because it disables
 	// double buffering, see: https://gitlab.gnome.org/GNOME/gtk/-/issues/2560
-	// FIXME: It also breaks Tab-switching at the start of program.
 	//
 	// If GTK+'s OpenGL integration fails to deliver, we need to use the window
 	// directly, sidestepping the toolkit entirely.
@@ -214,15 +213,17 @@ fastiv_view_realize(GtkWidget *widget)
 static gboolean
 fastiv_view_draw(GtkWidget *widget, cairo_t *cr)
 {
-	FastivView *self = FASTIV_VIEW(widget);
-	if (!self->surface ||
-		!gtk_cairo_should_draw_window(cr, gtk_widget_get_window(widget)))
-		return TRUE;
-
+	// Placed here due to our using a native GdkWindow on X11,
+	// which makes the widget have no double buffering or default background.
 	GtkAllocation allocation;
 	gtk_widget_get_allocation(widget, &allocation);
 	gtk_render_background(gtk_widget_get_style_context(widget), cr, 0, 0,
 		allocation.width, allocation.height);
+
+	FastivView *self = FASTIV_VIEW(widget);
+	if (!self->surface ||
+		!gtk_cairo_should_draw_window(cr, gtk_widget_get_window(widget)))
+		return TRUE;
 
 	int w, h;
 	get_display_dimensions(self, &w, &h);
