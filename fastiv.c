@@ -266,13 +266,6 @@ on_next(void)
 }
 
 static void
-on_item_activated(G_GNUC_UNUSED FastivBrowser *browser, const char *path,
-	G_GNUC_UNUSED gpointer data)
-{
-	open(path);
-}
-
-static void
 spawn_path(const char *path)
 {
 	char *argv[] = {PROJECT_NAME, (char *) path, NULL};
@@ -280,6 +273,16 @@ spawn_path(const char *path)
 	g_spawn_async(NULL, argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL,
 		NULL, &error);
 	g_clear_error(&error);
+}
+
+static void
+on_item_activated(G_GNUC_UNUSED FastivBrowser *browser, const char *path,
+	GtkPlacesOpenFlags flags, G_GNUC_UNUSED gpointer data)
+{
+	if (flags == GTK_PLACES_OPEN_NEW_WINDOW)
+		spawn_path(path);
+	else
+		open(path);
 }
 
 static gboolean

@@ -413,16 +413,25 @@ static gboolean
 fastiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 {
 	FastivBrowser *self = FASTIV_BROWSER(widget);
-	if (event->type != GDK_BUTTON_PRESS || event->button != 1 ||
-		event->state != 0)
+	if (event->type != GDK_BUTTON_PRESS || event->state != 0)
 		return FALSE;
 
 	const Entry *entry = entry_at(self, event->x, event->y);
 	if (!entry)
 		return FALSE;
 
-	g_signal_emit(widget, browser_signals[ITEM_ACTIVATED], 0, entry->filename);
-	return TRUE;
+	switch (event->button) {
+	case 1:
+		g_signal_emit(widget, browser_signals[ITEM_ACTIVATED], 0,
+			entry->filename, GTK_PLACES_OPEN_NORMAL);
+		return TRUE;
+	case 2:
+		g_signal_emit(widget, browser_signals[ITEM_ACTIVATED], 0,
+			entry->filename, GTK_PLACES_OPEN_NEW_WINDOW);
+		return TRUE;
+	default:
+		return FALSE;
+	}
 }
 
 gboolean
@@ -516,9 +525,9 @@ fastiv_browser_class_init(FastivBrowserClass *klass)
 	widget_class->motion_notify_event = fastiv_browser_motion_notify_event;
 	widget_class->style_updated = fastiv_browser_style_updated;
 
-	browser_signals[ITEM_ACTIVATED] =
-		g_signal_new("item-activated", G_TYPE_FROM_CLASS(klass), 0, 0,
-			NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_STRING);
+	browser_signals[ITEM_ACTIVATED] = g_signal_new("item-activated",
+		G_TYPE_FROM_CLASS(klass), 0, 0, NULL, NULL, NULL,
+		G_TYPE_NONE, 2, G_TYPE_STRING, GTK_TYPE_PLACES_OPEN_FLAGS);
 
 	// TODO(p): Later override "screen_changed", recreate Pango layouts there,
 	// if we get to have any, or otherwise reflect DPI changes.
