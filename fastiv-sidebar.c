@@ -105,6 +105,27 @@ create_row(GFile *file, const char *icon_name)
 	return row;
 }
 
+static gint
+listbox_sort(
+	GtkListBoxRow *row1, GtkListBoxRow *row2, G_GNUC_UNUSED gpointer user_data)
+{
+	GFile *location1 =
+		g_object_get_qdata(G_OBJECT(row1), fastiv_sidebar_location_quark());
+	GFile *location2 =
+		g_object_get_qdata(G_OBJECT(row2), fastiv_sidebar_location_quark());
+	if (g_file_has_prefix(location1, location2))
+		return +1;
+	if (g_file_has_prefix(location2, location1))
+		return -1;
+
+	gchar *name1 = g_file_get_parse_name(location1);
+	gchar *name2 = g_file_get_parse_name(location2);
+	gint result = g_utf8_collate(name1, name2);
+	g_free(name1);
+	g_free(name2);
+	return result;
+}
+
 static void
 update_location(FastivSidebar *self, GFile *location)
 {
@@ -143,8 +164,8 @@ update_location(FastivSidebar *self, GFile *location)
 	if (!enumerator)
 		return;
 
-	// TODO(p): gtk_list_box_set_sort_func(), gtk_list_box_set_filter_func(),
-	// or even use a model.
+	// TODO(p): gtk_list_box_set_filter_func(), or even use a model,
+	// which could be shared with FastivBrowser.
 	while (TRUE) {
 		GFileInfo *info = NULL;
 		GFile *child = NULL;
@@ -376,6 +397,9 @@ fastiv_sidebar_init(FastivSidebar *self)
 		GTK_LIST_BOX(self->listbox), GTK_SELECTION_NONE);
 	g_signal_connect(self->listbox, "row-activated",
 		G_CALLBACK(on_open_breadcrumb), self);
+
+	gtk_list_box_set_sort_func(
+		GTK_LIST_BOX(self->listbox), listbox_sort, self, NULL);
 
 	GtkWidget *superbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	gtk_container_add(

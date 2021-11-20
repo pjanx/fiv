@@ -649,21 +649,30 @@ fastiv_browser_load(FastivBrowser *self, const char *path)
 	g_array_set_size(self->entries, 0);
 	g_array_set_size(self->layouted_rows, 0);
 
-	// TODO(p): Use opendir(), in order to get file type directly.
-	GDir *dir = g_dir_open(path, 0, NULL);
-	if (!dir)
+	GFile *file = g_file_new_for_path(path);
+	GFileEnumerator *enumerator = g_file_enumerate_children(file,
+		G_FILE_ATTRIBUTE_STANDARD_NAME "," G_FILE_ATTRIBUTE_STANDARD_TYPE,
+		G_FILE_QUERY_INFO_NONE, NULL, NULL);
+	g_object_unref(file);
+	if (!enumerator)
 		return;
 
-	const char *filename;
-	while ((filename = g_dir_read_name(dir))) {
-		if (!strcmp(filename, ".") || !strcmp(filename, ".."))
+	while (TRUE) {
+		GFileInfo *info = NULL;
+		GFile *child = NULL;
+		if (!g_file_enumerator_iterate(enumerator, &info, &child, NULL, NULL) ||
+			!info)
+			break;
+		if (g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY)
 			continue;
 
-		gchar *subpath = g_build_filename(path, filename, NULL);
-		g_array_append_val(
-			self->entries, ((Entry) {.thumbnail = NULL, .filename = subpath}));
+		// TODO(p): Support being passed filter/sort functions.
+		g_file_info_get_name(info);
+
+		g_array_append_val(self->entries,
+			((Entry) {.thumbnail = NULL, .filename = g_file_get_path(child)}));
 	}
-	g_dir_close(dir);
+	g_object_unref(enumerator);
 
 	GThreadPool *pool = g_thread_pool_new(
 		entry_add_thumbnail, NULL, g_get_num_processors(), FALSE, NULL);
