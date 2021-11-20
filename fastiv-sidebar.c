@@ -129,11 +129,10 @@ update_location(FastivSidebar *self, GFile *location)
 			create_row(parent, "go-up-symbolic"));
 	}
 
-	// Another option would be "folder-open-symbolic",
-	// "*-visiting-*" is mildly inappropriate (means: open in another window).
-	// TODO(p): Try out "circle-filled-symbolic".
+	// Other options are "folder-{visiting,open}-symbolic", though the former
+	// is mildly inappropriate (means: open in another window).
 	gtk_container_add(GTK_CONTAINER(self->listbox),
-		create_row(self->location, "folder-visiting-symbolic"));
+		create_row(self->location, "circle-filled-symbolic"));
 
 	GFileEnumerator *enumerator = g_file_enumerate_children(self->location,
 		G_FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME
@@ -339,25 +338,64 @@ fastiv_sidebar_init(FastivSidebar *self)
 		GTK_POLICY_NEVER, GTK_POLICY_NEVER);
 
 	// Fill up what would otherwise be wasted space,
-	// as it is in the example of Nautilus and Thunar.
-	GtkWidget *superbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-	gtk_container_add(
-		GTK_CONTAINER(superbox), GTK_WIDGET(self->places));
-	gtk_container_add(
-		GTK_CONTAINER(superbox), gtk_separator_new(GTK_ORIENTATION_VERTICAL));
+	// as it is in the examples of Nautilus and Thunar.
+	GtkWidget *plus = gtk_button_new_from_icon_name("zoom-in-symbolic",
+		GTK_ICON_SIZE_BUTTON);
+	gtk_widget_set_tooltip_text(plus, "Larger thumbnails");
+	GtkWidget *minus = gtk_button_new_from_icon_name("zoom-out-symbolic",
+		GTK_ICON_SIZE_BUTTON);
+	gtk_widget_set_tooltip_text(minus, "Smaller thumbnails");
+
+	GtkWidget *zoom_group = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+	gtk_style_context_add_class(
+		gtk_widget_get_style_context(zoom_group), GTK_STYLE_CLASS_LINKED);
+	gtk_box_pack_start(GTK_BOX(zoom_group), plus, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(zoom_group), minus, FALSE, FALSE, 0);
+
+	GtkWidget *funnel = gtk_toggle_button_new();
+	gtk_container_add(GTK_CONTAINER(funnel),
+		gtk_image_new_from_icon_name("funnel-symbolic", GTK_ICON_SIZE_BUTTON));
+	gtk_widget_set_tooltip_text(funnel, "Hide unsupported files");
+
+	// None of GtkActionBar, GtkToolbar, .inline-toolbar is appropriate.
+	// It is either borders or padding.
+	GtkWidget *buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+	gtk_style_context_add_class(
+		gtk_widget_get_style_context(buttons), GTK_STYLE_CLASS_TOOLBAR);
+	gtk_box_pack_start(GTK_BOX(buttons), zoom_group, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(buttons), funnel, FALSE, FALSE, 0);
+	gtk_widget_set_halign(buttons, GTK_ALIGN_CENTER);
+
+	// TODO(p): Implement. Probably fill `buttons` in externally.
+	gtk_widget_set_sensitive(plus, FALSE);
+	gtk_widget_set_sensitive(minus, FALSE);
+	gtk_widget_set_sensitive(funnel, FALSE);
 
 	self->listbox = gtk_list_box_new();
 	gtk_list_box_set_selection_mode(
 		GTK_LIST_BOX(self->listbox), GTK_SELECTION_NONE);
 	g_signal_connect(self->listbox, "row-activated",
 		G_CALLBACK(on_open_breadcrumb), self);
-	gtk_container_add(GTK_CONTAINER(superbox), self->listbox);
+
+	GtkWidget *superbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	gtk_container_add(
+		GTK_CONTAINER(superbox), GTK_WIDGET(self->places));
+	gtk_container_add(
+		GTK_CONTAINER(superbox), gtk_separator_new(GTK_ORIENTATION_VERTICAL));
+	gtk_container_add(
+		GTK_CONTAINER(superbox), buttons);
+	gtk_container_add(
+		GTK_CONTAINER(superbox), gtk_separator_new(GTK_ORIENTATION_VERTICAL));
+	gtk_container_add(
+		GTK_CONTAINER(superbox), self->listbox);
+	gtk_container_add(GTK_CONTAINER(self), superbox);
 
 	gtk_scrolled_window_set_policy(
 		GTK_SCROLLED_WINDOW(self), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
 	gtk_style_context_add_class(gtk_widget_get_style_context(GTK_WIDGET(self)),
 		GTK_STYLE_CLASS_SIDEBAR);
-	gtk_container_add(GTK_CONTAINER(self), superbox);
+	gtk_style_context_add_class(gtk_widget_get_style_context(GTK_WIDGET(self)),
+		"fastiv");
 }
 
 // --- Public interface --------------------------------------------------------

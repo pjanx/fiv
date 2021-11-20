@@ -36,8 +36,15 @@ configure_file(
 	configuration : conf,
 )
 
+gnome = import('gnome')
+resources = gnome.compile_resources('resources',
+	'resources/resources.gresource.xml',
+	source_dir : 'resources',
+	c_name : 'resources',
+)
+
 exe = executable('fastiv', 'fastiv.c', 'fastiv-view.c', 'fastiv-io.c',
-	'fastiv-browser.c', 'fastiv-sidebar.c', 'xdg.c',
+	'fastiv-browser.c', 'fastiv-sidebar.c', 'xdg.c', resources,
 	install : true,
 	dependencies : [dependencies])
 

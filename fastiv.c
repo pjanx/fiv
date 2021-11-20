@@ -482,11 +482,15 @@ main(int argc, char *argv[])
 	const gchar *path_arg = path_args ? path_args[0] : NULL;
 
 	gtk_window_set_default_icon_name(PROJECT_NAME);
+	gtk_icon_theme_add_resource_path(
+		gtk_icon_theme_get_default(), "/org/gnome/design/IconLibrary/");
 
 	// This is incredibly broken https://stackoverflow.com/a/51054396/76313
 	// thus resolving the problem using overlaps.
 	const char *style = "@define-color fastiv-tile #3c3c3c; \
 		fastiv-view, fastiv-browser { background: #222; } \
+		placessidebar.fastiv .toolbar { padding: 2px 6px; } \
+		placessidebar.fastiv box > separator { margin: 4px 0; } \
 		fastiv-browser { padding: 5px; } \
 		fastiv-browser.item { \
 			border: 1px solid rgba(255, 255, 255, 0.375); \
