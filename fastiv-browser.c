@@ -67,6 +67,7 @@ static const int g_item_spacing = 1;
 struct entry {
 	char *filename;                     ///< Absolute path
 	cairo_surface_t *thumbnail;         ///< Prescaled thumbnail
+	GIcon *icon;                        ///< If no thumbnail, use this icon
 };
 
 static void
@@ -75,6 +76,7 @@ entry_free(Entry *self)
 	g_free(self->filename);
 	if (self->thumbnail)
 		cairo_surface_destroy(self->thumbnail);
+	g_clear_object(&self->icon);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -244,10 +246,15 @@ draw_row(FastivBrowser *self, cairo_t *cr, const Row *row)
 		GdkRectangle extents = item_extents(item, row);
 		cairo_translate(cr, extents.x - border.left, extents.y - border.top);
 
-		gdk_cairo_set_source_rgba(cr, &glow_color);
-		draw_outer_border(self, cr,
-			border.left + extents.width + border.right,
-			border.top + extents.height + border.bottom);
+		gtk_style_context_save(style);
+		if (item->entry->icon) {
+			gtk_style_context_add_class(style, "symbolic");
+		} else {
+			gdk_cairo_set_source_rgba(cr, &glow_color);
+			draw_outer_border(self, cr,
+				border.left + extents.width + border.right,
+				border.top + extents.height + border.bottom);
+		}
 
 		gtk_render_background(
 			style, cr, border.left, border.top, extents.width, extents.height);
@@ -256,10 +263,20 @@ draw_row(FastivBrowser *self, cairo_t *cr, const Row *row)
 			border.left + extents.width + border.right,
 			border.top + extents.height + border.bottom);
 
-		cairo_set_source_surface(
-			cr, item->entry->thumbnail, border.left, border.top);
-		cairo_paint(cr);
+		if (item->entry->icon) {
+			GdkRGBA color = {};
+			gtk_style_context_get_color(style, state, &color);
+			gdk_cairo_set_source_rgba(cr, &color);
+			cairo_mask_surface(
+				cr, item->entry->thumbnail, border.left, border.top);
+		} else {
+			cairo_set_source_surface(
+				cr, item->entry->thumbnail, border.left, border.top);
+			cairo_paint(cr);
+		}
+
 		cairo_restore(cr);
+		gtk_style_context_restore(style);
 	}
 	gtk_style_context_restore(style);
 }
@@ -590,6 +607,23 @@ entry_add_thumbnail(gpointer data, G_GNUC_UNUSED gpointer user_data)
 	Entry *self = data;
 	self->thumbnail =
 		rescale_thumbnail(fastiv_io_lookup_thumbnail(self->filename));
+	if (self->thumbnail)
+		return;
+
+	// Fall back to symbolic icons, though there's only so much we can do
+	// in parallel--GTK+ isn't thread-safe.
+	GFile *file = g_file_new_for_path(self->filename);
+	GFileInfo *info = g_file_query_info(file,
+		G_FILE_ATTRIBUTE_STANDARD_NAME
+		"," G_FILE_ATTRIBUTE_STANDARD_SYMBOLIC_ICON,
+		G_FILE_QUERY_INFO_NONE, NULL, NULL);
+	g_object_unref(file);
+	if (info) {
+		GIcon *icon = g_file_info_get_symbolic_icon(info);
+		if (icon)
+			self->icon = g_object_ref(icon);
+		g_object_unref(info);
+	}
 }
 
 void
@@ -619,6 +653,50 @@ fastiv_browser_load(FastivBrowser *self, const char *path)
 		g_thread_pool_push(pool, &g_array_index(self->entries, Entry, i), NULL);
 	g_thread_pool_free(pool, FALSE, TRUE);
 
-	// TODO(p): Sort the entries.
+	for (guint i = 0; i < self->entries->len; i++) {
+		Entry *entry = &g_array_index(self->entries, Entry, i);
+		if (!entry->icon)
+			continue;
+
+		// Fucker will still give us non-symbolic icons, no more playing nice.
+		// TODO(p): Investigate a bit closer. We may want to abandon the idea
+		// of using GLib to look up icons for us, derive a list from a guessed
+		// MIME type, with "-symbolic" prefixes and fallbacks,
+		// and use gtk_icon_theme_choose_icon() instead.
+		// TODO(p): Make sure we have /some/ icon for every entry.
+		// TODO(p): GtkSettings -> notify::gtk-icon-theme-name?
+		// TODO(p): We might want to populate these on an as-needed basis.
+		GtkIconInfo *icon_info =
+			gtk_icon_theme_lookup_by_gicon(gtk_icon_theme_get_default(),
+				entry->icon, g_row_height / 2, GTK_ICON_LOOKUP_FORCE_SYMBOLIC);
+		if (!icon_info)
+			continue;
+
+		// Bílá, bílá, bílá, bílá... komu by se nelíbí-lá...
+		// We do not want any highlights, nor do we want to remember the style.
+		const GdkRGBA white = {1, 1, 1, 1};
+		GdkPixbuf *pixbuf = gtk_icon_info_load_symbolic(
+			icon_info, &white, &white, &white, &white, NULL, NULL);
+		if (pixbuf) {
+			int outer_size = g_row_height;
+			entry->thumbnail = cairo_image_surface_create(
+				CAIRO_FORMAT_A8, outer_size, outer_size);
+
+			// "Note that the resulting pixbuf may not be exactly this size;"
+			// though GTK_ICON_LOOKUP_FORCE_SIZE is also an option.
+			int x = (outer_size - gdk_pixbuf_get_width(pixbuf)) / 2;
+			int y = (outer_size - gdk_pixbuf_get_height(pixbuf)) / 2;
+
+			cairo_t *cr = cairo_create(entry->thumbnail);
+			gdk_cairo_set_source_pixbuf(cr, pixbuf, x, y);
+			cairo_paint(cr);
+			cairo_destroy(cr);
+
+			g_object_unref(pixbuf);
+		}
+		g_object_unref(icon_info);
+	}
+
+	// TODO(p): Sort and filter the entries.
 	gtk_widget_queue_resize(GTK_WIDGET(self));
 }

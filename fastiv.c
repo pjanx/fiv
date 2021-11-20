@@ -489,7 +489,7 @@ main(int argc, char *argv[])
 		fastiv-view, fastiv-browser { background: #222; } \
 		fastiv-browser { padding: 5px; } \
 		fastiv-browser.item { \
-			border: 1px solid rgba(255, 255, 255, 0.5); \
+			border: 1px solid rgba(255, 255, 255, 0.375); \
 			margin: 10px; color: #000; \
 			background: #333; \
 			background-image: \
@@ -499,6 +499,10 @@ main(int argc, char *argv[])
 				linear-gradient(-45deg, transparent 74%, @fastiv-tile 74%); \
 			background-size: 40px 40px; \
 			background-position: 0 0, 0 20px, 20px -20px, -20px 0px; \
+		} \
+		fastiv-browser.item.symbolic { \
+			border-color: transparent; color: #222; \
+			background: #2c2c2c; background-image: none; \
 		}";
 
 	GtkCssProvider *provider = gtk_css_provider_new();
