@@ -3,7 +3,7 @@ project('fastiv', 'c',
 	version : '0.1.0')
 add_project_arguments(
 	meson.get_compiler('c').get_supported_arguments('-Wno-cast-function-type'),
-	language: 'c',
+	language : 'c',
 )
 
 # TODO(p): Use libraw_r later, when we start parallelizing/preloading.
