@@ -412,9 +412,14 @@ fastiv_browser_draw(GtkWidget *widget, cairo_t *cr)
 static gboolean
 fastiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 {
+	GTK_WIDGET_CLASS(fastiv_browser_parent_class)
+		->button_press_event(widget, event);
+
 	FastivBrowser *self = FASTIV_BROWSER(widget);
 	if (event->type != GDK_BUTTON_PRESS || event->state != 0)
 		return FALSE;
+	if (event->button == 1)
+		gtk_widget_grab_focus(widget);
 
 	const Entry *entry = entry_at(self, event->x, event->y);
 	if (!entry)
@@ -437,6 +442,9 @@ fastiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 gboolean
 fastiv_browser_motion_notify_event(GtkWidget *widget, GdkEventMotion *event)
 {
+	GTK_WIDGET_CLASS(fastiv_browser_parent_class)
+		->motion_notify_event(widget, event);
+
 	FastivBrowser *self = FASTIV_BROWSER(widget);
 	if (event->state != 0)
 		return FALSE;
