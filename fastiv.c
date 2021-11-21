@@ -335,20 +335,14 @@ on_open_location(G_GNUC_UNUSED GtkPlacesSidebar *sidebar, GFile *location,
 static void
 on_toolbar_zoom(G_GNUC_UNUSED GtkButton *button, gpointer user_data)
 {
-	FastivIoThumbnailSize size = FASTIV_IO_THUMBNAIL_SIZE_MIN;
+	FastivIoThumbnailSize size = FASTIV_IO_THUMBNAIL_SIZE_COUNT;
 	g_object_get(g.browser, "thumbnail-size", &size, NULL);
 
-	gintptr position = -1, count = 0, adjustment = (gintptr) user_data;
-	while (fastiv_io_thumbnail_sizes[count].size) {
-		if (fastiv_io_thumbnail_sizes[count].size == size)
-			position = count;
-		count++;
-	}
+	size += (gintptr) user_data;
+	g_return_if_fail(size >= FASTIV_IO_THUMBNAIL_SIZE_MIN &&
+		size <= FASTIV_IO_THUMBNAIL_SIZE_MAX);
 
-	position += adjustment;
-	g_return_if_fail(position >= 0 && position < count);
-	g_object_set(g.browser, "thumbnail-size",
-		fastiv_io_thumbnail_sizes[position].size, NULL);
+	g_object_set(g.browser, "thumbnail-size", size, NULL);
 }
 
 static void

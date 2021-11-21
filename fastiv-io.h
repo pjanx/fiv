@@ -32,23 +32,25 @@ typedef enum _FastivIoThumbnailSize {
 	XX(NORMAL, 256, "large") \
 	XX(LARGE,  512, "x-large") \
 	XX(HUGE,  1024, "xx-large")
-#define XX(name, value, dir) FASTIV_IO_THUMBNAIL_SIZE_ ## name = value,
+#define XX(name, value, dir) FASTIV_IO_THUMBNAIL_SIZE_ ## name,
 	FASTIV_IO_THUMBNAIL_SIZES(XX)
 #undef XX
-	FASTIV_IO_THUMBNAIL_SIZE_MIN = FASTIV_IO_THUMBNAIL_SIZE_SMALL,
-	FASTIV_IO_THUMBNAIL_SIZE_MAX = FASTIV_IO_THUMBNAIL_SIZE_HUGE
+	FASTIV_IO_THUMBNAIL_SIZE_COUNT,
+
+	FASTIV_IO_THUMBNAIL_SIZE_MIN = 0,
+	FASTIV_IO_THUMBNAIL_SIZE_MAX = FASTIV_IO_THUMBNAIL_SIZE_COUNT - 1
 } FastivIoThumbnailSize;
 
 GType fastiv_io_thumbnail_size_get_type(void) G_GNUC_CONST;
 #define FASTIV_TYPE_IO_THUMBNAIL_SIZE (fastiv_io_thumbnail_size_get_type())
 
 typedef struct _FastivIoThumbnailSizeInfo {
-	FastivIoThumbnailSize size;         ///< Nominal size in pixels
-	const char *directory_name;         ///< thumbnail-spec directory name
+	int size;                           ///< Nominal size in pixels
+	const char *thumbnail_spec_name;    ///< thumbnail-spec directory name
 } FastivIoThumbnailSizeInfo;
 
-// The array is null-terminated.
-extern FastivIoThumbnailSizeInfo fastiv_io_thumbnail_sizes[];
+extern FastivIoThumbnailSizeInfo
+	fastiv_io_thumbnail_sizes[FASTIV_IO_THUMBNAIL_SIZE_COUNT];
 
 cairo_surface_t *fastiv_io_open(const gchar *path, GError **error);
 cairo_surface_t *fastiv_io_open_from_data(

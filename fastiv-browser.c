@@ -41,7 +41,8 @@
 struct _FastivBrowser {
 	GtkWidget parent_instance;
 
-	FastivIoThumbnailSize item_size;    ///< Thumbnail height in pixels
+	FastivIoThumbnailSize item_size;    ///< Thumbnail size
+	int item_height;                    ///< Thumbnail height in pixels
 
 	GArray *entries;                    ///< [Entry]
 	GArray *layouted_rows;              ///< [Row]
@@ -115,7 +116,7 @@ append_row(FastivBrowser *self, int *y, int x, GArray *items_array)
 	}));
 
 	// Not trying to pack them vertically, but this would be the place to do it.
-	*y += (int) self->item_size;
+	*y += self->item_height;
 	*y += self->item_border_y;
 }
 
@@ -206,7 +207,7 @@ item_extents(FastivBrowser *self, const Item *item, const Row *row)
 	int height = cairo_image_surface_get_height(item->entry->thumbnail);
 	return (GdkRectangle) {
 		.x = row->x_offset + item->x_offset,
-		.y = row->y_offset + (int) self->item_size - height,
+		.y = row->y_offset + self->item_height - height,
 		.width = width,
 		.height = height,
 	};
@@ -354,9 +355,10 @@ entry_add_thumbnail(gpointer data, gpointer user_data)
 	if (self->thumbnail)
 		cairo_surface_destroy(self->thumbnail);
 
-	FastivIoThumbnailSize size = FASTIV_BROWSER(user_data)->item_size;
+	FastivBrowser *browser = FASTIV_BROWSER(user_data);
 	self->thumbnail = rescale_thumbnail(
-		fastiv_io_lookup_thumbnail(self->filename, size), (int) size);
+		fastiv_io_lookup_thumbnail(self->filename, browser->item_size),
+		browser->item_height);
 	if (self->thumbnail)
 		return;
 
@@ -390,7 +392,7 @@ materialize_icon(FastivBrowser *self, Entry *entry)
 	// TODO(p): Make sure we have /some/ icon for every entry.
 	// TODO(p): We might want to populate these on an as-needed basis.
 	GtkIconInfo *icon_info = gtk_icon_theme_lookup_by_gicon(
-		gtk_icon_theme_get_default(), entry->icon, (int) self->item_size / 2,
+		gtk_icon_theme_get_default(), entry->icon, self->item_height / 2,
 		GTK_ICON_LOOKUP_FORCE_SYMBOLIC);
 	if (!icon_info)
 		return;
@@ -401,7 +403,7 @@ materialize_icon(FastivBrowser *self, Entry *entry)
 	GdkPixbuf *pixbuf = gtk_icon_info_load_symbolic(
 		icon_info, &white, &white, &white, &white, NULL, NULL);
 	if (pixbuf) {
-		int outer_size = (int) self->item_size;
+		int outer_size = self->item_height;
 		entry->thumbnail =
 			cairo_image_surface_create(CAIRO_FORMAT_A8, outer_size, outer_size);
 
@@ -492,6 +494,7 @@ fastiv_browser_set_property(
 	case PROP_THUMBNAIL_SIZE:
 		if (g_value_get_enum(value) != (int) self->item_size) {
 			self->item_size = g_value_get_enum(value);
+			self->item_height = fastiv_io_thumbnail_sizes[self->item_size].size;
 			reload_thumbnails(self);
 		}
 		break;
@@ -516,7 +519,7 @@ fastiv_browser_get_preferred_width(
 	GtkBorder padding = {};
 	gtk_style_context_get_padding(style, GTK_STATE_FLAG_NORMAL, &padding);
 	*minimum = *natural =
-		g_permitted_width_multiplier * (int) self->item_size +
+		g_permitted_width_multiplier * self->item_height +
 		padding.left + 2 * self->item_border_x + padding.right;
 }
 
@@ -594,7 +597,7 @@ fastiv_browser_draw(GtkWidget *widget, cairo_t *cr)
 			.x = 0,
 			.y = row->y_offset - self->item_border_y,
 			.width = allocation.width,
-			.height = (int) self->item_size + 2 * self->item_border_y,
+			.height = self->item_height + 2 * self->item_border_y,
 		};
 		if (!have_clip || gdk_rectangle_intersect(&clip, &extents, NULL))
 			draw_row(self, cr, row);
@@ -755,6 +758,7 @@ fastiv_browser_init(FastivBrowser *self)
 	g_array_set_clear_func(self->layouted_rows, (GDestroyNotify) row_free);
 
 	self->item_size = FASTIV_IO_THUMBNAIL_SIZE_NORMAL;
+	self->item_height = fastiv_io_thumbnail_sizes[self->item_size].size;
 	self->selected = -1;
 	self->glow = cairo_image_surface_create(CAIRO_FORMAT_A1, 0, 0);
 
