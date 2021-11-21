@@ -614,7 +614,7 @@ fastiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 	FastivBrowser *self = FASTIV_BROWSER(widget);
 	if (event->type != GDK_BUTTON_PRESS || event->state != 0)
 		return FALSE;
-	if (event->button == 1)
+	if (event->button == GDK_BUTTON_PRIMARY)
 		gtk_widget_grab_focus(widget);
 
 	const Entry *entry = entry_at(self, event->x, event->y);
@@ -622,11 +622,11 @@ fastiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 		return FALSE;
 
 	switch (event->button) {
-	case 1:
+	case GDK_BUTTON_PRIMARY:
 		g_signal_emit(widget, browser_signals[ITEM_ACTIVATED], 0,
 			entry->filename, GTK_PLACES_OPEN_NORMAL);
 		return TRUE;
-	case 2:
+	case GDK_BUTTON_MIDDLE:
 		g_signal_emit(widget, browser_signals[ITEM_ACTIVATED], 0,
 			entry->filename, GTK_PLACES_OPEN_NEW_WINDOW);
 		return TRUE;
