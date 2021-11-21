@@ -1048,3 +1048,19 @@ fastiv_io_lookup_thumbnail(const gchar *target, FastivIoThumbnailSize size)
 	g_free(uri);
 	return result;
 }
+
+int
+fastiv_io_filecmp(GFile *location1, GFile *location2)
+{
+	if (g_file_has_prefix(location1, location2))
+		return +1;
+	if (g_file_has_prefix(location2, location1))
+		return -1;
+
+	gchar *name1 = g_file_get_parse_name(location1);
+	gchar *name2 = g_file_get_parse_name(location2);
+	int result = g_utf8_collate(name1, name2);
+	g_free(name1);
+	g_free(name2);
+	return result;
+}

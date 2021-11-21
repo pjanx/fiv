@@ -768,6 +768,19 @@ fastiv_browser_init(FastivBrowser *self)
 
 // --- Public interface --------------------------------------------------------
 
+static gint
+entry_compare(gconstpointer a, gconstpointer b)
+{
+	const Entry *entry1 = a;
+	const Entry *entry2 = b;
+	GFile *location1 = g_file_new_for_path(entry1->filename);
+	GFile *location2 = g_file_new_for_path(entry2->filename);
+	gint result = fastiv_io_filecmp(location1, location2);
+	g_object_unref(location1);
+	g_object_unref(location2);
+	return result;
+}
+
 void
 fastiv_browser_load(
 	FastivBrowser *self, FastivBrowserFilterCallback cb, const char *path)
@@ -791,8 +804,6 @@ fastiv_browser_load(
 			break;
 		if (g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY)
 			continue;
-
-		// TODO(p): Support being passed a sort function.
 		if (cb && !cb(g_file_info_get_name(info)))
 			continue;
 
@@ -801,6 +812,8 @@ fastiv_browser_load(
 	}
 	g_object_unref(enumerator);
 
-	// TODO(p): Sort the entries before.
+	// TODO(p): Support being passed a sort function.
+	g_array_sort(self->entries, entry_compare);
+
 	reload_thumbnails(self);
 }

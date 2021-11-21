@@ -17,6 +17,7 @@
 
 #include <gtk/gtk.h>
 
+#include "fastiv-io.h"  // fastiv_io_filecmp
 #include "fastiv-sidebar.h"
 
 struct _FastivSidebar {
@@ -107,24 +108,12 @@ create_row(GFile *file, const char *icon_name)
 }
 
 static gint
-listbox_sort(
+listbox_compare(
 	GtkListBoxRow *row1, GtkListBoxRow *row2, G_GNUC_UNUSED gpointer user_data)
 {
-	GFile *location1 =
-		g_object_get_qdata(G_OBJECT(row1), fastiv_sidebar_location_quark());
-	GFile *location2 =
-		g_object_get_qdata(G_OBJECT(row2), fastiv_sidebar_location_quark());
-	if (g_file_has_prefix(location1, location2))
-		return +1;
-	if (g_file_has_prefix(location2, location1))
-		return -1;
-
-	gchar *name1 = g_file_get_parse_name(location1);
-	gchar *name2 = g_file_get_parse_name(location2);
-	gint result = g_utf8_collate(name1, name2);
-	g_free(name1);
-	g_free(name2);
-	return result;
+	return fastiv_io_filecmp(
+		g_object_get_qdata(G_OBJECT(row1), fastiv_sidebar_location_quark()),
+		g_object_get_qdata(G_OBJECT(row2), fastiv_sidebar_location_quark()));
 }
 
 static void
@@ -371,7 +360,7 @@ fastiv_sidebar_init(FastivSidebar *self)
 	g_signal_connect(self->listbox, "row-activated",
 		G_CALLBACK(on_open_breadcrumb), self);
 	gtk_list_box_set_sort_func(
-		GTK_LIST_BOX(self->listbox), listbox_sort, self, NULL);
+		GTK_LIST_BOX(self->listbox), listbox_compare, self, NULL);
 
 	// Fill up what would otherwise be wasted space,
 	// as it is in the examples of Nautilus and Thunar.
