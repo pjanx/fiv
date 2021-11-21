@@ -55,6 +55,7 @@ exit_fatal(const gchar *format, ...)
 
 struct {
 	gchar **supported_globs;
+	gboolean filtering;
 
 	gchar *directory;
 	GPtrArray *files;
@@ -118,7 +119,8 @@ load_directory(const gchar *dirname)
 	GFile *file = g_file_new_for_path(g.directory);
 	fastiv_sidebar_set_location(FASTIV_SIDEBAR(g.browser_sidebar), file);
 	g_object_unref(file);
-	fastiv_browser_load(FASTIV_BROWSER(g.browser), g.directory);
+	fastiv_browser_load(FASTIV_BROWSER(g.browser),
+		g.filtering ? is_supported : NULL, g.directory);
 
 	GError *error = NULL;
 	GDir *dir = g_dir_open(g.directory, 0, &error);
@@ -150,6 +152,14 @@ load_directory(const gchar *dirname)
 		gtk_stack_set_visible_child(GTK_STACK(g.stack), g.browser_paned);
 		gtk_widget_grab_focus(g.browser_scroller);
 	}
+}
+
+static void
+on_filtering_toggled(GtkToggleButton *button, G_GNUC_UNUSED gpointer user_data)
+{
+	g.filtering = gtk_toggle_button_get_active(button);
+	if (g.directory)
+		load_directory(NULL);
 }
 
 static void
@@ -549,6 +559,34 @@ main(int argc, char *argv[])
 	g_signal_connect(g.browser_sidebar, "open-location",
 		G_CALLBACK(on_open_location), NULL);
 
+	GtkWidget *plus = gtk_button_new_from_icon_name("zoom-in-symbolic",
+		GTK_ICON_SIZE_BUTTON);
+	gtk_widget_set_tooltip_text(plus, "Larger thumbnails");
+	GtkWidget *minus = gtk_button_new_from_icon_name("zoom-out-symbolic",
+		GTK_ICON_SIZE_BUTTON);
+	gtk_widget_set_tooltip_text(minus, "Smaller thumbnails");
+
+	GtkWidget *zoom_group = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+	gtk_style_context_add_class(
+		gtk_widget_get_style_context(zoom_group), GTK_STYLE_CLASS_LINKED);
+	gtk_box_pack_start(GTK_BOX(zoom_group), plus, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(zoom_group), minus, FALSE, FALSE, 0);
+
+	GtkWidget *funnel = gtk_toggle_button_new();
+	gtk_container_add(GTK_CONTAINER(funnel),
+		gtk_image_new_from_icon_name("funnel-symbolic", GTK_ICON_SIZE_BUTTON));
+	gtk_widget_set_tooltip_text(funnel, "Hide unsupported files");
+
+	// TODO(p): Implement these as well.
+	gtk_widget_set_sensitive(plus, FALSE);
+	gtk_widget_set_sensitive(minus, FALSE);
+
+	GtkBox *toolbar =
+		fastiv_sidebar_get_toolbar(FASTIV_SIDEBAR(g.browser_sidebar));
+	gtk_box_pack_start(toolbar, zoom_group, FALSE, FALSE, 0);
+	gtk_box_pack_start(toolbar, funnel, FALSE, FALSE, 0);
+	gtk_widget_set_halign(GTK_WIDGET(toolbar), GTK_ALIGN_CENTER);
+
 	g.browser_paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
 	gtk_paned_add1(GTK_PANED(g.browser_paned), g.browser_sidebar);
 	gtk_paned_add2(GTK_PANED(g.browser_paned), g.browser_scroller);
@@ -572,6 +610,9 @@ main(int argc, char *argv[])
 	char **types = fastiv_io_all_supported_media_types();
 	g.supported_globs = extract_mime_globs((const char **) types);
 	g_strfreev(types);
+
+	g_signal_connect(funnel, "toggled", G_CALLBACK(on_filtering_toggled), NULL);
+	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(funnel), TRUE);
 
 	g.files = g_ptr_array_new_full(16, g_free);
 	g.directory = g_get_current_dir();

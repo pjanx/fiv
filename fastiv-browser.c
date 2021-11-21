@@ -644,7 +644,8 @@ entry_add_thumbnail(gpointer data, G_GNUC_UNUSED gpointer user_data)
 }
 
 void
-fastiv_browser_load(FastivBrowser *self, const char *path)
+fastiv_browser_load(
+	FastivBrowser *self, FastivBrowserFilterCallback cb, const char *path)
 {
 	g_array_set_size(self->entries, 0);
 	g_array_set_size(self->layouted_rows, 0);
@@ -666,8 +667,9 @@ fastiv_browser_load(FastivBrowser *self, const char *path)
 		if (g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY)
 			continue;
 
-		// TODO(p): Support being passed filter/sort functions.
-		g_file_info_get_name(info);
+		// TODO(p): Support being passed a sort function.
+		if (cb && !cb(g_file_info_get_name(info)))
+			continue;
 
 		g_array_append_val(self->entries,
 			((Entry) {.thumbnail = NULL, .filename = g_file_get_path(child)}));

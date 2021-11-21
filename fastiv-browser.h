@@ -22,4 +22,7 @@
 #define FASTIV_TYPE_BROWSER (fastiv_browser_get_type())
 G_DECLARE_FINAL_TYPE(FastivBrowser, fastiv_browser, FASTIV, BROWSER, GtkWidget)
 
-void fastiv_browser_load(FastivBrowser *self, const char *path);
+typedef gboolean (*FastivBrowserFilterCallback) (const char *);
+
+void fastiv_browser_load(
+	FastivBrowser *self, FastivBrowserFilterCallback cb, const char *path);

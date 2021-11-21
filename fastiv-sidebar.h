@@ -25,3 +25,4 @@ G_DECLARE_FINAL_TYPE(
 
 void fastiv_sidebar_set_location(FastivSidebar *self, GFile *location);
 void fastiv_sidebar_show_enter_location(FastivSidebar *self);
+GtkBox *fastiv_sidebar_get_toolbar(FastivSidebar *self);
