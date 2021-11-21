@@ -355,6 +355,16 @@ on_notify_thumbnail_size(
 	gtk_widget_set_sensitive(g.minus, size > FASTIV_IO_THUMBNAIL_SIZE_MIN);
 }
 
+static void
+toggle_fullscreen(void)
+{
+	if (gdk_window_get_state(gtk_widget_get_window(g.window)) &
+		GDK_WINDOW_STATE_FULLSCREEN)
+		gtk_window_unfullscreen(GTK_WINDOW(g.window));
+	else
+		gtk_window_fullscreen(GTK_WINDOW(g.window));
+}
+
 // Cursor keys, e.g., simply cannot be bound through accelerators
 // (and GtkWidget::keynav-failed would arguably be an awful solution).
 //
@@ -410,11 +420,7 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 
 		case GDK_KEY_F11:
 		case GDK_KEY_f:
-			if (gdk_window_get_state(gtk_widget_get_window(g.window)) &
-				GDK_WINDOW_STATE_FULLSCREEN)
-				gtk_window_unfullscreen(GTK_WINDOW(g.window));
-			else
-				gtk_window_fullscreen(GTK_WINDOW(g.window));
+			toggle_fullscreen();
 			return TRUE;
 		}
 	}
@@ -459,6 +465,12 @@ on_button_press_view(G_GNUC_UNUSED GtkWidget *widget, GdkEventButton *event)
 	case 8:  // back
 		gtk_stack_set_visible_child(GTK_STACK(g.stack), g.browser_paned);
 		return TRUE;
+	case GDK_BUTTON_PRIMARY:
+		if (event->type == GDK_2BUTTON_PRESS) {
+			toggle_fullscreen();
+			return TRUE;
+		}
+		return FALSE;
 	default:
 		return FALSE;
 	}
