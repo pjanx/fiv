@@ -331,7 +331,7 @@ fastiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 		return set_scale(self, self->scale * SCALE_STEP);
 	case GDK_KEY_minus:
 		return set_scale(self, self->scale / SCALE_STEP);
-	case GDK_KEY_f:
+	case GDK_KEY_F:
 		return set_scale_to_fit(self, !self->scale_to_fit);
 	}
 	return FALSE;
