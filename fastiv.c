@@ -108,6 +108,21 @@ show_error_dialog(GError *error)
 }
 
 static void
+switch_to_browser(void)
+{
+	gtk_window_set_title(GTK_WINDOW(g.window), g.directory);
+	gtk_stack_set_visible_child(GTK_STACK(g.stack), g.browser_paned);
+	gtk_widget_grab_focus(g.browser_scroller);
+}
+
+static void
+switch_to_view(const char *path)
+{
+	gtk_window_set_title(GTK_WINDOW(g.window), path);
+	gtk_stack_set_visible_child(GTK_STACK(g.stack), g.view_scroller);
+}
+
+static void
 load_directory(const gchar *dirname)
 {
 	if (dirname) {
@@ -150,10 +165,8 @@ load_directory(const gchar *dirname)
 	// XXX: When something outside the filtered entries is open, the index is
 	// kept at -1, and browsing doesn't work. How to behave here?
 	// Should we add it to the pointer array as an exception?
-	if (dirname) {
-		gtk_stack_set_visible_child(GTK_STACK(g.stack), g.browser_paned);
-		gtk_widget_grab_focus(g.browser_scroller);
-	}
+	if (dirname)
+		switch_to_browser();
 }
 
 static void
@@ -201,8 +214,7 @@ open(const gchar *path)
 	}
 	g_free(dirname);
 
-	gtk_window_set_title(GTK_WINDOW(g.window), path);
-	gtk_stack_set_visible_child(GTK_STACK(g.stack), g.view_scroller);
+	switch_to_view(path);
 }
 
 static GtkWidget *
@@ -449,7 +461,7 @@ on_key_press_view(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 
 		case GDK_KEY_Tab:
 		case GDK_KEY_Return:
-			gtk_stack_set_visible_child(GTK_STACK(g.stack), g.browser_paned);
+			switch_to_browser();
 			return TRUE;
 		}
 	}
@@ -463,7 +475,7 @@ on_button_press_view(G_GNUC_UNUSED GtkWidget *widget, GdkEventButton *event)
 		return FALSE;
 	switch (event->button) {
 	case 8:  // back
-		gtk_stack_set_visible_child(GTK_STACK(g.stack), g.browser_paned);
+		switch_to_browser();
 		return TRUE;
 	case GDK_BUTTON_PRIMARY:
 		if (event->type == GDK_2BUTTON_PRESS) {
@@ -483,7 +495,8 @@ on_button_press_browser(G_GNUC_UNUSED GtkWidget *widget, GdkEventButton *event)
 		return FALSE;
 	switch (event->button) {
 	case 9:  // forward
-		gtk_stack_set_visible_child(GTK_STACK(g.stack), g.view_scroller);
+		// FIXME: This is inconsistent, normally there is an absolute path.
+		switch_to_view(g.basename);
 		return TRUE;
 	default:
 		return FALSE;
