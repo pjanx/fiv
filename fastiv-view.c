@@ -313,7 +313,9 @@ fastiv_view_scroll_event(GtkWidget *widget, GdkEventScroll *event)
 	case GDK_SCROLL_DOWN:
 		return set_scale(self, self->scale / SCALE_STEP);
 	default:
-		return FALSE;
+		// For some reason, we can also get GDK_SCROLL_SMOOTH.
+		// Left/right are good to steal from GtkScrolledWindow for consistency.
+		return TRUE;
 	}
 }
 
