@@ -41,6 +41,8 @@
 struct _FastivBrowser {
 	GtkWidget parent_instance;
 
+	FastivIoThumbnailSize item_size;    ///< Thumbnail height in pixels
+
 	GArray *entries;                    ///< [Entry]
 	GArray *layouted_rows;              ///< [Row]
 	int selected;
@@ -55,7 +57,6 @@ typedef struct entry Entry;
 typedef struct item Item;
 typedef struct row Row;
 
-static const double g_row_height = 256;
 static const double g_permitted_width_multiplier = 2;
 
 // Could be split out to also-idiomatic row-spacing/column-spacing properties.
@@ -114,7 +115,7 @@ append_row(FastivBrowser *self, int *y, int x, GArray *items_array)
 	}));
 
 	// Not trying to pack them vertically, but this would be the place to do it.
-	*y += g_row_height;
+	*y += (int) self->item_size;
 	*y += self->item_border_y;
 }
 
@@ -199,13 +200,13 @@ draw_outer_border(FastivBrowser *self, cairo_t *cr, int width, int height)
 }
 
 static GdkRectangle
-item_extents(const Item *item, const Row *row)
+item_extents(FastivBrowser *self, const Item *item, const Row *row)
 {
 	int width = cairo_image_surface_get_width(item->entry->thumbnail);
 	int height = cairo_image_surface_get_height(item->entry->thumbnail);
 	return (GdkRectangle) {
 		.x = row->x_offset + item->x_offset,
-		.y = row->y_offset + g_row_height - height,
+		.y = row->y_offset + (int) self->item_size - height,
 		.width = width,
 		.height = height,
 	};
@@ -217,7 +218,7 @@ entry_at(FastivBrowser *self, int x, int y)
 	for (guint i = 0; i < self->layouted_rows->len; i++) {
 		const Row *row = &g_array_index(self->layouted_rows, Row, i);
 		for (Item *item = row->items; item->entry; item++) {
-			GdkRectangle extents = item_extents(item, row);
+			GdkRectangle extents = item_extents(self, item, row);
 			if (x >= extents.x &&
 				y >= extents.y &&
 				x <= extents.x + extents.width &&
@@ -243,7 +244,7 @@ draw_row(FastivBrowser *self, cairo_t *cr, const Row *row)
 	gtk_style_context_get_border(style, state, &border);
 	for (Item *item = row->items; item->entry; item++) {
 		cairo_save(cr);
-		GdkRectangle extents = item_extents(item, row);
+		GdkRectangle extents = item_extents(self, item, row);
 		cairo_translate(cr, extents.x - border.left, extents.y - border.top);
 
 		gtk_style_context_save(style);
@@ -281,12 +282,172 @@ draw_row(FastivBrowser *self, cairo_t *cr, const Row *row)
 	gtk_style_context_restore(style);
 }
 
+// --- Thumbnails --------------------------------------------------------------
+
+// NOTE: "It is important to note that when an image with an alpha channel is
+// scaled, linear encoded, pre-multiplied component values must be used!"
+static cairo_surface_t *
+rescale_thumbnail(cairo_surface_t *thumbnail, double row_height)
+{
+	if (!thumbnail)
+		return thumbnail;
+
+	int width = cairo_image_surface_get_width(thumbnail);
+	int height = cairo_image_surface_get_height(thumbnail);
+
+	double scale_x = 1;
+	double scale_y = 1;
+	if (width > g_permitted_width_multiplier * height) {
+		scale_x = g_permitted_width_multiplier * row_height / width;
+		scale_y = round(scale_x * height) / height;
+	} else {
+		scale_y = row_height / height;
+		scale_x = round(scale_y * width) / width;
+	}
+	if (scale_x == 1 && scale_y == 1)
+		return thumbnail;
+
+	int projected_width = round(scale_x * width);
+	int projected_height = round(scale_y * height);
+	cairo_surface_t *scaled = cairo_image_surface_create(
+		CAIRO_FORMAT_ARGB32, projected_width, projected_height);
+
+	// pixman can take gamma into account when scaling, unlike Cairo.
+	struct pixman_f_transform xform_floating;
+	struct pixman_transform xform;
+
+	// PIXMAN_a8r8g8b8_sRGB can be used for gamma-correct results,
+	// but it's an incredibly slow transformation
+	pixman_format_code_t format = PIXMAN_a8r8g8b8;
+
+	pixman_image_t *src = pixman_image_create_bits(format, width, height,
+		(uint32_t *) cairo_image_surface_get_data(thumbnail),
+		cairo_image_surface_get_stride(thumbnail));
+	pixman_image_t *dest = pixman_image_create_bits(format,
+		cairo_image_surface_get_width(scaled),
+		cairo_image_surface_get_height(scaled),
+		(uint32_t *) cairo_image_surface_get_data(scaled),
+		cairo_image_surface_get_stride(scaled));
+
+	pixman_f_transform_init_scale(&xform_floating, scale_x, scale_y);
+	pixman_f_transform_invert(&xform_floating, &xform_floating);
+	pixman_transform_from_pixman_f_transform(&xform, &xform_floating);
+	pixman_image_set_transform(src, &xform);
+	pixman_image_set_filter(src, PIXMAN_FILTER_BILINEAR, NULL, 0);
+	pixman_image_set_repeat(src, PIXMAN_REPEAT_PAD);
+
+	pixman_image_composite(PIXMAN_OP_SRC, src, NULL, dest, 0, 0, 0, 0, 0, 0,
+		projected_width, projected_height);
+	pixman_image_unref(src);
+	pixman_image_unref(dest);
+
+	cairo_surface_destroy(thumbnail);
+	cairo_surface_mark_dirty(scaled);
+	return scaled;
+}
+
+static void
+entry_add_thumbnail(gpointer data, gpointer user_data)
+{
+	Entry *self = data;
+	g_clear_object(&self->icon);
+	if (self->thumbnail)
+		cairo_surface_destroy(self->thumbnail);
+
+	FastivIoThumbnailSize size = FASTIV_BROWSER(user_data)->item_size;
+	self->thumbnail = rescale_thumbnail(
+		fastiv_io_lookup_thumbnail(self->filename, size), (int) size);
+	if (self->thumbnail)
+		return;
+
+	// Fall back to symbolic icons, though there's only so much we can do
+	// in parallel--GTK+ isn't thread-safe.
+	GFile *file = g_file_new_for_path(self->filename);
+	GFileInfo *info = g_file_query_info(file,
+		G_FILE_ATTRIBUTE_STANDARD_NAME
+		"," G_FILE_ATTRIBUTE_STANDARD_SYMBOLIC_ICON,
+		G_FILE_QUERY_INFO_NONE, NULL, NULL);
+	g_object_unref(file);
+	if (info) {
+		GIcon *icon = g_file_info_get_symbolic_icon(info);
+		if (icon)
+			self->icon = g_object_ref(icon);
+		g_object_unref(info);
+	}
+}
+
+static void
+materialize_icon(FastivBrowser *self, Entry *entry)
+{
+	if (!entry->icon)
+		return;
+
+	// Fucker will still give us non-symbolic icons, no more playing nice.
+	// TODO(p): Investigate a bit closer. We may want to abandon the idea
+	// of using GLib to look up icons for us, derive a list from a guessed
+	// MIME type, with "-symbolic" prefixes and fallbacks,
+	// and use gtk_icon_theme_choose_icon() instead.
+	// TODO(p): Make sure we have /some/ icon for every entry.
+	// TODO(p): We might want to populate these on an as-needed basis.
+	GtkIconInfo *icon_info = gtk_icon_theme_lookup_by_gicon(
+		gtk_icon_theme_get_default(), entry->icon, (int) self->item_size / 2,
+		GTK_ICON_LOOKUP_FORCE_SYMBOLIC);
+	if (!icon_info)
+		return;
+
+	// Bílá, bílá, bílá, bílá... komu by se nelíbí-lá...
+	// We do not want any highlights, nor do we want to remember the style.
+	const GdkRGBA white = {1, 1, 1, 1};
+	GdkPixbuf *pixbuf = gtk_icon_info_load_symbolic(
+		icon_info, &white, &white, &white, &white, NULL, NULL);
+	if (pixbuf) {
+		int outer_size = (int) self->item_size;
+		entry->thumbnail =
+			cairo_image_surface_create(CAIRO_FORMAT_A8, outer_size, outer_size);
+
+		// "Note that the resulting pixbuf may not be exactly this size;"
+		// though GTK_ICON_LOOKUP_FORCE_SIZE is also an option.
+		int x = (outer_size - gdk_pixbuf_get_width(pixbuf)) / 2;
+		int y = (outer_size - gdk_pixbuf_get_height(pixbuf)) / 2;
+
+		cairo_t *cr = cairo_create(entry->thumbnail);
+		gdk_cairo_set_source_pixbuf(cr, pixbuf, x, y);
+		cairo_paint(cr);
+		cairo_destroy(cr);
+
+		g_object_unref(pixbuf);
+	}
+	g_object_unref(icon_info);
+}
+
+static void
+reload_thumbnails(FastivBrowser *self)
+{
+	GThreadPool *pool = g_thread_pool_new(
+		entry_add_thumbnail, self, g_get_num_processors(), FALSE, NULL);
+	for (guint i = 0; i < self->entries->len; i++)
+		g_thread_pool_push(pool, &g_array_index(self->entries, Entry, i), NULL);
+	g_thread_pool_free(pool, FALSE, TRUE);
+
+	for (guint i = 0; i < self->entries->len; i++)
+		materialize_icon(self, &g_array_index(self->entries, Entry, i));
+
+	gtk_widget_queue_resize(GTK_WIDGET(self));
+}
+
 // --- Boilerplate -------------------------------------------------------------
 
 // TODO(p): For proper navigation, we need to implement GtkScrollable.
 G_DEFINE_TYPE_EXTENDED(FastivBrowser, fastiv_browser, GTK_TYPE_WIDGET, 0,
 	/* G_IMPLEMENT_INTERFACE(GTK_TYPE_SCROLLABLE,
 		fastiv_browser_scrollable_init) */)
+
+enum {
+	PROP_THUMBNAIL_SIZE = 1,
+	N_PROPERTIES
+};
+
+static GParamSpec *browser_properties[N_PROPERTIES];
 
 enum {
 	ITEM_ACTIVATED,
@@ -308,6 +469,37 @@ fastiv_browser_finalize(GObject *gobject)
 	G_OBJECT_CLASS(fastiv_browser_parent_class)->finalize(gobject);
 }
 
+static void
+fastiv_browser_get_property(
+	GObject *object, guint property_id, GValue *value, GParamSpec *pspec)
+{
+	FastivBrowser *self = FASTIV_BROWSER(object);
+	switch (property_id) {
+	case PROP_THUMBNAIL_SIZE:
+		g_value_set_enum(value, self->item_size);
+		break;
+	default:
+		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
+	}
+}
+
+static void
+fastiv_browser_set_property(
+	GObject *object, guint property_id, const GValue *value, GParamSpec *pspec)
+{
+	FastivBrowser *self = FASTIV_BROWSER(object);
+	switch (property_id) {
+	case PROP_THUMBNAIL_SIZE:
+		if (g_value_get_enum(value) != (int) self->item_size) {
+			self->item_size = g_value_get_enum(value);
+			reload_thumbnails(self);
+		}
+		break;
+	default:
+		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
+	}
+}
+
 static GtkSizeRequestMode
 fastiv_browser_get_request_mode(G_GNUC_UNUSED GtkWidget *widget)
 {
@@ -323,7 +515,8 @@ fastiv_browser_get_preferred_width(
 
 	GtkBorder padding = {};
 	gtk_style_context_get_padding(style, GTK_STATE_FLAG_NORMAL, &padding);
-	*minimum = *natural = g_permitted_width_multiplier * g_row_height +
+	*minimum = *natural =
+		g_permitted_width_multiplier * (int) self->item_size +
 		padding.left + 2 * self->item_border_x + padding.right;
 }
 
@@ -401,7 +594,7 @@ fastiv_browser_draw(GtkWidget *widget, cairo_t *cr)
 			.x = 0,
 			.y = row->y_offset - self->item_border_y,
 			.width = allocation.width,
-			.height = g_row_height + 2 * self->item_border_y,
+			.height = (int) self->item_size + 2 * self->item_border_y,
 		};
 		if (!have_clip || gdk_rectangle_intersect(&clip, &extents, NULL))
 			draw_row(self, cr, row);
@@ -520,6 +713,19 @@ fastiv_browser_class_init(FastivBrowserClass *klass)
 {
 	GObjectClass *object_class = G_OBJECT_CLASS(klass);
 	object_class->finalize = fastiv_browser_finalize;
+	object_class->get_property = fastiv_browser_get_property;
+	object_class->set_property = fastiv_browser_set_property;
+
+	browser_properties[PROP_THUMBNAIL_SIZE] = g_param_spec_enum(
+		"thumbnail-size", "Thumbnail size", "The thumbnail height to use",
+		FASTIV_TYPE_IO_THUMBNAIL_SIZE, FASTIV_IO_THUMBNAIL_SIZE_NORMAL,
+		G_PARAM_READWRITE);
+	g_object_class_install_properties(
+		object_class, N_PROPERTIES, browser_properties);
+
+	browser_signals[ITEM_ACTIVATED] = g_signal_new("item-activated",
+		G_TYPE_FROM_CLASS(klass), 0, 0, NULL, NULL, NULL,
+		G_TYPE_NONE, 2, G_TYPE_STRING, GTK_TYPE_PLACES_OPEN_FLAGS);
 
 	GtkWidgetClass *widget_class = GTK_WIDGET_CLASS(klass);
 	widget_class->get_request_mode = fastiv_browser_get_request_mode;
@@ -532,10 +738,6 @@ fastiv_browser_class_init(FastivBrowserClass *klass)
 	widget_class->button_press_event = fastiv_browser_button_press_event;
 	widget_class->motion_notify_event = fastiv_browser_motion_notify_event;
 	widget_class->style_updated = fastiv_browser_style_updated;
-
-	browser_signals[ITEM_ACTIVATED] = g_signal_new("item-activated",
-		G_TYPE_FROM_CLASS(klass), 0, 0, NULL, NULL, NULL,
-		G_TYPE_NONE, 2, G_TYPE_STRING, GTK_TYPE_PLACES_OPEN_FLAGS);
 
 	// TODO(p): Later override "screen_changed", recreate Pango layouts there,
 	// if we get to have any, or otherwise reflect DPI changes.
@@ -552,96 +754,15 @@ fastiv_browser_init(FastivBrowser *self)
 	self->layouted_rows = g_array_new(FALSE, TRUE, sizeof(Row));
 	g_array_set_clear_func(self->layouted_rows, (GDestroyNotify) row_free);
 
+	self->item_size = FASTIV_IO_THUMBNAIL_SIZE_NORMAL;
 	self->selected = -1;
 	self->glow = cairo_image_surface_create(CAIRO_FORMAT_A1, 0, 0);
+
+	g_signal_connect_swapped(gtk_settings_get_default(),
+		"notify::gtk-icon-theme-name", G_CALLBACK(reload_thumbnails), self);
 }
 
-// NOTE: "It is important to note that when an image with an alpha channel is
-// scaled, linear encoded, pre-multiplied component values must be used!"
-static cairo_surface_t *
-rescale_thumbnail(cairo_surface_t *thumbnail)
-{
-	if (!thumbnail)
-		return thumbnail;
-
-	int width = cairo_image_surface_get_width(thumbnail);
-	int height = cairo_image_surface_get_height(thumbnail);
-
-	double scale_x = 1;
-	double scale_y = 1;
-	if (width > g_permitted_width_multiplier * height) {
-		scale_x = g_permitted_width_multiplier * g_row_height / width;
-		scale_y = round(scale_x * height) / height;
-	} else {
-		scale_y = g_row_height / height;
-		scale_x = round(scale_y * width) / width;
-	}
-	if (scale_x == 1 && scale_y == 1)
-		return thumbnail;
-
-	int projected_width = round(scale_x * width);
-	int projected_height = round(scale_y * height);
-	cairo_surface_t *scaled = cairo_image_surface_create(
-		CAIRO_FORMAT_ARGB32, projected_width, projected_height);
-
-	// pixman can take gamma into account when scaling, unlike Cairo.
-	struct pixman_f_transform xform_floating;
-	struct pixman_transform xform;
-
-	// PIXMAN_a8r8g8b8_sRGB can be used for gamma-correct results,
-	// but it's an incredibly slow transformation
-	pixman_format_code_t format = PIXMAN_a8r8g8b8;
-
-	pixman_image_t *src = pixman_image_create_bits(format, width, height,
-		(uint32_t *) cairo_image_surface_get_data(thumbnail),
-		cairo_image_surface_get_stride(thumbnail));
-	pixman_image_t *dest = pixman_image_create_bits(format,
-		cairo_image_surface_get_width(scaled),
-		cairo_image_surface_get_height(scaled),
-		(uint32_t *) cairo_image_surface_get_data(scaled),
-		cairo_image_surface_get_stride(scaled));
-
-	pixman_f_transform_init_scale(&xform_floating, scale_x, scale_y);
-	pixman_f_transform_invert(&xform_floating, &xform_floating);
-	pixman_transform_from_pixman_f_transform(&xform, &xform_floating);
-	pixman_image_set_transform(src, &xform);
-	pixman_image_set_filter(src, PIXMAN_FILTER_BILINEAR, NULL, 0);
-	pixman_image_set_repeat(src, PIXMAN_REPEAT_PAD);
-
-	pixman_image_composite(PIXMAN_OP_SRC, src, NULL, dest, 0, 0, 0, 0, 0, 0,
-		projected_width, projected_height);
-	pixman_image_unref(src);
-	pixman_image_unref(dest);
-
-	cairo_surface_destroy(thumbnail);
-	cairo_surface_mark_dirty(scaled);
-	return scaled;
-}
-
-static void
-entry_add_thumbnail(gpointer data, G_GNUC_UNUSED gpointer user_data)
-{
-	Entry *self = data;
-	self->thumbnail =
-		rescale_thumbnail(fastiv_io_lookup_thumbnail(self->filename));
-	if (self->thumbnail)
-		return;
-
-	// Fall back to symbolic icons, though there's only so much we can do
-	// in parallel--GTK+ isn't thread-safe.
-	GFile *file = g_file_new_for_path(self->filename);
-	GFileInfo *info = g_file_query_info(file,
-		G_FILE_ATTRIBUTE_STANDARD_NAME
-		"," G_FILE_ATTRIBUTE_STANDARD_SYMBOLIC_ICON,
-		G_FILE_QUERY_INFO_NONE, NULL, NULL);
-	g_object_unref(file);
-	if (info) {
-		GIcon *icon = g_file_info_get_symbolic_icon(info);
-		if (icon)
-			self->icon = g_object_ref(icon);
-		g_object_unref(info);
-	}
-}
+// --- Public interface --------------------------------------------------------
 
 void
 fastiv_browser_load(
@@ -676,56 +797,6 @@ fastiv_browser_load(
 	}
 	g_object_unref(enumerator);
 
-	GThreadPool *pool = g_thread_pool_new(
-		entry_add_thumbnail, NULL, g_get_num_processors(), FALSE, NULL);
-	for (guint i = 0; i < self->entries->len; i++)
-		g_thread_pool_push(pool, &g_array_index(self->entries, Entry, i), NULL);
-	g_thread_pool_free(pool, FALSE, TRUE);
-
-	for (guint i = 0; i < self->entries->len; i++) {
-		Entry *entry = &g_array_index(self->entries, Entry, i);
-		if (!entry->icon)
-			continue;
-
-		// Fucker will still give us non-symbolic icons, no more playing nice.
-		// TODO(p): Investigate a bit closer. We may want to abandon the idea
-		// of using GLib to look up icons for us, derive a list from a guessed
-		// MIME type, with "-symbolic" prefixes and fallbacks,
-		// and use gtk_icon_theme_choose_icon() instead.
-		// TODO(p): Make sure we have /some/ icon for every entry.
-		// TODO(p): GtkSettings -> notify::gtk-icon-theme-name?
-		// TODO(p): We might want to populate these on an as-needed basis.
-		GtkIconInfo *icon_info =
-			gtk_icon_theme_lookup_by_gicon(gtk_icon_theme_get_default(),
-				entry->icon, g_row_height / 2, GTK_ICON_LOOKUP_FORCE_SYMBOLIC);
-		if (!icon_info)
-			continue;
-
-		// Bílá, bílá, bílá, bílá... komu by se nelíbí-lá...
-		// We do not want any highlights, nor do we want to remember the style.
-		const GdkRGBA white = {1, 1, 1, 1};
-		GdkPixbuf *pixbuf = gtk_icon_info_load_symbolic(
-			icon_info, &white, &white, &white, &white, NULL, NULL);
-		if (pixbuf) {
-			int outer_size = g_row_height;
-			entry->thumbnail = cairo_image_surface_create(
-				CAIRO_FORMAT_A8, outer_size, outer_size);
-
-			// "Note that the resulting pixbuf may not be exactly this size;"
-			// though GTK_ICON_LOOKUP_FORCE_SIZE is also an option.
-			int x = (outer_size - gdk_pixbuf_get_width(pixbuf)) / 2;
-			int y = (outer_size - gdk_pixbuf_get_height(pixbuf)) / 2;
-
-			cairo_t *cr = cairo_create(entry->thumbnail);
-			gdk_cairo_set_source_pixbuf(cr, pixbuf, x, y);
-			cairo_paint(cr);
-			cairo_destroy(cr);
-
-			g_object_unref(pixbuf);
-		}
-		g_object_unref(icon_info);
-	}
-
-	// TODO(p): Sort and filter the entries.
-	gtk_widget_queue_resize(GTK_WIDGET(self));
+	// TODO(p): Sort the entries before.
+	reload_thumbnails(self);
 }

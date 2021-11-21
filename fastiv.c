@@ -71,6 +71,8 @@ struct {
 	GtkWidget *browser_scroller;
 	GtkWidget *browser_paned;
 	GtkWidget *browser_sidebar;
+	GtkWidget *plus;
+	GtkWidget *minus;
 } g;
 
 static gboolean
@@ -330,6 +332,35 @@ on_open_location(G_GNUC_UNUSED GtkPlacesSidebar *sidebar, GFile *location,
 	}
 }
 
+static void
+on_toolbar_zoom(G_GNUC_UNUSED GtkButton *button, gpointer user_data)
+{
+	FastivIoThumbnailSize size = FASTIV_IO_THUMBNAIL_SIZE_MIN;
+	g_object_get(g.browser, "thumbnail-size", &size, NULL);
+
+	gintptr position = -1, count = 0, adjustment = (gintptr) user_data;
+	while (fastiv_io_thumbnail_sizes[count].size) {
+		if (fastiv_io_thumbnail_sizes[count].size == size)
+			position = count;
+		count++;
+	}
+
+	position += adjustment;
+	g_return_if_fail(position >= 0 && position < count);
+	g_object_set(g.browser, "thumbnail-size",
+		fastiv_io_thumbnail_sizes[position].size, NULL);
+}
+
+static void
+on_notify_thumbnail_size(
+	GObject *object, GParamSpec *param_spec, G_GNUC_UNUSED gpointer user_data)
+{
+	FastivIoThumbnailSize size = 0;
+	g_object_get(object, g_param_spec_get_name(param_spec), &size, NULL);
+	gtk_widget_set_sensitive(g.plus, size < FASTIV_IO_THUMBNAIL_SIZE_MAX);
+	gtk_widget_set_sensitive(g.minus, size > FASTIV_IO_THUMBNAIL_SIZE_MIN);
+}
+
 // Cursor keys, e.g., simply cannot be bound through accelerators
 // (and GtkWidget::keynav-failed would arguably be an awful solution).
 //
@@ -559,27 +590,30 @@ main(int argc, char *argv[])
 	g_signal_connect(g.browser_sidebar, "open-location",
 		G_CALLBACK(on_open_location), NULL);
 
-	GtkWidget *plus = gtk_button_new_from_icon_name("zoom-in-symbolic",
+	g.plus = gtk_button_new_from_icon_name("zoom-in-symbolic",
 		GTK_ICON_SIZE_BUTTON);
-	gtk_widget_set_tooltip_text(plus, "Larger thumbnails");
-	GtkWidget *minus = gtk_button_new_from_icon_name("zoom-out-symbolic",
+	gtk_widget_set_tooltip_text(g.plus, "Larger thumbnails");
+	g_signal_connect(g.plus, "clicked",
+		G_CALLBACK(on_toolbar_zoom), (gpointer) +1);
+
+	g.minus = gtk_button_new_from_icon_name("zoom-out-symbolic",
 		GTK_ICON_SIZE_BUTTON);
-	gtk_widget_set_tooltip_text(minus, "Smaller thumbnails");
+	gtk_widget_set_tooltip_text(g.minus, "Smaller thumbnails");
+	g_signal_connect(g.minus, "clicked",
+		G_CALLBACK(on_toolbar_zoom), (gpointer) -1);
 
 	GtkWidget *zoom_group = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	gtk_style_context_add_class(
 		gtk_widget_get_style_context(zoom_group), GTK_STYLE_CLASS_LINKED);
-	gtk_box_pack_start(GTK_BOX(zoom_group), plus, FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(zoom_group), minus, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(zoom_group), g.plus, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(zoom_group), g.minus, FALSE, FALSE, 0);
 
 	GtkWidget *funnel = gtk_toggle_button_new();
 	gtk_container_add(GTK_CONTAINER(funnel),
 		gtk_image_new_from_icon_name("funnel-symbolic", GTK_ICON_SIZE_BUTTON));
 	gtk_widget_set_tooltip_text(funnel, "Hide unsupported files");
-
-	// TODO(p): Implement these as well.
-	gtk_widget_set_sensitive(plus, FALSE);
-	gtk_widget_set_sensitive(minus, FALSE);
+	g_signal_connect(funnel, "toggled",
+		G_CALLBACK(on_filtering_toggled), NULL);
 
 	GtkBox *toolbar =
 		fastiv_sidebar_get_toolbar(FASTIV_SIDEBAR(g.browser_sidebar));
@@ -611,7 +645,9 @@ main(int argc, char *argv[])
 	g.supported_globs = extract_mime_globs((const char **) types);
 	g_strfreev(types);
 
-	g_signal_connect(funnel, "toggled", G_CALLBACK(on_filtering_toggled), NULL);
+	g_signal_connect(g.browser, "notify::thumbnail-size",
+		G_CALLBACK(on_notify_thumbnail_size), NULL);
+	on_toolbar_zoom(NULL, (gpointer) 0);
 	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(funnel), TRUE);
 
 	g.files = g_ptr_array_new_full(16, g_free);

@@ -102,6 +102,29 @@ fastiv_io_all_supported_media_types(void)
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+GType
+fastiv_io_thumbnail_size_get_type(void)
+{
+	static gsize guard;
+	if (g_once_init_enter(&guard)) {
+#define XX(name, value, dir) {FASTIV_IO_THUMBNAIL_SIZE_ ## name, \
+	"FASTIV_IO_THUMBNAIL_SIZE_" #name, #name},
+		static const GEnumValue values[] = {FASTIV_IO_THUMBNAIL_SIZES(XX) {}};
+#undef XX
+		GType type = g_enum_register_static(
+			g_intern_static_string("FastivIoThumbnailSize"), values);
+		g_once_init_leave(&guard, type);
+	}
+	return guard;
+}
+
+#define XX(name, value, dir) {FASTIV_IO_THUMBNAIL_SIZE_ ## name, dir},
+FastivIoThumbnailSizeInfo fastiv_io_thumbnail_sizes[] = {
+	FASTIV_IO_THUMBNAIL_SIZES(XX) {}};
+#undef XX
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
 #define FASTIV_IO_ERROR fastiv_io_error_quark()
 
 G_DEFINE_QUARK(fastiv-io-error-quark, fastiv_io_error)
@@ -981,8 +1004,20 @@ fail_init:
 }
 
 cairo_surface_t *
-fastiv_io_lookup_thumbnail(const gchar *target)
+fastiv_io_lookup_thumbnail(const gchar *target, FastivIoThumbnailSize size)
 {
+	// TODO(p): Consider having linear enum constants,
+	// and using a trivial lookup table. This is ridiculous.
+	int size_index = 0;
+	while (fastiv_io_thumbnail_sizes[size_index].size &&
+		fastiv_io_thumbnail_sizes[size_index].size < size)
+		size_index++;
+	int size_count = size_index;
+	while (fastiv_io_thumbnail_sizes[size_count].size)
+		size_count++;
+
+	g_return_val_if_fail(fastiv_io_thumbnail_sizes[size_index].size, NULL);
+
 	GStatBuf st;
 	if (g_stat(target, &st))
 		return NULL;
@@ -997,17 +1032,22 @@ fastiv_io_lookup_thumbnail(const gchar *target)
 	gchar *cache_dir = get_xdg_home_dir("XDG_CACHE_HOME", ".cache");
 
 	cairo_surface_t *result = NULL;
-	const gchar *sizes[] = {"large", "x-large", "xx-large", "normal"};
 	GError *error = NULL;
-	for (gsize i = 0; !result && i < G_N_ELEMENTS(sizes); i++) {
-		gchar *path = g_strdup_printf(
-			"%s/thumbnails/%s/%s.png", cache_dir, sizes[i], sum);
+	for (int i = 0; i < size_count; i++) {
+		int size_use = size_index + i;
+		if (size_use >= size_count)
+			size_use = size_count - i - 1;
+
+		gchar *path = g_strdup_printf("%s/thumbnails/%s/%s.png", cache_dir,
+			fastiv_io_thumbnail_sizes[size_use].directory_name, sum);
 		result = read_spng_thumbnail(path, uri, st.st_mtim.tv_sec, &error);
 		if (error) {
 			g_debug("%s: %s", path, error->message);
 			g_clear_error(&error);
 		}
 		g_free(path);
+		if (result)
+			break;
 	}
 
 	g_free(cache_dir);
