@@ -7,6 +7,7 @@ RAW and SVG pictures, or whatever gdk-pixbuf loads.  Currently, it's very basic.
 Non-goals
 ---------
  - fancy UI--the focus is on speed of use first, colour accuracy second
+ - editing--that's what _editors_ are for, be it GIMP or Rawtherapee
  - memory efficiency, though preloading can cause some pressure
  - portability to non-UNIXy systems
 
