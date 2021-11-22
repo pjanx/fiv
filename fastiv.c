@@ -128,6 +128,11 @@ load_directory(const gchar *dirname)
 	if (dirname) {
 		free(g.directory);
 		g.directory = g_strdup(dirname);
+
+		GtkAdjustment *vadjustment = gtk_scrolled_window_get_vadjustment(
+			GTK_SCROLLED_WINDOW(g.browser_scroller));
+		gtk_adjustment_set_value(
+			vadjustment, gtk_adjustment_get_lower(vadjustment));
 	}
 
 	g_ptr_array_set_size(g.files, 0);
@@ -600,6 +605,11 @@ main(int argc, char *argv[])
 	g_signal_connect(g.browser, "button-press-event",
 		G_CALLBACK(on_button_press_browser), NULL);
 	gtk_container_add(GTK_CONTAINER(g.browser_scroller), g.browser);
+
+	// Christ, no.
+	GtkWidget *browser_port = gtk_bin_get_child(GTK_BIN(g.browser_scroller));
+	gtk_container_set_focus_hadjustment(GTK_CONTAINER(browser_port), NULL);
+	gtk_container_set_focus_vadjustment(GTK_CONTAINER(browser_port), NULL);
 
 	// TODO(p): As with GtkFileChooserWidget, bind:
 	//  - C-h to filtering,
