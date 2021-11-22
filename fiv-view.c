@@ -384,8 +384,12 @@ fiv_view_realize(GtkWidget *widget)
 		// Assuming here that we can't ask for a higher-precision Visual
 		// than what we get automatically.
 		.visual = gtk_widget_get_visual(widget),
-		.event_mask = gtk_widget_get_events(widget) | GDK_SCROLL_MASK |
-			GDK_KEY_PRESS_MASK | GDK_BUTTON_PRESS_MASK,
+
+		// Pointer motion/release enables attaching GtkGestureDrag to
+		// the parent GtkScrolledWindow, having it work with the mouse.
+		.event_mask = gtk_widget_get_events(widget) | GDK_KEY_PRESS_MASK |
+			GDK_SCROLL_MASK | GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK |
+			GDK_POINTER_MOTION_MASK,
 	};
 
 	// We need this window to receive input events at all.
