@@ -471,6 +471,13 @@ on_key_press_view(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 			switch_to_browser();
 			return TRUE;
 		}
+		break;
+	case GDK_MOD1_MASK:
+		switch (event->keyval) {
+		case GDK_KEY_Left:
+			switch_to_browser();
+			return TRUE;
+		}
 	}
 	return FALSE;
 }
