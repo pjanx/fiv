@@ -239,8 +239,12 @@ complete_path(GFile *location, GtkListStore *model)
 			g_file_info_get_is_hidden(info))
 			continue;
 
-		// TODO(p): Resolve ~ paths a bit better.
 		char *parse_name = g_file_get_parse_name(child);
+		if (!g_str_has_suffix(parse_name, G_DIR_SEPARATOR_S)) {
+			char *save = parse_name;
+			parse_name = g_strdup_printf("%s%c", parse_name, G_DIR_SEPARATOR);
+			g_free(save);
+		}
 		gtk_list_store_insert_with_values(model, NULL, -1, 0, parse_name, -1);
 		g_free(parse_name);
 	}
@@ -310,6 +314,7 @@ on_show_enter_location(G_GNUC_UNUSED GtkPlacesSidebar *sidebar,
 	GtkEntryCompletion *completion = gtk_entry_completion_new();
 	gtk_entry_completion_set_model(completion, GTK_TREE_MODEL(model));
 	gtk_entry_completion_set_text_column(completion, 0);
+	// TODO(p): Complete ~ paths so that they start with ~, then we can filter.
 	gtk_entry_completion_set_match_func(
 		completion, (GtkEntryCompletionMatchFunc) gtk_true, NULL, NULL);
 	g_object_unref(model);
