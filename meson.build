@@ -56,6 +56,8 @@ endif
 
 install_data('fastiv.desktop',
 	install_dir : get_option('datadir') + '/applications')
+install_data('fastiv-browse.desktop',
+	install_dir : get_option('datadir') + '/applications')
 install_data('fastiv.svg',
 	install_dir : get_option('datadir') + '/icons/hicolor/scalable/apps')
 

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=fastiv
+GenericName=File Browser
+Icon=fastiv
+Exec=fastiv --browse %f
+NoDisplay=true
+Terminal=false
+StartupNotify=true
+Categories=Utility;FileTools;
+MimeType=inode/directory;

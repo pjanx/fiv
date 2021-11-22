@@ -321,18 +321,25 @@ on_item_activated(G_GNUC_UNUSED FastivBrowser *browser, const char *path,
 }
 
 static gboolean
-open_any_path(const char *path)
+open_any_path(const char *path, gboolean force_browser)
 {
 	GStatBuf st;
 	gchar *canonical = g_canonicalize_filename(path, g.directory);
 	gboolean success = !g_stat(canonical, &st);
-	if (!success)
+	if (!success) {
 		show_error_dialog(g_error_new(G_FILE_ERROR,
 			g_file_error_from_errno(errno), "%s: %s", path, g_strerror(errno)));
-	else if (S_ISDIR(st.st_mode))
+	} else if (S_ISDIR(st.st_mode)) {
 		load_directory(canonical);
-	else
+	} else if (force_browser) {
+		// GNOME, e.g., invokes this as a hint to focus the particular file,
+		// which we can't currently do yet.
+		gchar *directory = g_path_get_dirname(canonical);
+		load_directory(directory);
+		g_free(directory);
+	} else {
 		open(canonical);
+	}
 	g_free(canonical);
 	return success;
 }
@@ -346,7 +353,7 @@ on_open_location(G_GNUC_UNUSED GtkPlacesSidebar *sidebar, GFile *location,
 		if (flags & GTK_PLACES_OPEN_NEW_WINDOW)
 			spawn_path(path);
 		else
-			open_any_path(path);
+			open_any_path(path, FALSE);
 		g_free(path);
 	}
 }
@@ -520,7 +527,8 @@ on_button_press_browser(G_GNUC_UNUSED GtkWidget *widget, GdkEventButton *event)
 int
 main(int argc, char *argv[])
 {
-	gboolean show_version = FALSE, show_supported_media_types = FALSE;
+	gboolean show_version = FALSE, show_supported_media_types = FALSE,
+		browse = FALSE;
 	gchar **path_args = NULL;
 	const GOptionEntry options[] = {
 		{G_OPTION_REMAINING, 0, 0, G_OPTION_ARG_FILENAME_ARRAY, &path_args,
@@ -528,6 +536,9 @@ main(int argc, char *argv[])
 		{"list-supported-media-types", 0, G_OPTION_FLAG_IN_MAIN,
 			G_OPTION_ARG_NONE, &show_supported_media_types,
 			"Output supported media types and exit", NULL},
+		{"browse", 0, G_OPTION_FLAG_IN_MAIN,
+			G_OPTION_ARG_NONE, &browse,
+			"Start in filesystem browsing mode", NULL},
 		{"version", 'V', G_OPTION_FLAG_IN_MAIN, G_OPTION_ARG_NONE,
 			&show_version, "Output version information and exit", NULL},
 		{},
@@ -699,8 +710,8 @@ main(int argc, char *argv[])
 
 	g.files = g_ptr_array_new_full(16, g_free);
 	g.directory = g_get_current_dir();
-	if (!path_arg || !open_any_path(path_arg))
-		open_any_path(g.directory);
+	if (!path_arg || !open_any_path(path_arg, browse))
+		open_any_path(g.directory, FALSE);
 
 	// Try to get half of the screen vertically, in 4:3 aspect ratio.
 	//
