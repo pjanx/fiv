@@ -483,17 +483,30 @@ fastiv_browser_get_property(
 }
 
 static void
+set_item_size(FastivBrowser *self, FastivIoThumbnailSize size)
+{
+	if (size < FASTIV_IO_THUMBNAIL_SIZE_MIN ||
+		size > FASTIV_IO_THUMBNAIL_SIZE_MAX)
+		return;
+
+	if (size != self->item_size) {
+		self->item_size = size;
+		self->item_height = fastiv_io_thumbnail_sizes[self->item_size].size;
+		reload_thumbnails(self);
+
+		g_object_notify_by_pspec(
+			G_OBJECT(self), browser_properties[PROP_THUMBNAIL_SIZE]);
+	}
+}
+
+static void
 fastiv_browser_set_property(
 	GObject *object, guint property_id, const GValue *value, GParamSpec *pspec)
 {
 	FastivBrowser *self = FASTIV_BROWSER(object);
 	switch (property_id) {
 	case PROP_THUMBNAIL_SIZE:
-		if (g_value_get_enum(value) != (int) self->item_size) {
-			self->item_size = g_value_get_enum(value);
-			self->item_height = fastiv_io_thumbnail_sizes[self->item_size].size;
-			reload_thumbnails(self);
-		}
+		set_item_size(self, g_value_get_enum(value));
 		break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
@@ -547,7 +560,8 @@ fastiv_browser_realize(GtkWidget *widget)
 
 		.visual = gtk_widget_get_visual(widget),
 		.event_mask = gtk_widget_get_events(widget) | GDK_KEY_PRESS_MASK |
-			GDK_POINTER_MOTION_MASK | GDK_BUTTON_PRESS_MASK,
+			GDK_POINTER_MOTION_MASK | GDK_BUTTON_PRESS_MASK |
+			GDK_SCROLL_MASK,
 	};
 
 	// We need this window to receive input events at all.
@@ -647,6 +661,28 @@ fastiv_browser_motion_notify_event(GtkWidget *widget, GdkEventMotion *event)
 	GdkWindow *window = gtk_widget_get_window(widget);
 	gdk_window_set_cursor(window, entry ? self->pointer : NULL);
 	return TRUE;
+}
+
+static gboolean
+fastiv_browser_scroll_event(GtkWidget *widget, GdkEventScroll *event)
+{
+	FastivBrowser *self = FASTIV_BROWSER(widget);
+	if ((event->state & gtk_accelerator_get_default_mod_mask()) !=
+		GDK_CONTROL_MASK)
+		return FALSE;
+
+	switch (event->direction) {
+	case GDK_SCROLL_UP:
+		set_item_size(self, self->item_size + 1);
+		return TRUE;
+	case GDK_SCROLL_DOWN:
+		set_item_size(self, self->item_size - 1);
+		return TRUE;
+	default:
+		// For some reason, we can also get GDK_SCROLL_SMOOTH.
+		// Left/right are good to steal from GtkScrolledWindow for consistency.
+		return TRUE;
+	}
 }
 
 static gboolean
@@ -766,6 +802,7 @@ fastiv_browser_class_init(FastivBrowserClass *klass)
 	widget_class->size_allocate = fastiv_browser_size_allocate;
 	widget_class->button_press_event = fastiv_browser_button_press_event;
 	widget_class->motion_notify_event = fastiv_browser_motion_notify_event;
+	widget_class->scroll_event = fastiv_browser_scroll_event;
 	widget_class->query_tooltip = fastiv_browser_query_tooltip;
 	widget_class->style_updated = fastiv_browser_style_updated;
 
@@ -791,8 +828,7 @@ fastiv_browser_init(FastivBrowser *self)
 	self->layouted_rows = g_array_new(FALSE, TRUE, sizeof(Row));
 	g_array_set_clear_func(self->layouted_rows, (GDestroyNotify) row_free);
 
-	self->item_size = FASTIV_IO_THUMBNAIL_SIZE_NORMAL;
-	self->item_height = fastiv_io_thumbnail_sizes[self->item_size].size;
+	set_item_size(self, FASTIV_IO_THUMBNAIL_SIZE_NORMAL);
 	self->selected = -1;
 	self->glow = cairo_image_surface_create(CAIRO_FORMAT_A1, 0, 0);
 
