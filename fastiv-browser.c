@@ -43,6 +43,7 @@ struct _FastivBrowser {
 
 	FastivIoThumbnailSize item_size;    ///< Thumbnail size
 	int item_height;                    ///< Thumbnail height in pixels
+	int item_spacing;                   ///< Space between items in pixels
 
 	GArray *entries;                    ///< [Entry]
 	GArray *layouted_rows;              ///< [Row]
@@ -59,10 +60,6 @@ typedef struct item Item;
 typedef struct row Row;
 
 static const double g_permitted_width_multiplier = 2;
-
-// Could be split out to also-idiomatic row-spacing/column-spacing properties.
-// TODO(p): Make a property for this.
-static const int g_item_spacing = 1;
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
@@ -106,7 +103,7 @@ static void
 append_row(FastivBrowser *self, int *y, int x, GArray *items_array)
 {
 	if (self->layouted_rows->len)
-		*y += g_item_spacing;
+		*y += self->item_spacing;
 
 	*y += self->item_border_y;
 	g_array_append_val(self->layouted_rows, ((Row) {
@@ -143,8 +140,8 @@ relayout(FastivBrowser *self, int width)
 			2 * self->item_border_x;
 		if (!items->len) {
 			// Just insert it, whether or not there's any space.
-		} else if (x + g_item_spacing + width <= available_width) {
-			x += g_item_spacing;
+		} else if (x + self->item_spacing + width <= available_width) {
+			x += self->item_spacing;
 		} else {
 			append_row(self, &y,
 				padding.left + MAX(0, available_width - x) / 2, items);
@@ -661,6 +658,11 @@ fastiv_browser_style_updated(GtkWidget *widget)
 	GtkStyleContext *style = gtk_widget_get_style_context(widget);
 	GtkBorder border = {}, margin = {};
 
+	int item_spacing = self->item_spacing;
+	gtk_widget_style_get(widget, "spacing", &self->item_spacing, NULL);
+	if (item_spacing != self->item_spacing)
+		gtk_widget_queue_resize(widget);
+
 	// Using a pseudo-class, because GTK+ regions are deprecated.
 	gtk_style_context_save(style);
 	gtk_style_context_add_class(style, "item");
@@ -742,6 +744,12 @@ fastiv_browser_class_init(FastivBrowserClass *klass)
 	widget_class->button_press_event = fastiv_browser_button_press_event;
 	widget_class->motion_notify_event = fastiv_browser_motion_notify_event;
 	widget_class->style_updated = fastiv_browser_style_updated;
+
+	// Could be split to also-idiomatic row-spacing/column-spacing properties.
+	// The GParamSpec is sinked by this call.
+	gtk_widget_class_install_style_property(widget_class,
+		g_param_spec_int("spacing", "Spacing", "Space between items",
+			0, G_MAXINT, 1, G_PARAM_READWRITE));
 
 	// TODO(p): Later override "screen_changed", recreate Pango layouts there,
 	// if we get to have any, or otherwise reflect DPI changes.
