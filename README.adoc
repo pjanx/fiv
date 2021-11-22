@@ -2,12 +2,16 @@ fastiv
 ======
 
 'fastiv' is a fast image viewer, supporting BMP, PNG, GIF, JPEG, and optionally
-RAW and SVG pictures, or whatever gdk-pixbuf loads.  Currently, it's very basic.
+RAW, SVG and X11 cursors, or whatever gdk-pixbuf loads.
+
+It still has some road to go, but it's already become quite usable,
+and it has received basic polishing.
 
 Non-goals
 ---------
  - fancy UI--the focus is on speed of use first, colour accuracy second
- - editing--that's what _editors_ are for, be it GIMP or Rawtherapee
+ - editing--that's what _editors_ are for, be it GIMP or Rawtherapee;
+   nothing beyond the most basic of adjustments is desired
  - memory efficiency, though preloading can cause some pressure
  - portability to non-UNIXy systems
 
