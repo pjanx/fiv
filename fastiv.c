@@ -606,7 +606,7 @@ main(int argc, char *argv[])
 		G_CALLBACK(on_button_press_browser), NULL);
 	gtk_container_add(GTK_CONTAINER(g.browser_scroller), g.browser);
 
-	// Christ, no.
+	// Christ, no, do not scroll all the way to the top on focus.
 	GtkWidget *browser_port = gtk_bin_get_child(GTK_BIN(g.browser_scroller));
 	gtk_container_set_focus_hadjustment(GTK_CONTAINER(browser_port), NULL);
 	gtk_container_set_focus_vadjustment(GTK_CONTAINER(browser_port), NULL);
@@ -618,6 +618,15 @@ main(int argc, char *argv[])
 	g.browser_sidebar = g_object_new(FASTIV_TYPE_SIDEBAR, NULL);
 	g_signal_connect(g.browser_sidebar, "open-location",
 		G_CALLBACK(on_open_location), NULL);
+
+	// The opposite case, and it doesn't work from the init function.
+	GtkWidget *sidebar_port = gtk_bin_get_child(GTK_BIN(g.browser_sidebar));
+	gtk_container_set_focus_hadjustment(GTK_CONTAINER(sidebar_port),
+		gtk_scrolled_window_get_hadjustment(
+			GTK_SCROLLED_WINDOW(g.browser_sidebar)));
+	gtk_container_set_focus_vadjustment(GTK_CONTAINER(sidebar_port),
+		gtk_scrolled_window_get_vadjustment(
+			GTK_SCROLLED_WINDOW(g.browser_sidebar)));
 
 	g.plus = gtk_button_new_from_icon_name("zoom-in-symbolic",
 		GTK_ICON_SIZE_BUTTON);
