@@ -617,15 +617,25 @@ fastiv_browser_draw(GtkWidget *widget, cairo_t *cr)
 }
 
 static gboolean
+open_entry(GtkWidget *self, const Entry *entry, gboolean new_window)
+{
+	g_signal_emit(self, browser_signals[ITEM_ACTIVATED], 0, entry->filename,
+		new_window ? GTK_PLACES_OPEN_NEW_WINDOW : GTK_PLACES_OPEN_NORMAL);
+	return TRUE;
+}
+
+static gboolean
 fastiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 {
 	GTK_WIDGET_CLASS(fastiv_browser_parent_class)
 		->button_press_event(widget, event);
 
 	FastivBrowser *self = FASTIV_BROWSER(widget);
-	if (event->type != GDK_BUTTON_PRESS || event->state != 0)
+	if (event->type != GDK_BUTTON_PRESS)
 		return FALSE;
-	if (event->button == GDK_BUTTON_PRIMARY &&
+
+	guint state = event->state & gtk_accelerator_get_default_mod_mask();
+	if (event->button == GDK_BUTTON_PRIMARY && state == 0 &&
 		gtk_widget_get_focus_on_click(widget))
 		gtk_widget_grab_focus(widget);
 
@@ -635,13 +645,18 @@ fastiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 
 	switch (event->button) {
 	case GDK_BUTTON_PRIMARY:
-		g_signal_emit(widget, browser_signals[ITEM_ACTIVATED], 0,
-			entry->filename, GTK_PLACES_OPEN_NORMAL);
-		return TRUE;
+		if (state == 0)
+			return open_entry(widget, entry, FALSE);
+		if (state == GDK_CONTROL_MASK)
+			return open_entry(widget, entry, TRUE);
+		return FALSE;
 	case GDK_BUTTON_MIDDLE:
-		g_signal_emit(widget, browser_signals[ITEM_ACTIVATED], 0,
-			entry->filename, GTK_PLACES_OPEN_NEW_WINDOW);
-		return TRUE;
+		if (state == 0)
+			return open_entry(widget, entry, TRUE);
+		return FALSE;
+	case GDK_BUTTON_SECONDARY:
+		// TODO(p): Context menu.
+		return FALSE;
 	default:
 		return FALSE;
 	}
