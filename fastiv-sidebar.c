@@ -67,6 +67,19 @@ fastiv_sidebar_class_init(FastivSidebarClass *klass)
 			NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_FILE);
 }
 
+static gboolean
+on_rowlabel_query_tooltip(GtkWidget *widget,
+	G_GNUC_UNUSED gint x, G_GNUC_UNUSED gint y,
+	G_GNUC_UNUSED gboolean keyboard_tooltip, GtkTooltip *tooltip)
+{
+	GtkLabel *label = GTK_LABEL(widget);
+	if (!pango_layout_is_ellipsized(gtk_label_get_layout(label)))
+		return FALSE;
+
+	gtk_tooltip_set_text(tooltip, gtk_label_get_text(label));
+	return TRUE;
+}
+
 static GtkWidget *
 create_row(GFile *file, const char *icon_name)
 {
@@ -88,6 +101,9 @@ create_row(GFile *file, const char *icon_name)
 
 	GtkWidget *rowlabel = gtk_label_new(name);
 	gtk_label_set_ellipsize(GTK_LABEL(rowlabel), PANGO_ELLIPSIZE_END);
+	gtk_widget_set_has_tooltip(rowlabel, TRUE);
+	g_signal_connect(rowlabel, "query-tooltip",
+		G_CALLBACK(on_rowlabel_query_tooltip), NULL);
 	gtk_style_context_add_class(
 		gtk_widget_get_style_context(rowlabel), "sidebar-label");
 	gtk_container_add(GTK_CONTAINER(rowbox), rowlabel);
