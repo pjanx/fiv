@@ -649,6 +649,29 @@ fastiv_browser_motion_notify_event(GtkWidget *widget, GdkEventMotion *event)
 	return TRUE;
 }
 
+static gboolean
+fastiv_browser_query_tooltip(GtkWidget *widget, gint x, gint y,
+	G_GNUC_UNUSED gboolean keyboard_tooltip, GtkTooltip *tooltip)
+{
+	FastivBrowser *self = FASTIV_BROWSER(widget);
+	const Entry *entry = entry_at(self, x, y);
+	if (!entry)
+		return FALSE;
+
+	GFile *file = g_file_new_for_path(entry->filename);
+	GFileInfo *info = g_file_query_info(file,
+		G_FILE_ATTRIBUTE_STANDARD_NAME
+		"," G_FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME,
+		G_FILE_QUERY_INFO_NONE, NULL, NULL);
+	g_object_unref(file);
+	if (!info)
+		return FALSE;
+
+	gtk_tooltip_set_text(tooltip, g_file_info_get_display_name(info));
+	g_object_unref(info);
+	return TRUE;
+}
+
 static void
 fastiv_browser_style_updated(GtkWidget *widget)
 {
@@ -743,6 +766,7 @@ fastiv_browser_class_init(FastivBrowserClass *klass)
 	widget_class->size_allocate = fastiv_browser_size_allocate;
 	widget_class->button_press_event = fastiv_browser_button_press_event;
 	widget_class->motion_notify_event = fastiv_browser_motion_notify_event;
+	widget_class->query_tooltip = fastiv_browser_query_tooltip;
 	widget_class->style_updated = fastiv_browser_style_updated;
 
 	// Could be split to also-idiomatic row-spacing/column-spacing properties.
@@ -760,6 +784,7 @@ static void
 fastiv_browser_init(FastivBrowser *self)
 {
 	gtk_widget_set_can_focus(GTK_WIDGET(self), TRUE);
+	gtk_widget_set_has_tooltip(GTK_WIDGET(self), TRUE);
 
 	self->entries = g_array_new(FALSE, TRUE, sizeof(Entry));
 	g_array_set_clear_func(self->entries, (GDestroyNotify) entry_free);
