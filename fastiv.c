@@ -208,7 +208,8 @@ open(const gchar *path)
 
 	// So that load_directory() itself can be used for reloading.
 	gchar *dirname = g_path_get_dirname(path);
-	if (!g.directory || strcmp(dirname, g.directory)) {
+	if (!g.files->len /* hack to always load the directory after launch */ ||
+		!g.directory || strcmp(dirname, g.directory)) {
 		load_directory(dirname);
 	} else {
 		g.files_index = -1;
