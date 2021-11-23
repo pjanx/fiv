@@ -44,6 +44,8 @@ _~/.config/gtk-3.0/gtk.css_:
 
  fastiv-browser { -FastivBrowser-spacing: 0; padding: 0; border: 0; margin: 0; }
 
+The GTK+ inspector will be very helpful, should you want to experiment.
+
 Contributing and Support
 ------------------------
 Use https://git.janouch.name/p/fastiv to report any bugs, request features,
