@@ -438,10 +438,8 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 			return TRUE;
 
 		case GDK_KEY_F9:
-			if (gtk_widget_is_visible(g.browser_sidebar))
-				gtk_widget_hide(g.browser_sidebar);
-			else
-				gtk_widget_show(g.browser_sidebar);
+			gtk_widget_set_visible(g.browser_sidebar,
+				!gtk_widget_is_visible(g.browser_sidebar));
 			return TRUE;
 
 		case GDK_KEY_F11:
