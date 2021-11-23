@@ -425,7 +425,7 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 		switch (event->keyval) {
 		case GDK_KEY_Escape:
 		case GDK_KEY_q:
-			gtk_main_quit();
+			gtk_widget_destroy(g.window);
 			return TRUE;
 
 		case GDK_KEY_o:
@@ -598,6 +598,7 @@ main(int argc, char *argv[])
 	gtk_css_provider_load_from_data(provider, style, strlen(style), NULL);
 	gtk_style_context_add_provider_for_screen(gdk_screen_get_default(),
 		GTK_STYLE_PROVIDER(provider), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+	g_object_unref(provider);
 
 	g.view_scroller = gtk_scrolled_window_new(NULL, NULL);
 	g.view = g_object_new(FASTIV_TYPE_VIEW, NULL);

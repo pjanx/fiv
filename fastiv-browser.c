@@ -73,8 +73,7 @@ static void
 entry_free(Entry *self)
 {
 	g_free(self->filename);
-	if (self->thumbnail)
-		cairo_surface_destroy(self->thumbnail);
+	g_clear_pointer(&self->thumbnail, cairo_surface_destroy);
 	g_clear_object(&self->icon);
 }
 
@@ -349,8 +348,7 @@ entry_add_thumbnail(gpointer data, gpointer user_data)
 {
 	Entry *self = data;
 	g_clear_object(&self->icon);
-	if (self->thumbnail)
-		cairo_surface_destroy(self->thumbnail);
+	g_clear_pointer(&self->thumbnail, cairo_surface_destroy);
 
 	FastivBrowser *browser = FASTIV_BROWSER(user_data);
 	self->thumbnail = rescale_thumbnail(
