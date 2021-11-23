@@ -52,6 +52,9 @@ typedef struct _FastivIoThumbnailSizeInfo {
 extern FastivIoThumbnailSizeInfo
 	fastiv_io_thumbnail_sizes[FASTIV_IO_THUMBNAIL_SIZE_COUNT];
 
+extern cairo_user_data_key_t fastiv_io_key_exif;
+extern cairo_user_data_key_t fastiv_io_key_icc;
+
 cairo_surface_t *fastiv_io_open(const gchar *path, GError **error);
 cairo_surface_t *fastiv_io_open_from_data(
 	const char *data, size_t len, const gchar *path, GError **error);

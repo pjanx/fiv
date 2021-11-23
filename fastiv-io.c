@@ -361,6 +361,93 @@ trivial_cmyk_to_bgra(unsigned char *p, int len)
 	}
 }
 
+static void
+parse_jpeg_metadata(cairo_surface_t *surface, const gchar *data, gsize len)
+{
+	// Because the JPEG file format is simple, just do it manually.
+	// See: https://www.w3.org/Graphics/JPEG/itu-t81.pdf
+	enum {
+		APP0 = 0xE0,
+		APP1,
+		APP2,
+		RST0 = 0xD0,
+		RST1,
+		RST2,
+		RST3,
+		RST4,
+		RST5,
+		RST6,
+		RST7,
+		SOI = 0xD8,
+		EOI = 0xD9,
+		SOS = 0xDA,
+		TEM = 0x01,
+	};
+
+	GByteArray *exif = g_byte_array_new(), *icc = g_byte_array_new();
+	int icc_sequence = 0, icc_done = FALSE;
+
+	const guint8 *p = (const guint8 *) data, *end = p + len;
+	while (p + 3 < end && *p++ == 0xFF && *p != SOS && *p != EOI) {
+		// The previous byte is a fill byte, restart.
+		if (*p == 0xFF)
+			continue;
+
+		// These markers stand alone, not starting a marker segment.
+		guint8 marker = *p++;
+		switch (marker) {
+		case RST0:
+		case RST1:
+		case RST2:
+		case RST3:
+		case RST4:
+		case RST5:
+		case RST6:
+		case RST7:
+		case SOI:
+		case TEM:
+			continue;
+		}
+
+		// Do not bother validating the structure.
+		guint16 length = p[0] << 8 | p[1];
+		const guint8 *payload = p + 2;
+		if ((p += length) > end)
+			break;
+
+		// https://www.cipa.jp/std/documents/e/DC-008-2012_E.pdf 4.7.2
+		// Do not check the padding byte.
+		if (marker == APP1 && p - payload >= 6 &&
+			!memcmp(payload, "Exif\0", 5) && !exif->len) {
+			payload += 6;
+			g_byte_array_append(exif, payload, p - payload);
+		}
+
+		// https://www.color.org/specification/ICC1v43_2010-12.pdf B.4
+		if (marker == APP2 && p - payload >= 14 &&
+			!memcmp(payload, "ICC_PROFILE\0", 12) && !icc_done &&
+			payload[12] == ++icc_sequence && payload[13] >= payload[12]) {
+			payload += 14;
+			g_byte_array_append(icc, payload, p - payload);
+			icc_done = payload[-1] == icc_sequence;
+		}
+	}
+
+	if (exif->len)
+		cairo_surface_set_user_data(surface, &fastiv_io_key_exif,
+			g_byte_array_free_to_bytes(exif),
+			(cairo_destroy_func_t) g_byte_array_unref);
+	else
+		g_byte_array_free(exif, TRUE);
+
+	if (icc_done)
+		cairo_surface_set_user_data(surface, &fastiv_io_key_icc,
+			g_byte_array_free_to_bytes(icc),
+			(cairo_destroy_func_t) g_byte_array_unref);
+	else
+		g_byte_array_free(icc, TRUE);
+}
+
 static cairo_surface_t *
 open_libjpeg_turbo(const gchar *data, gsize len, GError **error)
 {
@@ -417,6 +504,7 @@ open_libjpeg_turbo(const gchar *data, gsize len, GError **error)
 	cairo_surface_mark_dirty(surface);
 
 	tjDestroy(dec);
+	parse_jpeg_metadata(surface, data, len);
 	return surface;
 }
 
@@ -763,6 +851,9 @@ open_gdkpixbuf(const gchar *data, gsize len, GError **error)
 }
 
 #endif  // HAVE_GDKPIXBUF ------------------------------------------------------
+
+cairo_user_data_key_t fastiv_io_key_exif;
+cairo_user_data_key_t fastiv_io_key_icc;
 
 cairo_surface_t *
 fastiv_io_open(const gchar *path, GError **error)
