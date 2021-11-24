@@ -142,6 +142,83 @@ set_error(GError **error, const char *message)
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+static bool
+pull_passthrough(const wuffs_base__more_information *minfo,
+	wuffs_base__io_buffer *src, wuffs_base__io_buffer *dst, GError **error)
+{
+	wuffs_base__range_ie_u64 r =
+		wuffs_base__more_information__metadata_raw_passthrough__range(minfo);
+	if (wuffs_base__range_ie_u64__is_empty(&r))
+		return true;
+
+	// This should currently be zero, because we read files all at once.
+	uint64_t pos = src->meta.pos;
+	if (pos > r.min_incl ||
+		wuffs_base__u64__sat_sub(r.max_excl, pos) > src->meta.wi) {
+		set_error(error, "metadata is outside the read buffer");
+		return false;
+	}
+
+	// Mimic WUFFS_BASE__MORE_INFORMATION__FLAVOR__METADATA_RAW_TRANSFORM.
+	*dst = wuffs_base__make_io_buffer(src->data,
+		wuffs_base__make_io_buffer_meta(
+			wuffs_base__u64__sat_sub(r.max_excl, pos),
+			wuffs_base__u64__sat_sub(r.min_incl, pos), pos, TRUE));
+
+	// Seeking to the end of it seems to be a requirement in decode_gif.wuffs.
+	// Just not in case the block was empty. :^)
+	src->meta.ri = dst->meta.wi;
+	return true;
+}
+
+static GByteArray *
+pull_metadata(wuffs_base__image_decoder *dec, wuffs_base__io_buffer *src,
+	wuffs_base__more_information *minfo, GError **error)
+{
+	uint8_t buf[8192] = {};
+	GByteArray *array = g_byte_array_new();
+	while (true) {
+		*minfo = wuffs_base__empty_more_information();
+		wuffs_base__io_buffer dst = wuffs_base__ptr_u8__writer(buf, sizeof buf);
+		wuffs_base__status status =
+			wuffs_base__image_decoder__tell_me_more(dec, &dst, minfo, src);
+		switch (minfo->flavor) {
+		case 0:
+			// Most likely as a result of an error, we'll handle that below.
+		case WUFFS_BASE__MORE_INFORMATION__FLAVOR__METADATA_RAW_TRANSFORM:
+			// Wuffs is reading it into the buffer.
+		case WUFFS_BASE__MORE_INFORMATION__FLAVOR__METADATA_PARSED:
+			// Use Wuffs accessor functions in the caller.
+			break;
+		default:
+			set_error(error, "Wuffs metadata API incompatibility");
+			goto fail;
+
+		case WUFFS_BASE__MORE_INFORMATION__FLAVOR__METADATA_RAW_PASSTHROUGH:
+			// The insane case: error checking really should come first,
+			// and it can say "even more information". See decode_gif.wuffs.
+			if (!pull_passthrough(minfo, src, &dst, error))
+				goto fail;
+		}
+
+		g_byte_array_append(array,
+			wuffs_base__io_buffer__reader_pointer(&dst),
+			wuffs_base__io_buffer__reader_length(&dst));
+		if (wuffs_base__status__is_ok(&status))
+			return array;
+
+		if (status.repr != wuffs_base__suspension__even_more_information &&
+			status.repr != wuffs_base__suspension__short_write) {
+			set_error(error, wuffs_base__status__message(&status));
+			goto fail;
+		}
+	}
+
+fail:
+	g_byte_array_unref(array);
+	return NULL;
+}
+
 // https://github.com/google/wuffs/blob/main/example/gifplayer/gifplayer.c
 // is pure C, and a good reference. I can't use the auxiliary libraries,
 // since they depend on C++, which is undesirable.
@@ -149,16 +226,59 @@ static cairo_surface_t *
 open_wuffs(
 	wuffs_base__image_decoder *dec, wuffs_base__io_buffer src, GError **error)
 {
-	wuffs_base__image_config cfg;
-	wuffs_base__status status =
-		wuffs_base__image_decoder__decode_image_config(dec, &cfg, &src);
-	if (!wuffs_base__status__is_ok(&status)) {
-		set_error(error, wuffs_base__status__message(&status));
-		return NULL;
+	cairo_surface_t *result = NULL;
+
+	// TODO(p): PNG also has sRGB and gAMA, as well as text chunks (Wuffs #58).
+	// The former two use WUFFS_BASE__MORE_INFORMATION__FLAVOR__METADATA_PARSED.
+	GBytes *meta_exif = NULL;
+	wuffs_base__image_decoder__set_report_metadata(
+		dec, WUFFS_BASE__FOURCC__EXIF, true);
+
+	GBytes *meta_iccp = NULL;
+	wuffs_base__image_decoder__set_report_metadata(
+		dec, WUFFS_BASE__FOURCC__ICCP, true);
+
+	wuffs_base__image_config cfg = {};
+	wuffs_base__status status = {};
+	while (true) {
+		status = wuffs_base__image_decoder__decode_image_config(
+			dec, &cfg, &src);
+		if (wuffs_base__status__is_ok(&status))
+			break;
+
+		if (status.repr != wuffs_base__note__metadata_reported) {
+			set_error(error, wuffs_base__status__message(&status));
+			goto fail_preread;
+		}
+
+		wuffs_base__more_information minfo = {};
+		GByteArray *buffer = NULL;
+		if (!(buffer = pull_metadata(dec, &src, &minfo, error)))
+			goto fail_preread;
+
+		switch (wuffs_base__more_information__metadata__fourcc(&minfo)) {
+		case WUFFS_BASE__FOURCC__EXIF:
+			if (meta_exif) {
+				g_warning("ignoring repeated Exif");
+				break;
+			}
+			meta_exif = g_byte_array_free_to_bytes(buffer);
+			continue;
+		case WUFFS_BASE__FOURCC__ICCP:
+			if (meta_iccp) {
+				g_warning("ignoring repeated ICC profile");
+				break;
+			}
+			meta_iccp = g_byte_array_free_to_bytes(buffer);
+			continue;
+		}
+
+		g_byte_array_unref(buffer);
 	}
+
 	if (!wuffs_base__image_config__is_valid(&cfg)) {
 		set_error(error, "invalid Wuffs image configuration");
-		return NULL;
+		goto fail_preread;
 	}
 
 	// We need to check because of the Cairo API.
@@ -166,7 +286,7 @@ open_wuffs(
 	uint32_t height = wuffs_base__pixel_config__height(&cfg.pixcfg);
 	if (width > INT_MAX || height > INT_MAX) {
 		set_error(error, "image dimensions overflow");
-		return NULL;
+		goto fail_preread;
 	}
 
 	// Wuffs maps tRNS to BGRA in `decoder.decode_trns?`, we should be fine.
@@ -225,12 +345,12 @@ open_wuffs(
 		workbuf = wuffs_base__malloc_slice_u8(malloc, workbuf_len_max_incl);
 		if (!workbuf.ptr) {
 			set_error(error, "failed to allocate a work buffer");
-			return NULL;
+			goto fail_preread;
 		}
 	}
 
 	unsigned char *targetbuf = NULL;
-	cairo_surface_t *result = NULL, *surface =
+	cairo_surface_t *surface =
 		cairo_image_surface_create(cairo_format, width, height);
 	cairo_status_t surface_status = cairo_surface_status(surface);
 	if (surface_status != CAIRO_STATUS_SUCCESS) {
@@ -319,12 +439,23 @@ open_wuffs(
 	// Pixel data has been written, need to let Cairo know.
 	cairo_surface_mark_dirty((result = surface));
 
+	if (meta_exif)
+		cairo_surface_set_user_data(surface, &fastiv_io_key_exif,
+			g_bytes_ref(meta_exif), (cairo_destroy_func_t) g_bytes_unref);
+	if (meta_iccp)
+		cairo_surface_set_user_data(surface, &fastiv_io_key_icc,
+			g_bytes_ref(meta_iccp), (cairo_destroy_func_t) g_bytes_unref);
+
 fail:
 	if (!result)
 		cairo_surface_destroy(surface);
 
 	g_free(targetbuf);
 	free(workbuf.ptr);
+
+fail_preread:
+	g_clear_pointer(&meta_exif, g_bytes_unref);
+	g_clear_pointer(&meta_iccp, g_bytes_unref);
 	return result;
 }
 
@@ -436,14 +567,14 @@ parse_jpeg_metadata(cairo_surface_t *surface, const gchar *data, gsize len)
 	if (exif->len)
 		cairo_surface_set_user_data(surface, &fastiv_io_key_exif,
 			g_byte_array_free_to_bytes(exif),
-			(cairo_destroy_func_t) g_byte_array_unref);
+			(cairo_destroy_func_t) g_bytes_unref);
 	else
 		g_byte_array_free(exif, TRUE);
 
 	if (icc_done)
 		cairo_surface_set_user_data(surface, &fastiv_io_key_icc,
 			g_byte_array_free_to_bytes(icc),
-			(cairo_destroy_func_t) g_byte_array_unref);
+			(cairo_destroy_func_t) g_bytes_unref);
 	else
 		g_byte_array_free(icc, TRUE);
 }
