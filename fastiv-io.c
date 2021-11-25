@@ -1123,6 +1123,52 @@ fastiv_io_open_from_data(const char *data, size_t len, const gchar *path,
 	return surface;
 }
 
+// --- Metadata ----------------------------------------------------------------
+
+FastivIoOrientation
+fastiv_io_exif_orientation(const guint8 *tiff, gsize len)
+{
+	// libtiff also knows how to do this, but it's not a lot of code.
+	// The "Orientation" tag/field is part of Baseline TIFF 6.0 (1992),
+	// it just so happens that Exif is derived from this format.
+	// There is no other meaningful placement for this than right in IFD0,
+	// describing the main image.
+	const uint8_t *end = tiff + len,
+		le[4] = {'I', 'I', 42, 0},
+		be[4] = {'M', 'M', 0, 42};
+
+	uint16_t (*u16)(const uint8_t *) = NULL;
+	uint32_t (*u32)(const uint8_t *) = NULL;
+	if (tiff + 8 > end) {
+		return FastivIoOrientationUnknown;
+	} else if (!memcmp(tiff, le, sizeof le)) {
+		u16 = wuffs_base__peek_u16le__no_bounds_check;
+		u32 = wuffs_base__peek_u32le__no_bounds_check;
+	} else if (!memcmp(tiff, be, sizeof be)) {
+		u16 = wuffs_base__peek_u16be__no_bounds_check;
+		u32 = wuffs_base__peek_u32be__no_bounds_check;
+	} else {
+		return FastivIoOrientationUnknown;
+	}
+
+	const uint8_t *ifd0 = tiff + u32(tiff + 4);
+	if (ifd0 + 2 > end)
+		return FastivIoOrientationUnknown;
+
+	uint16_t fields = u16(ifd0);
+	enum { BYTE = 1, ASCII, SHORT, LONG, RATIONAL,
+		SBYTE, UNDEFINED, SSHORT, SLONG, SRATIONAL, FLOAT, DOUBLE };
+	enum { Orientation = 274 };
+	for (const guint8 *p = ifd0 + 2; fields-- && p + 12 <= end; p += 12) {
+		uint16_t tag = u16(p), type = u16(p + 2);
+		uint32_t count = u32(p + 4), value = u32(p + 8);
+		if (tag == Orientation && type == SHORT && count == 1 &&
+			value >= 1 && value <= 8)
+			return value;
+	}
+	return FastivIoOrientationUnknown;
+}
+
 // --- Thumbnails --------------------------------------------------------------
 
 GType

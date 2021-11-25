@@ -46,6 +46,23 @@ cairo_surface_t *fastiv_io_open_from_data(
 
 int fastiv_io_filecmp(GFile *f1, GFile *f2);
 
+// --- Metadata ----------------------------------------------------------------
+
+// https://www.cipa.jp/std/documents/e/DC-008-2012_E.pdf Table 6
+typedef enum _FastivIoOrientation {
+	FastivIoOrientationUnknown   = 0,
+	FastivIoOrientation0         = 1,
+	FastivIoOrientationMirror0   = 2,
+	FastivIoOrientation180       = 3,
+	FastivIoOrientationMirror180 = 4,
+	FastivIoOrientationMirror90  = 5,
+	FastivIoOrientation90        = 6,
+	FastivIoOrientationMirror270 = 7,
+	FastivIoOrientation270       = 8
+} FastivIoOrientation;
+
+FastivIoOrientation fastiv_io_exif_orientation(const guint8 *exif, gsize len);
+
 // --- Thumbnails --------------------------------------------------------------
 
 // And this is how you avoid glib-mkenums.
