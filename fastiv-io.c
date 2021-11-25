@@ -983,6 +983,8 @@ open_xcursor(const gchar *data, gsize len, GError **error)
 static cairo_surface_t *
 open_gdkpixbuf(const gchar *data, gsize len, GError **error)
 {
+	// gdk-pixbuf controls the playback itself, there is no reliable method of
+	// extracting individual frames (due to loops).
 	GInputStream *is = g_memory_input_stream_new_from_data(data, len, NULL);
 	GdkPixbuf *pixbuf = gdk_pixbuf_new_from_stream(is, NULL, error);
 	g_object_unref(is);
@@ -991,6 +993,20 @@ open_gdkpixbuf(const gchar *data, gsize len, GError **error)
 
 	cairo_surface_t *surface =
 		gdk_cairo_surface_create_from_pixbuf(pixbuf, 1, NULL);
+
+	// TODO(p): Also pass the pre-decoded Exif "orientation" option,
+	// which is an ASCII digit from 1 to 8.
+	const char *icc_profile = gdk_pixbuf_get_option(pixbuf, "icc-profile");
+	if (icc_profile) {
+		gsize out_len = 0;
+		guchar *raw = g_base64_decode(icc_profile, &out_len);
+		if (raw) {
+			cairo_surface_set_user_data(surface, &fastiv_io_key_icc,
+				g_bytes_new_take(raw, out_len),
+				(cairo_destroy_func_t) g_bytes_unref);
+		}
+	}
+
 	g_object_unref(pixbuf);
 	return surface;
 }

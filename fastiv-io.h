@@ -37,7 +37,7 @@ extern cairo_user_data_key_t fastiv_io_key_icc;
 extern cairo_user_data_key_t fastiv_io_key_frame_next;
 /// Frame duration in milliseconds as an intptr_t.
 extern cairo_user_data_key_t fastiv_io_key_frame_duration;
-/// How many times to repeat the animation, or zero for +inf, as an uintptr_t.
+/// How many times to repeat the animation, or zero for +inf, as a uintptr_t.
 extern cairo_user_data_key_t fastiv_io_key_loops;
 
 cairo_surface_t *fastiv_io_open(const gchar *path, GError **error);
