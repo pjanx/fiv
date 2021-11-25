@@ -25,6 +25,29 @@ extern const char *fastiv_io_supported_media_types[];
 
 char **fastiv_io_all_supported_media_types(void);
 
+// Userdata are typically attached to all Cairo surfaces in an animation.
+
+/// GBytes with plain Exif data.
+extern cairo_user_data_key_t fastiv_io_key_exif;
+/// GBytes with plain ICC profile data.
+extern cairo_user_data_key_t fastiv_io_key_icc;
+
+/// The next frame in a sequence, as a surface, in a chain, pre-composited.
+/// There is no wrap-around.
+extern cairo_user_data_key_t fastiv_io_key_frame_next;
+/// Frame duration in milliseconds as an intptr_t.
+extern cairo_user_data_key_t fastiv_io_key_frame_duration;
+/// How many times to repeat the animation, or zero for +inf, as an uintptr_t.
+extern cairo_user_data_key_t fastiv_io_key_loops;
+
+cairo_surface_t *fastiv_io_open(const gchar *path, GError **error);
+cairo_surface_t *fastiv_io_open_from_data(
+	const char *data, size_t len, const gchar *path, GError **error);
+
+int fastiv_io_filecmp(GFile *f1, GFile *f2);
+
+// --- Thumbnails --------------------------------------------------------------
+
 // And this is how you avoid glib-mkenums.
 typedef enum _FastivIoThumbnailSize {
 #define FASTIV_IO_THUMBNAIL_SIZES(XX) \
@@ -52,13 +75,5 @@ typedef struct _FastivIoThumbnailSizeInfo {
 extern FastivIoThumbnailSizeInfo
 	fastiv_io_thumbnail_sizes[FASTIV_IO_THUMBNAIL_SIZE_COUNT];
 
-extern cairo_user_data_key_t fastiv_io_key_exif;
-extern cairo_user_data_key_t fastiv_io_key_icc;
-
-cairo_surface_t *fastiv_io_open(const gchar *path, GError **error);
-cairo_surface_t *fastiv_io_open_from_data(
-	const char *data, size_t len, const gchar *path, GError **error);
 cairo_surface_t *fastiv_io_lookup_thumbnail(
 	const gchar *target, FastivIoThumbnailSize size);
-
-int fastiv_io_filecmp(GFile *f1, GFile *f2);
