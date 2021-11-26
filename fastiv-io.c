@@ -975,7 +975,7 @@ open_xcursor(const gchar *data, gsize len, GError **error)
 			last_nominal = image->size;
 		}
 
-		// TODO(p): Byte-swap if on big-endian. Wuffs doesn't even build there.
+		// The library automatically byte swaps in _XcursorReadImage().
 		cairo_surface_t *source = cairo_image_surface_create_for_data(
 			(unsigned char *) image->pixels, CAIRO_FORMAT_ARGB32,
 			image->width, image->height, image->width * sizeof *image->pixels);
