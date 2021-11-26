@@ -317,6 +317,8 @@ load_wuffs_frame(struct load_wuffs_frame_context *ctx, GError **error)
 		(void *) (intptr_t) (wuffs_base__frame_config__duration(&fc) /
 			WUFFS_BASE__FLICKS_PER_MILLISECOND), NULL);
 
+	cairo_surface_set_user_data(surface, &fastiv_io_key_frame_previous,
+		ctx->result_tail, NULL);
 	if (ctx->result_tail)
 		cairo_surface_set_user_data(ctx->result_tail, &fastiv_io_key_frame_next,
 			surface, (cairo_destroy_func_t) cairo_surface_destroy);
@@ -465,6 +467,11 @@ open_wuffs(
 
 	while (load_wuffs_frame(&ctx, error))
 		;
+
+	// Wrap the chain around, since our caller receives only one pointer.
+	if (ctx.result)
+		cairo_surface_set_user_data(ctx.result, &fastiv_io_key_frame_previous,
+			ctx.result_tail, NULL);
 
 fail:
 	free(ctx.workbuf.ptr);
@@ -1024,6 +1031,7 @@ cairo_user_data_key_t fastiv_io_key_orientation;
 cairo_user_data_key_t fastiv_io_key_icc;
 
 cairo_user_data_key_t fastiv_io_key_frame_next;
+cairo_user_data_key_t fastiv_io_key_frame_previous;
 cairo_user_data_key_t fastiv_io_key_frame_duration;
 cairo_user_data_key_t fastiv_io_key_loops;
 

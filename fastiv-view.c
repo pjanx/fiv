@@ -452,9 +452,15 @@ fastiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 		gtk_widget_queue_resize(widget);
 		return TRUE;
 
+	case GDK_KEY_bracketleft:
+		if (!(self->frame = cairo_surface_get_user_data(
+				self->frame, &fastiv_io_key_frame_previous)))
+			self->frame = self->surface;
+		gtk_widget_queue_draw(widget);
+		return TRUE;
 	case GDK_KEY_bracketright:
 		if (!(self->frame = cairo_surface_get_user_data(
-				  self->frame, &fastiv_io_key_frame_next)))
+				self->frame, &fastiv_io_key_frame_next)))
 			self->frame = self->surface;
 		gtk_widget_queue_draw(widget);
 		return TRUE;

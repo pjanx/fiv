@@ -37,6 +37,10 @@ extern cairo_user_data_key_t fastiv_io_key_icc;
 /// The next frame in a sequence, as a surface, in a chain, pre-composited.
 /// There is no wrap-around.
 extern cairo_user_data_key_t fastiv_io_key_frame_next;
+/// The previous frame in a sequence, as a surface, in a chain, pre-composited.
+/// This is a weak pointer that wraps around, and needn't be present
+/// for static images.
+extern cairo_user_data_key_t fastiv_io_key_frame_previous;
 /// Frame duration in milliseconds as an intptr_t.
 extern cairo_user_data_key_t fastiv_io_key_frame_duration;
 /// How many times to repeat the animation, or zero for +inf, as a uintptr_t.
