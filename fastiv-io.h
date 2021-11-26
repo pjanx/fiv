@@ -29,6 +29,8 @@ char **fastiv_io_all_supported_media_types(void);
 
 /// GBytes with plain Exif data.
 extern cairo_user_data_key_t fastiv_io_key_exif;
+/// FastivIoOrientation, as a uintptr_t.
+extern cairo_user_data_key_t fastiv_io_key_orientation;
 /// GBytes with plain ICC profile data.
 extern cairo_user_data_key_t fastiv_io_key_icc;
 

@@ -994,8 +994,14 @@ open_gdkpixbuf(const gchar *data, gsize len, GError **error)
 	cairo_surface_t *surface =
 		gdk_cairo_surface_create_from_pixbuf(pixbuf, 1, NULL);
 
-	// TODO(p): Also pass the pre-decoded Exif "orientation" option,
-	// which is an ASCII digit from 1 to 8.
+	const char *orientation = gdk_pixbuf_get_option(pixbuf, "orientation");
+	if (orientation && strlen(orientation) == 1) {
+		int n = *orientation - '0';
+		if (n >= 1 && n <= 8)
+			cairo_surface_set_user_data(surface, &fastiv_io_key_orientation,
+				(void *) (uintptr_t) n, NULL);
+	}
+
 	const char *icc_profile = gdk_pixbuf_get_option(pixbuf, "icc-profile");
 	if (icc_profile) {
 		gsize out_len = 0;
@@ -1014,6 +1020,7 @@ open_gdkpixbuf(const gchar *data, gsize len, GError **error)
 #endif  // HAVE_GDKPIXBUF ------------------------------------------------------
 
 cairo_user_data_key_t fastiv_io_key_exif;
+cairo_user_data_key_t fastiv_io_key_orientation;
 cairo_user_data_key_t fastiv_io_key_icc;
 
 cairo_user_data_key_t fastiv_io_key_frame_next;
@@ -1120,6 +1127,19 @@ fastiv_io_open_from_data(const char *data, size_t len, const gchar *path,
 
 		set_error(error, "unsupported file type");
 	}
+
+	// gdk-pixbuf only gives out this single field--cater to its limitations,
+	// since we'd really like to have it.
+	GBytes *exif = NULL;
+	gsize exif_len = 0;
+	gconstpointer exif_data = NULL;
+	if (surface &&
+		(exif = cairo_surface_get_user_data(surface, &fastiv_io_key_exif)) &&
+		(exif_data = g_bytes_get_data(exif, &exif_len))) {
+		cairo_surface_set_user_data(surface, &fastiv_io_key_orientation,
+			(void *) (uintptr_t) fastiv_io_exif_orientation(
+				exif_data, exif_len), NULL);
+	}
 	return surface;
 }
 
@@ -1160,11 +1180,11 @@ fastiv_io_exif_orientation(const guint8 *tiff, gsize len)
 		SBYTE, UNDEFINED, SSHORT, SLONG, SRATIONAL, FLOAT, DOUBLE };
 	enum { Orientation = 274 };
 	for (const guint8 *p = ifd0 + 2; fields-- && p + 12 <= end; p += 12) {
-		uint16_t tag = u16(p), type = u16(p + 2);
-		uint32_t count = u32(p + 4), value = u32(p + 8);
+		uint16_t tag = u16(p), type = u16(p + 2), value16 = u16(p + 8);
+		uint32_t count = u32(p + 4);
 		if (tag == Orientation && type == SHORT && count == 1 &&
-			value >= 1 && value <= 8)
-			return value;
+			value16 >= 1 && value16 <= 8)
+			return value16;
 	}
 	return FastivIoOrientationUnknown;
 }
