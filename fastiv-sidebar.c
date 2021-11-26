@@ -64,7 +64,8 @@ fastiv_sidebar_class_init(FastivSidebarClass *klass)
 	// TODO(p): Consider a return value, and using it.
 	sidebar_signals[OPEN_LOCATION] =
 		g_signal_new("open_location", G_TYPE_FROM_CLASS(klass), 0, 0,
-			NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_FILE);
+			NULL, NULL, NULL, G_TYPE_NONE,
+			2, G_TYPE_FILE, GTK_TYPE_PLACES_OPEN_FLAGS);
 }
 
 static gboolean
@@ -194,15 +195,16 @@ on_open_breadcrumb(
 	FastivSidebar *self = FASTIV_SIDEBAR(user_data);
 	GFile *location =
 		g_object_get_qdata(G_OBJECT(row), fastiv_sidebar_location_quark());
-	g_signal_emit(self, sidebar_signals[OPEN_LOCATION], 0, location);
+	g_signal_emit(self, sidebar_signals[OPEN_LOCATION], 0,
+		location, GTK_PLACES_OPEN_NORMAL);
 }
 
 static void
 on_open_location(G_GNUC_UNUSED GtkPlacesSidebar *sidebar, GFile *location,
-	G_GNUC_UNUSED GtkPlacesOpenFlags flags, gpointer user_data)
+	GtkPlacesOpenFlags flags, gpointer user_data)
 {
 	FastivSidebar *self = FASTIV_SIDEBAR(user_data);
-	g_signal_emit(self, sidebar_signals[OPEN_LOCATION], 0, location);
+	g_signal_emit(self, sidebar_signals[OPEN_LOCATION], 0, location, flags);
 
 	// Deselect the item in GtkPlacesSidebar, if unsuccessful.
 	update_location(self, NULL);
@@ -339,7 +341,8 @@ on_show_enter_location(G_GNUC_UNUSED GtkPlacesSidebar *sidebar,
 	if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
 		const char *text = gtk_entry_get_text(GTK_ENTRY(entry));
 		GFile *location = resolve_location(self, text);
-		g_signal_emit(self, sidebar_signals[OPEN_LOCATION], 0, location);
+		g_signal_emit(self, sidebar_signals[OPEN_LOCATION], 0,
+			location, GTK_PLACES_OPEN_NORMAL);
 		g_object_unref(location);
 	}
 	gtk_widget_destroy(dialog);

@@ -346,7 +346,7 @@ open_any_path(const char *path, gboolean force_browser)
 
 static void
 on_open_location(G_GNUC_UNUSED GtkPlacesSidebar *sidebar, GFile *location,
-	G_GNUC_UNUSED GtkPlacesOpenFlags flags, G_GNUC_UNUSED gpointer user_data)
+	GtkPlacesOpenFlags flags, G_GNUC_UNUSED gpointer user_data)
 {
 	gchar *path = g_file_get_path(location);
 	if (path) {
