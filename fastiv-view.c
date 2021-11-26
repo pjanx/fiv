@@ -31,7 +31,8 @@
 
 struct _FastivView {
 	GtkWidget parent_instance;
-	cairo_surface_t *surface;
+	cairo_surface_t *surface;           ///< The loaded image (sequence)
+	cairo_surface_t *frame;             ///< Current frame within, unreferenced
 	bool scale_to_fit;
 	double scale;
 };
@@ -237,12 +238,12 @@ fastiv_view_draw(GtkWidget *widget, cairo_t *cr)
 
 	// FIXME: Recording surfaces do not work well with CAIRO_SURFACE_TYPE_XLIB,
 	// we always get a shitty pixmap, where transparency contains junk.
-	if (cairo_surface_get_type(self->surface) == CAIRO_SURFACE_TYPE_RECORDING) {
+	if (cairo_surface_get_type(self->frame) == CAIRO_SURFACE_TYPE_RECORDING) {
 		cairo_surface_t *image =
 			cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
 		cairo_t *tcr = cairo_create(image);
 		cairo_scale(tcr, self->scale, self->scale);
-		cairo_set_source_surface(tcr, self->surface, 0, 0);
+		cairo_set_source_surface(tcr, self->frame, 0, 0);
 		cairo_paint(tcr);
 		cairo_destroy(tcr);
 
@@ -259,7 +260,7 @@ fastiv_view_draw(GtkWidget *widget, cairo_t *cr)
 
 	cairo_scale(cr, self->scale, self->scale);
 	cairo_set_source_surface(
-		cr, self->surface, x / self->scale, y / self->scale);
+		cr, self->frame, x / self->scale, y / self->scale);
 
 	cairo_pattern_t *pattern = cairo_get_source(cr);
 	cairo_pattern_set_extend(pattern, CAIRO_EXTEND_PAD);
@@ -339,6 +340,8 @@ fastiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 	FastivView *self = FASTIV_VIEW(widget);
 	if (event->state & ~GDK_SHIFT_MASK & gtk_accelerator_get_default_mod_mask())
 		return FALSE;
+	if (!self->surface)
+		return FALSE;
 
 	switch (event->keyval) {
 	case GDK_KEY_1:
@@ -349,6 +352,13 @@ fastiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 		return set_scale(self, self->scale / SCALE_STEP);
 	case GDK_KEY_F:
 		return set_scale_to_fit(self, !self->scale_to_fit);
+	case GDK_KEY_greater: {
+		if (!(self->frame = cairo_surface_get_user_data(
+				  self->frame, &fastiv_io_key_frame_next)))
+			self->frame = self->surface;
+		gtk_widget_queue_draw(widget);
+		return TRUE;
+	}
 	}
 	return FALSE;
 }
@@ -404,7 +414,7 @@ fastiv_view_open(FastivView *self, const gchar *path, GError **error)
 	if (self->surface)
 		cairo_surface_destroy(self->surface);
 
-	self->surface = surface;
+	self->frame = self->surface = surface;
 	set_scale_to_fit(self, true);
 	return TRUE;
 }
