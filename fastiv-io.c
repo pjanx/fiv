@@ -33,6 +33,10 @@
 #ifdef HAVE_XCURSOR
 #include <X11/Xcursor/Xcursor.h>
 #endif  // HAVE_XCURSOR
+#ifdef HAVE_LIBTIFF
+#include <tiff.h>
+#include <tiffio.h>
+#endif  // HAVE_LIBTIFF
 #ifdef HAVE_GDKPIXBUF
 #include <gdk/gdk.h>
 #include <gdk-pixbuf/gdk-pixbuf.h>
@@ -75,6 +79,9 @@ const char *fastiv_io_supported_media_types[] = {
 #ifdef HAVE_XCURSOR
 	"image/x-xcursor",
 #endif  // HAVE_XCURSOR
+#ifdef HAVE_LIBTIFF
+	"image/tiff",
+#endif  // HAVE_LIBTIFF
 	NULL
 };
 
@@ -1010,6 +1017,217 @@ open_xcursor(const gchar *data, gsize len, GError **error)
 }
 
 #endif  // HAVE_XCURSOR --------------------------------------------------------
+#ifdef HAVE_LIBTIFF  //---------------------------------------------------------
+
+struct fastiv_io_tiff {
+	unsigned char *data;
+	gchar *error;
+
+	// No, libtiff, the offset is not supposed to be unsigned (also see:
+	// man 0p sys_types.h), but at least it's fewer cases for us to care about.
+	toff_t position, len;
+};
+
+static tsize_t
+fastiv_io_tiff_read(thandle_t h, tdata_t buf, tsize_t len)
+{
+	struct fastiv_io_tiff *io = h;
+	if (len < 0) {
+		// What the FUCK! This argument is not supposed to be signed!
+		// How many mistakes can you make in such a basic API?
+		errno = EOWNERDEAD;
+		return -1;
+	}
+	if (io->position > io->len) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	toff_t n = MIN(io->len - io->position, (toff_t) len);
+	if (n > TIFF_TMSIZE_T_MAX) {
+		errno = EIO;
+		return -1;
+	}
+	memcpy(buf, io->data + io->position, n);
+	io->position += n;
+	return n;
+}
+
+static tsize_t
+fastiv_io_tiff_write(G_GNUC_UNUSED thandle_t h,
+	G_GNUC_UNUSED tdata_t buf, G_GNUC_UNUSED tsize_t len)
+{
+	errno = EBADF;
+	return -1;
+}
+
+static toff_t
+fastiv_io_tiff_seek(thandle_t h, toff_t offset, int whence)
+{
+	struct fastiv_io_tiff *io = h;
+	switch (whence) {
+	case SEEK_SET:
+		io->position = offset;
+		break;
+	case SEEK_CUR:
+		io->position += offset;
+		break;
+	case SEEK_END:
+		io->position = io->len + offset;
+		break;
+	default:
+		errno = EINVAL;
+		return -1;
+	}
+	return io->position;
+}
+
+static int
+fastiv_io_tiff_close(G_GNUC_UNUSED thandle_t h)
+{
+	return 0;
+}
+
+static toff_t
+fastiv_io_tiff_size(thandle_t h)
+{
+	return ((struct fastiv_io_tiff *) h)->len;
+}
+
+static void
+fastiv_io_tiff_error(thandle_t h,
+	const char *module, const char *format, va_list ap)
+{
+	struct fastiv_io_tiff *io = h;
+	gchar *message = g_strdup_vprintf(format, ap);
+	if (io->error)
+		// I'm not sure if two errors can ever come in a succession,
+		// but make sure to log them in any case.
+		g_warning("tiff: %s: %s", module, message);
+	else
+		io->error = g_strconcat(module, ": ", message, NULL);
+	g_free(message);
+}
+
+static void
+fastiv_io_tiff_warning(G_GNUC_UNUSED thandle_t h,
+	const char *module, const char *format, va_list ap)
+{
+	gchar *message = g_strdup_vprintf(format, ap);
+	g_debug("tiff: %s: %s", module, message);
+	g_free(message);
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+static cairo_surface_t *
+load_libtiff_directory(TIFF *tiff, GError **error)
+{
+	char emsg[1024] = "";
+	if (!TIFFRGBAImageOK(tiff, emsg)) {
+		set_error(error, emsg);
+		return NULL;
+	}
+
+	// TODO(p): Are there cases where we might not want to "stop on error"?
+	TIFFRGBAImage image;
+	if (!TIFFRGBAImageBegin(&image, tiff, 1 /* stop on error */, emsg)) {
+		set_error(error, emsg);
+		return NULL;
+	}
+	if (image.width > G_MAXINT || image.height >= G_MAXINT ||
+		G_MAXUINT32 / image.width < image.height) {
+		set_error(error, "image dimensions too large");
+		TIFFRGBAImageEnd(&image);
+		return NULL;
+	}
+
+	cairo_surface_t *surface = cairo_image_surface_create(
+		CAIRO_FORMAT_ARGB32, image.width, image.height);
+	uint32_t *raster = (uint32_t *) cairo_image_surface_get_data(surface);
+
+	image.req_orientation = ORIENTATION_LEFTTOP;
+	if (TIFFRGBAImageGet(&image, raster, image.width, image.height)) {
+		// Needs to be converted from ABGR to ARGB for Cairo,
+		// and then premultiplied.
+		for (uint32_t i = image.width * image.height; i--; ) {
+			uint32_t pixel = raster[i],
+				a = TIFFGetA(pixel),
+				b = TIFFGetB(pixel) * a / 255,
+				g = TIFFGetG(pixel) * a / 255,
+				r = TIFFGetR(pixel) * a / 255;
+			raster[i] = a << 24 | r << 16 | g << 8 | b;
+		}
+		cairo_surface_mark_dirty(surface);
+	} else {
+		g_clear_pointer(&surface, cairo_surface_destroy);
+	}
+
+	TIFFRGBAImageEnd(&image);
+	return surface;
+}
+
+static cairo_surface_t *
+open_libtiff(const gchar *data, gsize len, const gchar *path, GError **error)
+{
+	// Both kinds of handlers are called, redirect everything.
+	TIFFErrorHandler eh = TIFFSetErrorHandler(NULL);
+	TIFFErrorHandler wh = TIFFSetWarningHandler(NULL);
+	TIFFErrorHandlerExt ehe = TIFFSetErrorHandlerExt(fastiv_io_tiff_error);
+	TIFFErrorHandlerExt whe = TIFFSetWarningHandlerExt(fastiv_io_tiff_warning);
+	struct fastiv_io_tiff h = {
+		.data = (unsigned char *) data,
+		.position = 0,
+		.len = len,
+	};
+
+	cairo_surface_t *result = NULL, *result_tail = NULL;
+	TIFF *tiff = TIFFClientOpen(path, "rm" /* Avoid mmap. */, &h,
+		fastiv_io_tiff_read, fastiv_io_tiff_write, fastiv_io_tiff_seek,
+		fastiv_io_tiff_close, fastiv_io_tiff_size, NULL, NULL);
+	if (!tiff)
+		goto fail;
+
+	do {
+		// We inform about unsupported directories, but do not fail on them.
+		GError *err = NULL;
+		cairo_surface_t *surface = load_libtiff_directory(tiff, &err);
+		if (err) {
+			g_warning("%s: %s", path, err->message);
+			g_error_free(err);
+		}
+		if (!surface)
+			continue;
+
+		if (result) {
+			cairo_surface_set_user_data(result_tail,
+				&fastiv_io_key_page_next, surface,
+				(cairo_destroy_func_t) cairo_surface_destroy);
+			cairo_surface_set_user_data(surface,
+				&fastiv_io_key_page_previous, result_tail, NULL);
+			result_tail = surface;
+		} else {
+			result = result_tail = surface;
+		}
+	} while (TIFFReadDirectory(tiff));
+	TIFFClose(tiff);
+
+fail:
+	if (h.error) {
+		g_clear_pointer(&result, cairo_surface_destroy);
+		set_error(error, h.error);
+		g_free(h.error);
+	} else if (!result) {
+		set_error(error, "empty or unsupported image");
+	}
+
+	TIFFSetErrorHandlerExt(ehe);
+	TIFFSetWarningHandlerExt(whe);
+	TIFFSetErrorHandler(eh);
+	TIFFSetWarningHandler(wh);
+	return result;
+}
+
+#endif  // HAVE_LIBTIFF --------------------------------------------------------
 #ifdef HAVE_GDKPIXBUF  // ------------------------------------------------------
 
 static cairo_surface_t *
@@ -1149,6 +1367,15 @@ fastiv_io_open_from_data(const char *data, size_t len, const gchar *path,
 			g_clear_error(error);
 		}
 #endif  // HAVE_XCURSOR --------------------------------------------------------
+#ifdef HAVE_LIBTIFF  //---------------------------------------------------------
+		// This needs to be positioned after LibRaw.
+		if ((surface = open_libtiff(data, len, path, error)))
+			break;
+		if (error) {
+			g_debug("%s", (*error)->message);
+			g_clear_error(error);
+		}
+#endif  // HAVE_LIBTIFF --------------------------------------------------------
 #ifdef HAVE_GDKPIXBUF  // ------------------------------------------------------
 		// This is only used as a last resort, the rest above is special-cased.
 		if ((surface = open_gdkpixbuf(data, len, error)) ||

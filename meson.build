@@ -10,6 +10,7 @@ add_project_arguments(
 libraw = dependency('libraw', required : get_option('libraw'))
 librsvg = dependency('librsvg-2.0', required : get_option('librsvg'))
 xcursor = dependency('xcursor', required : get_option('xcursor'))
+libtiff = dependency('libtiff-4', required : get_option('libtiff'))
 gdkpixbuf = dependency('gdk-pixbuf-2.0', required : get_option('gdk-pixbuf'))
 dependencies = [
 	dependency('gtk+-3.0'),
@@ -20,6 +21,7 @@ dependencies = [
 	libraw,
 	librsvg,
 	xcursor,
+	libtiff,
 	gdkpixbuf,
 	meson.get_compiler('c').find_library('m', required : false),
 ]
@@ -30,6 +32,7 @@ conf.set_quoted('PROJECT_VERSION', meson.project_version())
 conf.set('HAVE_LIBRAW', libraw.found())
 conf.set('HAVE_LIBRSVG', librsvg.found())
 conf.set('HAVE_XCURSOR', xcursor.found())
+conf.set('HAVE_LIBTIFF', libtiff.found())
 conf.set('HAVE_GDKPIXBUF', gdkpixbuf.found())
 configure_file(
 	output : 'config.h',
