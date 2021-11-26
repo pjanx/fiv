@@ -34,6 +34,7 @@ struct _FastivView {
 	cairo_surface_t *surface;           ///< The loaded image (sequence)
 	cairo_surface_t *frame;             ///< Current frame within, unreferenced
 	FastivIoOrientation orientation;    ///< Current orientation
+	bool filter;
 	bool scale_to_fit;
 	double scale;
 };
@@ -350,8 +351,12 @@ fastiv_view_draw(GtkWidget *widget, cairo_t *cr)
 	cairo_pattern_t *pattern = cairo_get_source(cr);
 	cairo_pattern_set_matrix(pattern, &matrix);
 	cairo_pattern_set_extend(pattern, CAIRO_EXTEND_PAD);
+
 	// TODO(p): Prescale it ourselves to an off-screen bitmap, gamma-correctly.
-	cairo_pattern_set_filter(pattern, CAIRO_FILTER_GOOD);
+	if (self->filter)
+		cairo_pattern_set_filter(pattern, CAIRO_FILTER_GOOD);
+	else
+		cairo_pattern_set_filter(pattern, CAIRO_FILTER_NEAREST);
 
 #ifdef GDK_WINDOWING_QUARTZ
 	// Not supported there. Acts a bit like repeating, but weirdly offset.
@@ -439,6 +444,11 @@ fastiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 	case GDK_KEY_F:
 		return set_scale_to_fit(self, !self->scale_to_fit);
 
+	case GDK_KEY_i:
+		self->filter = !self->filter;
+		gtk_widget_queue_draw(widget);
+		return TRUE;
+
 	case GDK_KEY_less:
 		self->orientation = view_left[self->orientation];
 		gtk_widget_queue_resize(widget);
@@ -504,6 +514,7 @@ fastiv_view_init(FastivView *self)
 {
 	gtk_widget_set_can_focus(GTK_WIDGET(self), TRUE);
 
+	self->filter = true;
 	self->scale = 1.0;
 }
 
