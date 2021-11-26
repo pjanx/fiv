@@ -57,9 +57,9 @@ typedef enum _FastivIoOrientation {
 	FastivIoOrientationMirror0   = 2,
 	FastivIoOrientation180       = 3,
 	FastivIoOrientationMirror180 = 4,
-	FastivIoOrientationMirror90  = 5,
+	FastivIoOrientationMirror270 = 5,
 	FastivIoOrientation90        = 6,
-	FastivIoOrientationMirror270 = 7,
+	FastivIoOrientationMirror90  = 7,
 	FastivIoOrientation270       = 8
 } FastivIoOrientation;
 

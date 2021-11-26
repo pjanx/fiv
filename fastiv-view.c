@@ -33,11 +33,48 @@ struct _FastivView {
 	GtkWidget parent_instance;
 	cairo_surface_t *surface;           ///< The loaded image (sequence)
 	cairo_surface_t *frame;             ///< Current frame within, unreferenced
+	FastivIoOrientation orientation;    ///< Current orientation
 	bool scale_to_fit;
 	double scale;
 };
 
 G_DEFINE_TYPE(FastivView, fastiv_view, GTK_TYPE_WIDGET)
+
+static FastivIoOrientation view_left[9] = {
+	[FastivIoOrientationUnknown] = FastivIoOrientationUnknown,
+	[FastivIoOrientation0] = FastivIoOrientation270,
+	[FastivIoOrientationMirror0] = FastivIoOrientationMirror270,
+	[FastivIoOrientation180] = FastivIoOrientation90,
+	[FastivIoOrientationMirror180] = FastivIoOrientationMirror90,
+	[FastivIoOrientationMirror270] = FastivIoOrientationMirror180,
+	[FastivIoOrientation90] = FastivIoOrientation0,
+	[FastivIoOrientationMirror90] = FastivIoOrientationMirror0,
+	[FastivIoOrientation270] = FastivIoOrientation180
+};
+
+static FastivIoOrientation view_mirror[9] = {
+	[FastivIoOrientationUnknown] = FastivIoOrientationUnknown,
+	[FastivIoOrientation0] = FastivIoOrientationMirror0,
+	[FastivIoOrientationMirror0] = FastivIoOrientation0,
+	[FastivIoOrientation180] = FastivIoOrientationMirror180,
+	[FastivIoOrientationMirror180] = FastivIoOrientation180,
+	[FastivIoOrientationMirror270] = FastivIoOrientation270,
+	[FastivIoOrientation90] = FastivIoOrientationMirror270,
+	[FastivIoOrientationMirror90] = FastivIoOrientation90,
+	[FastivIoOrientation270] = FastivIoOrientationMirror270
+};
+
+static FastivIoOrientation view_right[9] = {
+	[FastivIoOrientationUnknown] = FastivIoOrientationUnknown,
+	[FastivIoOrientation0] = FastivIoOrientation90,
+	[FastivIoOrientationMirror0] = FastivIoOrientationMirror90,
+	[FastivIoOrientation180] = FastivIoOrientation270,
+	[FastivIoOrientationMirror180] = FastivIoOrientationMirror270,
+	[FastivIoOrientationMirror270] = FastivIoOrientationMirror0,
+	[FastivIoOrientation90] = FastivIoOrientation180,
+	[FastivIoOrientationMirror90] = FastivIoOrientationMirror180,
+	[FastivIoOrientation270] = FastivIoOrientation0
+};
 
 enum {
 	PROP_SCALE = 1,
@@ -83,13 +120,24 @@ get_surface_dimensions(FastivView *self, double *width, double *height)
 	cairo_rectangle_t extents = {};
 	switch (cairo_surface_get_type(self->surface)) {
 	case CAIRO_SURFACE_TYPE_IMAGE:
-		*width = cairo_image_surface_get_width(self->surface);
-		*height = cairo_image_surface_get_height(self->surface);
+		switch (self->orientation) {
+		case FastivIoOrientation90:
+		case FastivIoOrientationMirror90:
+		case FastivIoOrientation270:
+		case FastivIoOrientationMirror270:
+			*width = cairo_image_surface_get_height(self->surface);
+			*height = cairo_image_surface_get_width(self->surface);
+			break;
+		default:
+			*width = cairo_image_surface_get_width(self->surface);
+			*height = cairo_image_surface_get_height(self->surface);
+		}
 		return;
 	case CAIRO_SURFACE_TYPE_RECORDING:
-		if (!cairo_recording_surface_get_extents(self->surface, &extents))
+		if (!cairo_recording_surface_get_extents(self->surface, &extents)) {
 			cairo_recording_surface_ink_extents(self->surface,
 				&extents.x, &extents.y, &extents.width, &extents.height);
+		}
 
 		*width = extents.width;
 		*height = extents.height;
@@ -227,7 +275,9 @@ fastiv_view_draw(GtkWidget *widget, cairo_t *cr)
 		return TRUE;
 
 	int w, h;
+	double sw, sh;
 	get_display_dimensions(self, &w, &h);
+	get_surface_dimensions(self, &sw, &sh);
 
 	double x = 0;
 	double y = 0;
@@ -258,11 +308,47 @@ fastiv_view_draw(GtkWidget *widget, cairo_t *cr)
 	cairo_rectangle(cr, x, y, w, h);
 	cairo_clip(cr);
 
+	cairo_translate(cr, x, y);
 	cairo_scale(cr, self->scale, self->scale);
-	cairo_set_source_surface(
-		cr, self->frame, x / self->scale, y / self->scale);
+	cairo_set_source_surface(cr, self->frame, 0, 0);
+
+	cairo_matrix_t matrix = {};
+	cairo_matrix_init_identity(&matrix);
+	switch (self->orientation) {
+	case FastivIoOrientation90:
+		cairo_matrix_rotate(&matrix, -M_PI_2);
+		cairo_matrix_translate(&matrix, -sw, 0);
+		break;
+	case FastivIoOrientation180:
+		cairo_matrix_scale(&matrix, -1, -1);
+		cairo_matrix_translate(&matrix, -sw, -sh);
+		break;
+	case FastivIoOrientation270:
+		cairo_matrix_rotate(&matrix, +M_PI_2);
+		cairo_matrix_translate(&matrix, 0, -sh);
+		break;
+	case FastivIoOrientationMirror0:
+		cairo_matrix_scale(&matrix, -1, +1);
+		cairo_matrix_translate(&matrix, -sw, 0);
+		break;
+	case FastivIoOrientationMirror90:
+		cairo_matrix_rotate(&matrix, +M_PI_2);
+		cairo_matrix_scale(&matrix, -1, +1);
+		cairo_matrix_translate(&matrix, -sw, -sh);
+		break;
+	case FastivIoOrientationMirror180:
+		cairo_matrix_scale(&matrix, +1, -1);
+		cairo_matrix_translate(&matrix, 0, -sh);
+		break;
+	case FastivIoOrientationMirror270:
+		cairo_matrix_rotate(&matrix, -M_PI_2);
+		cairo_matrix_scale(&matrix, -1, +1);
+	default:
+		break;
+	}
 
 	cairo_pattern_t *pattern = cairo_get_source(cr);
+	cairo_pattern_set_matrix(pattern, &matrix);
 	cairo_pattern_set_extend(pattern, CAIRO_EXTEND_PAD);
 	// TODO(p): Prescale it ourselves to an off-screen bitmap, gamma-correctly.
 	cairo_pattern_set_filter(pattern, CAIRO_FILTER_GOOD);
@@ -352,13 +438,26 @@ fastiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 		return set_scale(self, self->scale / SCALE_STEP);
 	case GDK_KEY_F:
 		return set_scale_to_fit(self, !self->scale_to_fit);
-	case GDK_KEY_greater: {
+
+	case GDK_KEY_less:
+		self->orientation = view_left[self->orientation];
+		gtk_widget_queue_resize(widget);
+		return TRUE;
+	case GDK_KEY_equal:
+		self->orientation = view_mirror[self->orientation];
+		gtk_widget_queue_draw(widget);
+		return TRUE;
+	case GDK_KEY_greater:
+		self->orientation = view_right[self->orientation];
+		gtk_widget_queue_resize(widget);
+		return TRUE;
+
+	case GDK_KEY_bracketright:
 		if (!(self->frame = cairo_surface_get_user_data(
 				  self->frame, &fastiv_io_key_frame_next)))
 			self->frame = self->surface;
 		gtk_widget_queue_draw(widget);
 		return TRUE;
-	}
 	}
 	return FALSE;
 }
@@ -416,5 +515,10 @@ fastiv_view_open(FastivView *self, const gchar *path, GError **error)
 
 	self->frame = self->surface = surface;
 	set_scale_to_fit(self, true);
+
+	if ((self->orientation = (uintptr_t) cairo_surface_get_user_data(
+			 self->surface, &fastiv_io_key_orientation)) ==
+		FastivIoOrientationUnknown)
+		self->orientation = FastivIoOrientation0;
 	return TRUE;
 }
