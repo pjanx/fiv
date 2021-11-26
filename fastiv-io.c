@@ -497,7 +497,7 @@ open_wuffs_using(wuffs_base__image_decoder *(*allocate)(),
 }
 
 static void
-trivial_cmyk_to_bgra(unsigned char *p, int len)
+trivial_cmyk_to_host_byte_order_argb(unsigned char *p, int len)
 {
 	// Inspired by gdk-pixbuf's io-jpeg.c:
 	//
@@ -505,10 +505,17 @@ trivial_cmyk_to_bgra(unsigned char *p, int len)
 	// does, see https://bugzilla.gnome.org/show_bug.cgi?id=618096
 	while (len--) {
 		int c = p[0], m = p[1], y = p[2], k = p[3];
+#if G_BYTE_ORDER == G_LITTLE_ENDIAN
 		p[0] = k * y / 255;
 		p[1] = k * m / 255;
 		p[2] = k * c / 255;
 		p[3] = 255;
+#else
+		p[3] = k * y / 255;
+		p[2] = k * m / 255;
+		p[1] = k * c / 255;
+		p[0] = 255;
+#endif
 		p += 4;
 	}
 }
@@ -644,11 +651,10 @@ open_libjpeg_turbo(const gchar *data, gsize len, GError **error)
 		return NULL;
 	}
 
-	// TODO(p): Support big-endian machines, too, those need ARGB ordering.
 	if (pixel_format == TJPF_CMYK) {
 		// CAIRO_STRIDE_ALIGNMENT is 4 bytes, so there will be no padding with
 		// ARGB/BGR/XRGB/BGRX.
-		trivial_cmyk_to_bgra(
+		trivial_cmyk_to_host_byte_order_argb(
 			cairo_image_surface_get_data(surface), width * height);
 	}
 
