@@ -31,8 +31,9 @@
 
 struct _FastivView {
 	GtkWidget parent_instance;
-	cairo_surface_t *surface;           ///< The loaded image (sequence)
-	cairo_surface_t *frame;             ///< Current frame within, unreferenced
+	cairo_surface_t *image;             ///< The loaded image (sequence)
+	cairo_surface_t *page;              ///< Current page within image, weak
+	cairo_surface_t *frame;             ///< Current frame within page, weak
 	FastivIoOrientation orientation;    ///< Current orientation
 	bool filter;
 	bool scale_to_fit;
@@ -89,7 +90,7 @@ static void
 fastiv_view_finalize(GObject *gobject)
 {
 	FastivView *self = FASTIV_VIEW(gobject);
-	cairo_surface_destroy(self->surface);
+	cairo_surface_destroy(self->image);
 
 	G_OBJECT_CLASS(fastiv_view_parent_class)->finalize(gobject);
 }
@@ -115,28 +116,28 @@ static void
 get_surface_dimensions(FastivView *self, double *width, double *height)
 {
 	*width = *height = 0;
-	if (!self->surface)
+	if (!self->image)
 		return;
 
 	cairo_rectangle_t extents = {};
-	switch (cairo_surface_get_type(self->surface)) {
+	switch (cairo_surface_get_type(self->page)) {
 	case CAIRO_SURFACE_TYPE_IMAGE:
 		switch (self->orientation) {
 		case FastivIoOrientation90:
 		case FastivIoOrientationMirror90:
 		case FastivIoOrientation270:
 		case FastivIoOrientationMirror270:
-			*width = cairo_image_surface_get_height(self->surface);
-			*height = cairo_image_surface_get_width(self->surface);
+			*width = cairo_image_surface_get_height(self->page);
+			*height = cairo_image_surface_get_width(self->page);
 			break;
 		default:
-			*width = cairo_image_surface_get_width(self->surface);
-			*height = cairo_image_surface_get_height(self->surface);
+			*width = cairo_image_surface_get_width(self->page);
+			*height = cairo_image_surface_get_height(self->page);
 		}
 		return;
 	case CAIRO_SURFACE_TYPE_RECORDING:
-		if (!cairo_recording_surface_get_extents(self->surface, &extents)) {
-			cairo_recording_surface_ink_extents(self->surface,
+		if (!cairo_recording_surface_get_extents(self->page, &extents)) {
+			cairo_recording_surface_ink_extents(self->page,
 				&extents.x, &extents.y, &extents.width, &extents.height);
 		}
 
@@ -198,7 +199,7 @@ fastiv_view_size_allocate(GtkWidget *widget, GtkAllocation *allocation)
 		->size_allocate(widget, allocation);
 
 	FastivView *self = FASTIV_VIEW(widget);
-	if (!self->surface || !self->scale_to_fit)
+	if (!self->image || !self->scale_to_fit)
 		return;
 
 	double w, h;
@@ -271,7 +272,7 @@ fastiv_view_draw(GtkWidget *widget, cairo_t *cr)
 		allocation.width, allocation.height);
 
 	FastivView *self = FASTIV_VIEW(widget);
-	if (!self->surface ||
+	if (!self->image ||
 		!gtk_cairo_should_draw_window(cr, gtk_widget_get_window(widget)))
 		return TRUE;
 
@@ -408,7 +409,7 @@ static gboolean
 fastiv_view_scroll_event(GtkWidget *widget, GdkEventScroll *event)
 {
 	FastivView *self = FASTIV_VIEW(widget);
-	if (!self->surface)
+	if (!self->image)
 		return FALSE;
 	if (event->state & gtk_accelerator_get_default_mod_mask())
 		return FALSE;
@@ -431,7 +432,7 @@ fastiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 	FastivView *self = FASTIV_VIEW(widget);
 	if (event->state & ~GDK_SHIFT_MASK & gtk_accelerator_get_default_mod_mask())
 		return FALSE;
-	if (!self->surface)
+	if (!self->image)
 		return FALSE;
 
 	switch (event->keyval) {
@@ -462,16 +463,33 @@ fastiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 		gtk_widget_queue_resize(widget);
 		return TRUE;
 
-	case GDK_KEY_bracketleft:
+	case GDK_KEY_bracketleft: {
+		cairo_surface_t *page = cairo_surface_get_user_data(
+			self->page, &fastiv_io_key_page_previous);
+		if (page)
+			self->frame = self->page = page;
+		gtk_widget_queue_resize(widget);
+		return TRUE;
+	}
+	case GDK_KEY_bracketright: {
+		cairo_surface_t *page = cairo_surface_get_user_data(
+			self->page, &fastiv_io_key_page_next);
+		if (page)
+			self->frame = self->page = page;
+		gtk_widget_queue_resize(widget);
+		return TRUE;
+	}
+
+	case GDK_KEY_braceleft:
 		if (!(self->frame = cairo_surface_get_user_data(
 				self->frame, &fastiv_io_key_frame_previous)))
-			self->frame = self->surface;
+			self->frame = self->page;
 		gtk_widget_queue_draw(widget);
 		return TRUE;
-	case GDK_KEY_bracketright:
+	case GDK_KEY_braceright:
 		if (!(self->frame = cairo_surface_get_user_data(
 				self->frame, &fastiv_io_key_frame_next)))
-			self->frame = self->surface;
+			self->frame = self->page;
 		gtk_widget_queue_draw(widget);
 		return TRUE;
 	}
@@ -527,14 +545,15 @@ fastiv_view_open(FastivView *self, const gchar *path, GError **error)
 	cairo_surface_t *surface = fastiv_io_open(path, error);
 	if (!surface)
 		return FALSE;
-	if (self->surface)
-		cairo_surface_destroy(self->surface);
+	if (self->image)
+		cairo_surface_destroy(self->image);
 
-	self->frame = self->surface = surface;
+	self->frame = self->page = self->image = surface;
 	set_scale_to_fit(self, true);
 
+	// TODO(p): This is actually per-page.
 	if ((self->orientation = (uintptr_t) cairo_surface_get_user_data(
-			 self->surface, &fastiv_io_key_orientation)) ==
+			 self->image, &fastiv_io_key_orientation)) ==
 		FastivIoOrientationUnknown)
 		self->orientation = FastivIoOrientation0;
 	return TRUE;

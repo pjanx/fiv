@@ -955,39 +955,58 @@ open_xcursor(const gchar *data, gsize len, GError **error)
 		return NULL;
 	}
 
-	// Let's just arrange the pixel data in a recording surface.
-	static cairo_user_data_key_t key = {};
-	cairo_surface_t *recording =
-		cairo_recording_surface_create(CAIRO_CONTENT_COLOR_ALPHA, NULL);
-	cairo_surface_set_user_data(
-		recording, &key, images, (cairo_destroy_func_t) XcursorImagesDestroy);
-	cairo_t *cr = cairo_create(recording);
+	// Interpret cursors as animated pages.
+	cairo_surface_t *pages = NULL, *frames_head = NULL, *frames_tail = NULL;
 
-	// Unpack horizontally by animation, vertically by size.
+	// XXX: Assuming that all "nominal sizes" have the same dimensions.
 	XcursorDim last_nominal = -1;
-	int x = 0, y = 0, row_height = 0;
 	for (int i = 0; i < images->nimage; i++) {
 		XcursorImage *image = images->images[i];
-		if (image->size != last_nominal) {
-			x = 0;
-			y += row_height;
-			row_height = 0;
-			last_nominal = image->size;
-		}
 
 		// The library automatically byte swaps in _XcursorReadImage().
-		cairo_surface_t *source = cairo_image_surface_create_for_data(
+		cairo_surface_t *surface = cairo_image_surface_create_for_data(
 			(unsigned char *) image->pixels, CAIRO_FORMAT_ARGB32,
 			image->width, image->height, image->width * sizeof *image->pixels);
-		cairo_set_source_surface(cr, source, x, y);
-		cairo_surface_destroy(source);
-		cairo_paint(cr);
+		cairo_surface_set_user_data(surface, &fastiv_io_key_frame_duration,
+			(void *) (intptr_t) image->delay, NULL);
 
-		x += image->width;
-		row_height = MAX(row_height, (int) image->height);
+		if (pages && image->size == last_nominal) {
+			cairo_surface_set_user_data(surface,
+				&fastiv_io_key_frame_previous, frames_tail, NULL);
+			cairo_surface_set_user_data(frames_tail,
+				&fastiv_io_key_frame_next, surface,
+				(cairo_destroy_func_t) cairo_surface_destroy);
+		} else if (frames_head) {
+			cairo_surface_set_user_data(frames_head,
+				&fastiv_io_key_frame_previous, frames_tail, NULL);
+
+			cairo_surface_set_user_data(frames_head,
+				&fastiv_io_key_page_next, surface,
+				(cairo_destroy_func_t) cairo_surface_destroy);
+			cairo_surface_set_user_data(surface,
+				&fastiv_io_key_page_previous, frames_head, NULL);
+			frames_head = surface;
+		} else {
+			pages = frames_head = surface;
+		}
+
+		frames_tail = surface;
+		last_nominal = image->size;
 	}
-	cairo_destroy(cr);
-	return recording;
+	if (!pages) {
+		XcursorImagesDestroy(images);
+		return NULL;
+	}
+
+	// Wrap around animations in the last page.
+	cairo_surface_set_user_data(
+		frames_head, &fastiv_io_key_frame_previous, frames_tail, NULL);
+
+	// There is no need to copy data, assign it to the surface.
+	static cairo_user_data_key_t key = {};
+	cairo_surface_set_user_data(
+		pages, &key, images, (cairo_destroy_func_t) XcursorImagesDestroy);
+	return pages;
 }
 
 #endif  // HAVE_XCURSOR --------------------------------------------------------
@@ -1040,6 +1059,9 @@ cairo_user_data_key_t fastiv_io_key_frame_next;
 cairo_user_data_key_t fastiv_io_key_frame_previous;
 cairo_user_data_key_t fastiv_io_key_frame_duration;
 cairo_user_data_key_t fastiv_io_key_loops;
+
+cairo_user_data_key_t fastiv_io_key_page_next;
+cairo_user_data_key_t fastiv_io_key_page_previous;
 
 cairo_surface_t *
 fastiv_io_open(const gchar *path, GError **error)

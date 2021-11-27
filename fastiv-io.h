@@ -46,6 +46,13 @@ extern cairo_user_data_key_t fastiv_io_key_frame_duration;
 /// How many times to repeat the animation, or zero for +inf, as a uintptr_t.
 extern cairo_user_data_key_t fastiv_io_key_loops;
 
+/// The first frame of the next page, as a surface, in a chain.
+/// There is no wrap-around.
+extern cairo_user_data_key_t fastiv_io_key_page_next;
+/// The first frame of the previous page, as a surface, in a chain.
+/// There is no wrap-around. This is a weak pointer.
+extern cairo_user_data_key_t fastiv_io_key_page_previous;
+
 cairo_surface_t *fastiv_io_open(const gchar *path, GError **error);
 cairo_surface_t *fastiv_io_open_from_data(
 	const char *data, size_t len, const gchar *path, GError **error);
