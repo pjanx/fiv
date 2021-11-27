@@ -311,13 +311,17 @@ spawn_path(const char *path)
 }
 
 static void
-on_item_activated(G_GNUC_UNUSED FastivBrowser *browser, const char *path,
+on_item_activated(G_GNUC_UNUSED FastivBrowser *browser, GFile *location,
 	GtkPlacesOpenFlags flags, G_GNUC_UNUSED gpointer data)
 {
-	if (flags == GTK_PLACES_OPEN_NEW_WINDOW)
-		spawn_path(path);
-	else
-		open(path);
+	gchar *path = g_file_get_path(location);
+	if (path) {
+		if (flags == GTK_PLACES_OPEN_NEW_WINDOW)
+			spawn_path(path);
+		else
+			open(path);
+		g_free(path);
+	}
 }
 
 static gboolean

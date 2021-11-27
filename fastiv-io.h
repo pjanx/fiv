@@ -99,4 +99,4 @@ extern FastivIoThumbnailSizeInfo
 	fastiv_io_thumbnail_sizes[FASTIV_IO_THUMBNAIL_SIZE_COUNT];
 
 cairo_surface_t *fastiv_io_lookup_thumbnail(
-	const gchar *target, FastivIoThumbnailSize size);
+	GFile *target, FastivIoThumbnailSize size);

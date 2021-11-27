@@ -64,7 +64,7 @@ static const double g_permitted_width_multiplier = 2;
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 struct entry {
-	char *filename;                     ///< Absolute path
+	char *uri;                          ///< GIO URI
 	cairo_surface_t *thumbnail;         ///< Prescaled thumbnail
 	GIcon *icon;                        ///< If no thumbnail, use this icon
 };
@@ -72,7 +72,7 @@ struct entry {
 static void
 entry_free(Entry *self)
 {
-	g_free(self->filename);
+	g_free(self->uri);
 	g_clear_pointer(&self->thumbnail, cairo_surface_destroy);
 	g_clear_object(&self->icon);
 }
@@ -351,15 +351,15 @@ entry_add_thumbnail(gpointer data, gpointer user_data)
 	g_clear_pointer(&self->thumbnail, cairo_surface_destroy);
 
 	FastivBrowser *browser = FASTIV_BROWSER(user_data);
+	GFile *file = g_file_new_for_uri(self->uri);
 	self->thumbnail = rescale_thumbnail(
-		fastiv_io_lookup_thumbnail(self->filename, browser->item_size),
+		fastiv_io_lookup_thumbnail(file, browser->item_size),
 		browser->item_height);
 	if (self->thumbnail)
-		return;
+		goto out;
 
 	// Fall back to symbolic icons, though there's only so much we can do
 	// in parallel--GTK+ isn't thread-safe.
-	GFile *file = g_file_new_for_path(self->filename);
 	GFileInfo *info = g_file_query_info(file,
 		G_FILE_ATTRIBUTE_STANDARD_NAME
 		"," G_FILE_ATTRIBUTE_STANDARD_SYMBOLIC_ICON,
@@ -371,6 +371,8 @@ entry_add_thumbnail(gpointer data, gpointer user_data)
 			self->icon = g_object_ref(icon);
 		g_object_unref(info);
 	}
+out:
+	g_object_unref(file);
 }
 
 static void
@@ -521,9 +523,9 @@ destroy_widget_idle_source_func(GtkWidget *widget)
 }
 
 static void
-show_context_menu(GtkWidget *widget, const char *filename)
+show_context_menu(GtkWidget *widget, const char *uri)
 {
-	GFile *file = g_file_new_for_path(filename);
+	GFile *file = g_file_new_for_uri(uri);
 	GFileInfo *info = g_file_query_info(file,
 		G_FILE_ATTRIBUTE_STANDARD_NAME
 		"," G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE,
@@ -778,8 +780,10 @@ fastiv_browser_draw(GtkWidget *widget, cairo_t *cr)
 static gboolean
 open_entry(GtkWidget *self, const Entry *entry, gboolean new_window)
 {
-	g_signal_emit(self, browser_signals[ITEM_ACTIVATED], 0, entry->filename,
+	GFile *location = g_file_new_for_uri(entry->uri);
+	g_signal_emit(self, browser_signals[ITEM_ACTIVATED], 0, location,
 		new_window ? GTK_PLACES_OPEN_NEW_WINDOW : GTK_PLACES_OPEN_NORMAL);
+	g_object_unref(location);
 	return TRUE;
 }
 
@@ -817,7 +821,7 @@ fastiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 		// On X11, after closing the menu, the pointer otherwise remains,
 		// no matter what its new location is.
 		gdk_window_set_cursor(gtk_widget_get_window(widget), NULL);
-		show_context_menu(widget, entry->filename);
+		show_context_menu(widget, entry->uri);
 		return TRUE;
 	default:
 		return FALSE;
@@ -871,7 +875,7 @@ fastiv_browser_query_tooltip(GtkWidget *widget, gint x, gint y,
 	if (!entry)
 		return FALSE;
 
-	GFile *file = g_file_new_for_path(entry->filename);
+	GFile *file = g_file_new_for_uri(entry->uri);
 	GFileInfo *info = g_file_query_info(file,
 		G_FILE_ATTRIBUTE_STANDARD_NAME
 		"," G_FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME,
@@ -967,7 +971,7 @@ fastiv_browser_class_init(FastivBrowserClass *klass)
 
 	browser_signals[ITEM_ACTIVATED] = g_signal_new("item-activated",
 		G_TYPE_FROM_CLASS(klass), 0, 0, NULL, NULL, NULL,
-		G_TYPE_NONE, 2, G_TYPE_STRING, GTK_TYPE_PLACES_OPEN_FLAGS);
+		G_TYPE_NONE, 2, G_TYPE_FILE, GTK_TYPE_PLACES_OPEN_FLAGS);
 
 	GtkWidgetClass *widget_class = GTK_WIDGET_CLASS(klass);
 	widget_class->get_request_mode = fastiv_browser_get_request_mode;
@@ -1020,8 +1024,8 @@ entry_compare(gconstpointer a, gconstpointer b)
 {
 	const Entry *entry1 = a;
 	const Entry *entry2 = b;
-	GFile *location1 = g_file_new_for_path(entry1->filename);
-	GFile *location2 = g_file_new_for_path(entry2->filename);
+	GFile *location1 = g_file_new_for_uri(entry1->uri);
+	GFile *location2 = g_file_new_for_uri(entry2->uri);
 	gint result = fastiv_io_filecmp(location1, location2);
 	g_object_unref(location1);
 	g_object_unref(location2);
@@ -1055,7 +1059,7 @@ fastiv_browser_load(
 			continue;
 
 		g_array_append_val(self->entries,
-			((Entry) {.thumbnail = NULL, .filename = g_file_get_path(child)}));
+			((Entry) {.thumbnail = NULL, .uri = g_file_get_uri(child)}));
 	}
 	g_object_unref(enumerator);
 

@@ -1365,21 +1365,23 @@ fail_init:
 }
 
 cairo_surface_t *
-fastiv_io_lookup_thumbnail(const gchar *target, FastivIoThumbnailSize size)
+fastiv_io_lookup_thumbnail(GFile *target, FastivIoThumbnailSize size)
 {
 	g_return_val_if_fail(size >= FASTIV_IO_THUMBNAIL_SIZE_MIN &&
 		size <= FASTIV_IO_THUMBNAIL_SIZE_MAX, NULL);
 
-	GStatBuf st;
-	if (g_stat(target, &st))
+	// Local files only, at least for now.
+	gchar *path = g_file_get_path(target);
+	if (!path)
 		return NULL;
 
-	// TODO(p): Consider making the `target` an absolute path, if it isn't.
-	// Or maybe let it fail, and document the requirement.
-	gchar *uri = g_filename_to_uri(target, NULL, NULL);
-	if (!uri)
+	GStatBuf st = {};
+	int err = g_stat(path, &st);
+	g_free(path);
+	if (err)
 		return NULL;
 
+	gchar *uri = g_file_get_uri(target);
 	gchar *sum = g_compute_checksum_for_string(G_CHECKSUM_MD5, uri, -1);
 	gchar *cache_dir = get_xdg_home_dir("XDG_CACHE_HOME", ".cache");
 
