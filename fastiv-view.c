@@ -34,10 +34,14 @@ struct _FastivView {
 	cairo_surface_t *image;             ///< The loaded image (sequence)
 	cairo_surface_t *page;              ///< Current page within image, weak
 	cairo_surface_t *frame;             ///< Current frame within page, weak
-	FastivIoOrientation orientation;    ///< Current orientation
-	bool filter;
-	bool scale_to_fit;
-	double scale;
+	FastivIoOrientation orientation;    ///< Current page orientation
+	bool filter;                        ///< Smooth scaling toggle
+	bool scale_to_fit;                  ///< Image no larger than the allocation
+	double scale;                       ///< Scaling factor
+
+	int remaining_loops;                ///< Greater than zero if limited
+	gint64 frame_time;                  ///< Current frame's start, µs precision
+	gulong frame_update_connection;     ///< GdkFrameClock::update
 };
 
 G_DEFINE_TYPE(FastivView, fastiv_view, GTK_TYPE_WIDGET)
@@ -426,6 +430,123 @@ fastiv_view_scroll_event(GtkWidget *widget, GdkEventScroll *event)
 	}
 }
 
+static void
+stop_animating(FastivView *self)
+{
+	GdkFrameClock *clock = gtk_widget_get_frame_clock(GTK_WIDGET(self));
+	if (!clock || !self->frame_update_connection)
+		return;
+
+	g_signal_handler_disconnect(clock, self->frame_update_connection);
+	gdk_frame_clock_end_updating(clock);
+
+	self->frame_time = 0;
+	self->frame_update_connection = 0;
+	self->remaining_loops = 0;
+}
+
+static gboolean
+advance_frame(FastivView *self)
+{
+	cairo_surface_t *next =
+		cairo_surface_get_user_data(self->frame, &fastiv_io_key_frame_next);
+	if (next) {
+		self->frame = next;
+	} else {
+		if (self->remaining_loops && !--self->remaining_loops)
+			return FALSE;
+
+		self->frame = self->page;
+	}
+	return TRUE;
+}
+
+static gboolean
+advance_animation(FastivView *self, GdkFrameClock *clock)
+{
+	gint64 now = gdk_frame_clock_get_frame_time(clock);
+	while (true) {
+		// TODO(p): See if infinite frames can actually happen, and how.
+		intptr_t duration = (intptr_t) cairo_surface_get_user_data(
+			self->frame, &fastiv_io_key_frame_duration);
+		if (duration < 0)
+			return FALSE;
+
+		// Do not busy loop. GIF timings are given in hundredths of a second.
+		if (duration == 0)
+			duration = gdk_frame_timings_get_refresh_interval(
+				gdk_frame_clock_get_current_timings(clock)) / 1000;
+		if (duration == 0)
+			duration = 1;
+
+		gint64 then = self->frame_time + duration * 1000;
+		if (then > now)
+			return TRUE;
+		if (!advance_frame(self))
+			return FALSE;
+
+		self->frame_time = then;
+		gtk_widget_queue_draw(GTK_WIDGET(self));
+	}
+}
+
+static void
+on_frame_clock_update(GdkFrameClock *clock, gpointer user_data)
+{
+	FastivView *self = FASTIV_VIEW(user_data);
+	if (!advance_animation(self, clock))
+		stop_animating(self);
+}
+
+static void
+start_animating(FastivView *self)
+{
+	stop_animating(self);
+
+	GdkFrameClock *clock = gtk_widget_get_frame_clock(GTK_WIDGET(self));
+	if (!clock ||
+		!cairo_surface_get_user_data(self->page, &fastiv_io_key_frame_next))
+		return;
+
+	self->frame_time = gdk_frame_clock_get_frame_time(clock);
+	self->frame_update_connection = g_signal_connect(
+		clock, "update", G_CALLBACK(on_frame_clock_update), self);
+	self->remaining_loops = (uintptr_t) cairo_surface_get_user_data(
+		self->page, &fastiv_io_key_loops);
+
+	gdk_frame_clock_begin_updating(clock);
+}
+
+static void
+switch_page(FastivView *self, cairo_surface_t *page)
+{
+	GtkWidget *widget = GTK_WIDGET(self);
+	self->frame = self->page = page;
+	if ((self->orientation = (uintptr_t) cairo_surface_get_user_data(
+			 self->page, &fastiv_io_key_orientation)) ==
+		FastivIoOrientationUnknown)
+		self->orientation = FastivIoOrientation0;
+
+	start_animating(self);
+	gtk_widget_queue_resize(widget);
+}
+
+static void
+fastiv_view_map(GtkWidget *widget)
+{
+	GTK_WIDGET_CLASS(fastiv_view_parent_class)->map(widget);
+
+	// Loading before mapping will fail to obtain a GdkFrameClock.
+	start_animating(FASTIV_VIEW(widget));
+}
+
+void
+fastiv_view_unmap(GtkWidget *widget)
+{
+	stop_animating(FASTIV_VIEW(widget));
+	GTK_WIDGET_CLASS(fastiv_view_parent_class)->unmap(widget);
+}
+
 static gboolean
 fastiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 {
@@ -467,26 +588,26 @@ fastiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 		cairo_surface_t *page = cairo_surface_get_user_data(
 			self->page, &fastiv_io_key_page_previous);
 		if (page)
-			self->frame = self->page = page;
-		gtk_widget_queue_resize(widget);
+			switch_page(self, page);
 		return TRUE;
 	}
 	case GDK_KEY_bracketright: {
 		cairo_surface_t *page = cairo_surface_get_user_data(
 			self->page, &fastiv_io_key_page_next);
 		if (page)
-			self->frame = self->page = page;
-		gtk_widget_queue_resize(widget);
+			switch_page(self, page);
 		return TRUE;
 	}
 
 	case GDK_KEY_braceleft:
+		stop_animating(self);
 		if (!(self->frame = cairo_surface_get_user_data(
 				self->frame, &fastiv_io_key_frame_previous)))
 			self->frame = self->page;
 		gtk_widget_queue_draw(widget);
 		return TRUE;
 	case GDK_KEY_braceright:
+		stop_animating(self);
 		if (!(self->frame = cairo_surface_get_user_data(
 				self->frame, &fastiv_io_key_frame_next)))
 			self->frame = self->page;
@@ -516,6 +637,8 @@ fastiv_view_class_init(FastivViewClass *klass)
 	widget_class->get_preferred_height = fastiv_view_get_preferred_height;
 	widget_class->get_preferred_width = fastiv_view_get_preferred_width;
 	widget_class->size_allocate = fastiv_view_size_allocate;
+	widget_class->map = fastiv_view_map;
+	widget_class->unmap = fastiv_view_unmap;
 	widget_class->realize = fastiv_view_realize;
 	widget_class->draw = fastiv_view_draw;
 	widget_class->button_press_event = fastiv_view_button_press_event;
@@ -548,13 +671,9 @@ fastiv_view_open(FastivView *self, const gchar *path, GError **error)
 	if (self->image)
 		cairo_surface_destroy(self->image);
 
-	self->frame = self->page = self->image = surface;
+	self->frame = self->page = NULL;
+	self->image = surface;
+	switch_page(self, self->image);
 	set_scale_to_fit(self, true);
-
-	// TODO(p): This is actually per-page.
-	if ((self->orientation = (uintptr_t) cairo_surface_get_user_data(
-			 self->image, &fastiv_io_key_orientation)) ==
-		FastivIoOrientationUnknown)
-		self->orientation = FastivIoOrientation0;
 	return TRUE;
 }
