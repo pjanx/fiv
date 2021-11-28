@@ -207,6 +207,7 @@ struct load_wuffs_frame_context {
 	wuffs_base__io_buffer *src;         ///< Wuffs source buffer
 	wuffs_base__image_config cfg;       ///< Wuffs image configuration
 	wuffs_base__slice_u8 workbuf;       ///< Work buffer for Wuffs
+	wuffs_base__frame_config last_fc;   ///< Previous frame configuration
 	uint32_t width;                     ///< Copied from cfg.pixcfg
 	uint32_t height;                    ///< Copied from cfg.pixcfg
 	cairo_format_t cairo_format;        ///< Target format for surfaces
@@ -222,7 +223,7 @@ struct load_wuffs_frame_context {
 static bool
 load_wuffs_frame(struct load_wuffs_frame_context *ctx, GError **error)
 {
-	wuffs_base__frame_config fc = {0};
+	wuffs_base__frame_config fc = {};
 	wuffs_base__status status =
 		wuffs_base__image_decoder__decode_frame_config(ctx->dec, &fc, ctx->src);
 	if (status.repr == wuffs_base__note__end_of_data && ctx->result)
@@ -310,6 +311,65 @@ load_wuffs_frame(struct load_wuffs_frame_context *ctx, GError **error)
 	// Pixel data has been written, need to let Cairo know.
 	cairo_surface_mark_dirty(surface);
 
+	// Single-frame images get a fast path, animations are are handled slowly:
+	if (wuffs_base__frame_config__index(&fc) > 0) {
+		// Copy the previous frame to a new surface.
+		cairo_surface_t *canvas = cairo_image_surface_create(
+			ctx->cairo_format, ctx->width, ctx->height);
+		int stride = cairo_image_surface_get_stride(canvas);
+		int height = cairo_image_surface_get_height(canvas);
+		memcpy(cairo_image_surface_get_data(canvas),
+			cairo_image_surface_get_data(ctx->result_tail), stride * height);
+		cairo_surface_mark_dirty(canvas);
+
+		// Apply that frame's disposal method.
+		wuffs_base__rect_ie_u32 bounds =
+			wuffs_base__frame_config__bounds(&ctx->last_fc);
+		wuffs_base__color_u32_argb_premul bg =
+			wuffs_base__frame_config__background_color(&ctx->last_fc);
+
+		double a = (bg >> 24) / 255., r = 0, g = 0, b = 0;
+		if (a) {
+			r = (uint8_t) (bg >> 16) / 255. / a;
+			g = (uint8_t) (bg >> 8)  / 255. / a;
+			b = (uint8_t) (bg)       / 255. / a;
+		}
+
+		cairo_t *cr = cairo_create(canvas);
+		switch (wuffs_base__frame_config__disposal(&ctx->last_fc)) {
+		case WUFFS_BASE__ANIMATION_DISPOSAL__RESTORE_BACKGROUND:
+			cairo_rectangle(cr, bounds.min_incl_x, bounds.min_incl_y,
+				bounds.max_excl_x - bounds.min_incl_x,
+				bounds.max_excl_y - bounds.min_incl_y);
+			cairo_set_source_rgba(cr, r, g, b, a);
+			cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+			cairo_fill(cr);
+			break;
+		case WUFFS_BASE__ANIMATION_DISPOSAL__RESTORE_PREVIOUS:
+			// TODO(p): Implement, it seems tricky.
+			// Might need another surface to keep track of the state.
+			break;
+		}
+
+		// Paint the current frame over that, within its bounds.
+		bounds = wuffs_base__frame_config__bounds(&fc);
+		cairo_rectangle(cr, bounds.min_incl_x, bounds.min_incl_y,
+			bounds.max_excl_x - bounds.min_incl_x,
+			bounds.max_excl_y - bounds.min_incl_y);
+		cairo_clip(cr);
+
+		cairo_set_operator(cr,
+			wuffs_base__frame_config__overwrite_instead_of_blend(&fc)
+				? CAIRO_OPERATOR_SOURCE
+				: CAIRO_OPERATOR_OVER);
+
+		cairo_set_source_surface(cr, surface, 0, 0);
+		cairo_paint(cr);
+		cairo_destroy(cr);
+		cairo_surface_destroy(surface);
+		surface = canvas;
+	}
+
 	if (ctx->meta_exif)
 		cairo_surface_set_user_data(surface, &fastiv_io_key_exif,
 			g_bytes_ref(ctx->meta_exif), (cairo_destroy_func_t) g_bytes_unref);
@@ -334,6 +394,7 @@ load_wuffs_frame(struct load_wuffs_frame_context *ctx, GError **error)
 
 	success = true;
 	ctx->result_tail = surface;
+	ctx->last_fc = fc;
 
 fail:
 	if (!success) {
