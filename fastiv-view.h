@@ -24,3 +24,29 @@ G_DECLARE_FINAL_TYPE(FastivView, fastiv_view, FASTIV, VIEW, GtkWidget)
 
 /// Try to open the given file, synchronously, to be displayed by the widget.
 gboolean fastiv_view_open(FastivView *self, const gchar *path, GError **error);
+
+typedef enum _FastivViewCommand {
+	FASTIV_VIEW_COMMAND_ROTATE_LEFT = 1,
+	FASTIV_VIEW_COMMAND_MIRROR,
+	FASTIV_VIEW_COMMAND_ROTATE_RIGHT,
+
+	FASTIV_VIEW_COMMAND_PAGE_FIRST,
+	FASTIV_VIEW_COMMAND_PAGE_PREVIOUS,
+	FASTIV_VIEW_COMMAND_PAGE_NEXT,
+	FASTIV_VIEW_COMMAND_PAGE_LAST,
+
+	FASTIV_VIEW_COMMAND_FRAME_FIRST,
+	FASTIV_VIEW_COMMAND_FRAME_PREVIOUS,
+	FASTIV_VIEW_COMMAND_FRAME_NEXT,
+	// Going to the end frame makes no sense, wrap around if needed.
+
+	FASTIV_VIEW_COMMAND_PRINT,
+	FASTIV_VIEW_COMMAND_SAVE_PAGE,
+
+	FASTIV_VIEW_COMMAND_ZOOM_IN,
+	FASTIV_VIEW_COMMAND_ZOOM_OUT,
+	FASTIV_VIEW_COMMAND_ZOOM_1
+} FastivViewCommand;
+
+/// Execute a user action.
+void fastiv_view_command(FastivView *self, FastivViewCommand command);

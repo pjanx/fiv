@@ -19,10 +19,11 @@
 #include <glib/gstdio.h>
 #include <gtk/gtk.h>
 
+#include <errno.h>
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <errno.h>
 
 #include <fnmatch.h>
 
@@ -53,6 +54,53 @@ exit_fatal(const gchar *format, ...)
 
 // --- Main --------------------------------------------------------------------
 
+// TODO(p): Add a toggle for a checkerboard background.
+// TODO(p): Implement commented-out actions.
+#define B make_toolbar_button
+#define TOOLBAR(XX) \
+	XX(BROWSE,        B("view-grid-symbolic", "Browse")) \
+	XX(FILE_PREVIOUS, B("go-previous-symbolic", "Previous file")) \
+	XX(FILE_NEXT,     B("go-next-symbolic", "Next file")) \
+	XX(S1,            make_separator()) \
+	XX(PAGE_FIRST,    B("go-top-symbolic", "First page")) \
+	XX(PAGE_PREVIOUS, B("go-up-symbolic", "Previous page")) \
+	XX(PAGE_NEXT,     B("go-down-symbolic", "Next page")) \
+	XX(PAGE_LAST,     B("go-bottom-symbolic", "Last page")) \
+	XX(S2,            make_separator()) \
+	XX(SKIP_BACK,     B("media-skip-backward-symbolic", "Rewind playback")) \
+	XX(SEEK_BACK,     B("media-seek-backward-symbolic", "Previous frame")) \
+	/* TODO(p): The opposite is "media-playback-play-symbolic". */ \
+	/* XX(PAUSE,      B("media-playback-pause-symbolic", "Pause")) */ \
+	XX(SEEK_FORWARD,  B("media-seek-forward-symbolic", "Next frame")) \
+	XX(S3,            make_separator()) \
+	XX(PLUS,          B("zoom-in-symbolic", "Zoom in")) \
+	XX(SCALE,         gtk_label_new("100%")) \
+	XX(MINUS,         B("zoom-out-symbolic", "Zoom out")) \
+	XX(ONE,           B("zoom-original-symbolic", "Original size")) \
+	/* XX(FIT,        B("zoom-fit-best-symbolic", "Scale to fit")) */ \
+	XX(S4,            make_separator()) \
+	/* XX(PIN,        B("view-pin-symbolic", "Keep view configuration")) */ \
+	/* Or perhaps "blur-symbolic", also in the extended set. */ \
+	/* XX(SMOOTH,     B("blend-tool-symbolic", "Smooth scaling")) */ \
+	/* XX(COLOR,      B("preferences-color-symbolic", "Color management")) */ \
+	XX(SAVE,          B("document-save-as-symbolic", "Save as...")) \
+	XX(PRINT,         B("document-print-symbolic", "Print...")) \
+	/* XX(INFO,       B("info-symbolic", "Information")) */ \
+	XX(S5,            make_separator()) \
+	XX(LEFT,          B("object-rotate-left-symbolic", "Rotate left")) \
+	XX(MIRROR,        B("object-flip-horizontal-symbolic", "Mirror")) \
+	XX(RIGHT,         B("object-rotate-right-symbolic", "Rotate right")) \
+	XX(S6,            make_separator()) \
+	/* We are YouTube. */ \
+	XX(FULLSCREEN,    B("view-fullscreen-symbolic", "Fullscreen"))
+
+enum {
+#define XX(id, constructor) TOOLBAR_ ## id,
+	TOOLBAR(XX)
+#undef XX
+	TOOLBAR_COUNT
+};
+
 struct {
 	gchar **supported_globs;
 	gboolean filtering;
@@ -65,14 +113,17 @@ struct {
 
 	GtkWidget *window;
 	GtkWidget *stack;
-	GtkWidget *view;
-	GtkWidget *view_scroller;
-	GtkWidget *browser;
-	GtkWidget *browser_scroller;
+
 	GtkWidget *browser_paned;
 	GtkWidget *browser_sidebar;
 	GtkWidget *plus;
 	GtkWidget *minus;
+	GtkWidget *browser_scroller;
+	GtkWidget *browser;
+
+	GtkWidget *view_box;
+	GtkWidget *toolbar[TOOLBAR_COUNT];
+	GtkWidget *view;
 } g;
 
 static gboolean
@@ -119,7 +170,7 @@ static void
 switch_to_view(const char *path)
 {
 	gtk_window_set_title(GTK_WINDOW(g.window), path);
-	gtk_stack_set_visible_child(GTK_STACK(g.stack), g.view_scroller);
+	gtk_stack_set_visible_child(GTK_STACK(g.stack), g.view_box);
 	gtk_widget_grab_focus(g.view);
 }
 
@@ -395,6 +446,20 @@ toggle_fullscreen(void)
 		gtk_window_fullscreen(GTK_WINDOW(g.window));
 }
 
+static void
+on_window_state_event(G_GNUC_UNUSED GtkWidget *widget,
+	GdkEventWindowState *event, G_GNUC_UNUSED gpointer user_data)
+{
+	if (!(event->changed_mask & GDK_WINDOW_STATE_FULLSCREEN))
+		return;
+
+	const char *name = (event->new_window_state & GDK_WINDOW_STATE_FULLSCREEN)
+		? "view-restore-symbolic"
+		: "view-fullscreen-symbolic";
+	gtk_button_set_image(GTK_BUTTON(g.toolbar[TOOLBAR_FULLSCREEN]),
+		gtk_image_new_from_icon_name(name, GTK_ICON_SIZE_BUTTON));
+}
+
 // Cursor keys, e.g., simply cannot be bound through accelerators
 // (and GtkWidget::keynav-failed would arguably be an awful solution).
 //
@@ -530,6 +595,107 @@ on_button_press_browser(G_GNUC_UNUSED GtkWidget *widget, GdkEventButton *event)
 	}
 }
 
+static GtkWidget *
+make_toolbar_button(const gchar *symbolic, const gchar *tooltip)
+{
+	GtkWidget *button =
+		gtk_button_new_from_icon_name(symbolic, GTK_ICON_SIZE_BUTTON);
+	gtk_widget_set_tooltip_text(button, tooltip);
+//	gtk_widget_set_sensitive(button, FALSE);
+	gtk_widget_set_focus_on_click(button, FALSE);
+
+	gtk_style_context_add_class(
+		gtk_widget_get_style_context(button), GTK_STYLE_CLASS_FLAT);
+	return button;
+}
+
+static GtkWidget *
+make_separator(void)
+{
+	// TODO(p): See if it's possible to give the separator room to shrink
+	// by some minor amount of pixels, margin-wise.
+	GtkWidget *separator = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
+	gtk_widget_set_margin_start(separator, 10);
+	gtk_widget_set_margin_end(separator, 10);
+	return separator;
+}
+
+static void
+on_notify_scale(
+	GObject *object, GParamSpec *param_spec, G_GNUC_UNUSED gpointer user_data)
+{
+	double scale = 0;
+	g_object_get(object, g_param_spec_get_name(param_spec), &scale, NULL);
+
+	gchar *scale_str = g_strdup_printf("%.0f%%", round(scale * 100));
+	gtk_label_set_text(GTK_LABEL(g.toolbar[TOOLBAR_SCALE]), scale_str);
+	g_free(scale_str);
+}
+
+static void
+toolbar_connect(int index, GCallback callback)
+{
+	g_signal_connect_swapped(g.toolbar[index], "clicked", callback, NULL);
+}
+
+static void
+on_command(intptr_t command)
+{
+	fastiv_view_command(FASTIV_VIEW(g.view), command);
+}
+
+static void
+toolbar_command(int index, FastivViewCommand command)
+{
+	g_signal_connect_swapped(g.toolbar[index], "clicked",
+		G_CALLBACK(on_command), (void *) (intptr_t) command);
+}
+
+// TODO(p): The toolbar should not be visible in fullscreen,
+// or show up only when the cursor reaches the bottom of the screen.
+// Presumably, GtkOverlay could be used for this. Proximity-based?
+// Might want to make the toolbar normally translucent.
+// TODO(p): The text and icons should be faded, unless the mouse cursor
+// is on the toolbar.
+static GtkWidget *
+make_view_toolbar(void)
+{
+#define XX(id, constructor) g.toolbar[TOOLBAR_ ## id] = constructor;
+	TOOLBAR(XX)
+#undef XX
+
+	// TODO(p): The scale should be at least as wide as "999%".
+	gtk_widget_set_margin_start(g.toolbar[TOOLBAR_SCALE], 5);
+	gtk_widget_set_margin_end(g.toolbar[TOOLBAR_SCALE], 5);
+
+	// GtkStatusBar solves a problem we do not have here.
+	GtkWidget *view_toolbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+	GtkBox *box = GTK_BOX(view_toolbar);
+	for (int i = 0; i < TOOLBAR_COUNT; i++)
+		gtk_box_pack_start(box, g.toolbar[i], FALSE, FALSE, 0);
+
+	toolbar_connect(TOOLBAR_BROWSE,        G_CALLBACK(switch_to_browser));
+	toolbar_connect(TOOLBAR_FILE_PREVIOUS, G_CALLBACK(on_previous));
+	toolbar_connect(TOOLBAR_FILE_NEXT,     G_CALLBACK(on_next));
+	toolbar_command(TOOLBAR_PAGE_FIRST,    FASTIV_VIEW_COMMAND_PAGE_FIRST);
+	toolbar_command(TOOLBAR_PAGE_PREVIOUS, FASTIV_VIEW_COMMAND_PAGE_PREVIOUS);
+	toolbar_command(TOOLBAR_PAGE_NEXT,     FASTIV_VIEW_COMMAND_PAGE_NEXT);
+	toolbar_command(TOOLBAR_PAGE_LAST,     FASTIV_VIEW_COMMAND_PAGE_LAST);
+	toolbar_command(TOOLBAR_SKIP_BACK,     FASTIV_VIEW_COMMAND_FRAME_FIRST);
+	toolbar_command(TOOLBAR_SEEK_BACK,     FASTIV_VIEW_COMMAND_FRAME_PREVIOUS);
+	toolbar_command(TOOLBAR_SEEK_FORWARD,  FASTIV_VIEW_COMMAND_FRAME_NEXT);
+	toolbar_command(TOOLBAR_PLUS,          FASTIV_VIEW_COMMAND_ZOOM_IN);
+	toolbar_command(TOOLBAR_MINUS,         FASTIV_VIEW_COMMAND_ZOOM_OUT);
+	toolbar_command(TOOLBAR_ONE,           FASTIV_VIEW_COMMAND_ZOOM_1);
+	toolbar_command(TOOLBAR_PRINT,         FASTIV_VIEW_COMMAND_PRINT);
+	toolbar_command(TOOLBAR_SAVE,          FASTIV_VIEW_COMMAND_SAVE_PAGE);
+	toolbar_command(TOOLBAR_LEFT,          FASTIV_VIEW_COMMAND_ROTATE_LEFT);
+	toolbar_command(TOOLBAR_MIRROR,        FASTIV_VIEW_COMMAND_MIRROR);
+	toolbar_command(TOOLBAR_RIGHT,         FASTIV_VIEW_COMMAND_ROTATE_RIGHT);
+	toolbar_connect(TOOLBAR_FULLSCREEN,    G_CALLBACK(toggle_fullscreen));
+	return view_toolbar;
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -578,10 +744,18 @@ main(int argc, char *argv[])
 
 	// This is incredibly broken https://stackoverflow.com/a/51054396/76313
 	// thus resolving the problem using overlaps.
+	// XXX: button.flat is too generic, it's only for the view toolbar.
+	// XXX: Similarly, box > separator.horizontal is a temporary hack.
+	// Consider using a #name or a .class here, possibly for a parent widget.
 	const char *style = "@define-color fastiv-tile #3c3c3c; \
 		fastiv-view, fastiv-browser { background: @content_view_bg; } \
 		placessidebar.fastiv .toolbar { padding: 2px 6px; } \
 		placessidebar.fastiv box > separator { margin: 4px 0; } \
+		button.flat { padding-left: 0; padding-right: 0 } \
+		box > separator.horizontal { \
+			background: mix(@insensitive_fg_color, \
+				@insensitive_bg_color, 0.4); margin: 6px 0; \
+		} \
 		fastiv-browser { padding: 5px; } \
 		fastiv-browser.item { \
 			border: 1px solid rgba(255, 255, 255, 0.375); \
@@ -606,22 +780,30 @@ main(int argc, char *argv[])
 		GTK_STYLE_PROVIDER(provider), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
 	g_object_unref(provider);
 
-	g.view_scroller = gtk_scrolled_window_new(NULL, NULL);
+	GtkWidget *view_scroller = gtk_scrolled_window_new(NULL, NULL);
 	g.view = g_object_new(FASTIV_TYPE_VIEW, NULL);
-	gtk_widget_set_vexpand(g.view, TRUE);
-	gtk_widget_set_hexpand(g.view, TRUE);
 	g_signal_connect(g.view, "key-press-event",
 		G_CALLBACK(on_key_press_view), NULL);
 	g_signal_connect(g.view, "button-press-event",
 		G_CALLBACK(on_button_press_view), NULL);
-	gtk_container_add(GTK_CONTAINER(g.view_scroller), g.view);
-	gtk_widget_show_all(g.view_scroller);
+	g_signal_connect(g.view, "notify::scale",
+		G_CALLBACK(on_notify_scale), NULL);
+	gtk_container_add(GTK_CONTAINER(view_scroller), g.view);
 
 	// Maybe our custom widgets should derive colours from the theme instead.
-	gtk_scrolled_window_set_overlay_scrolling(
-		GTK_SCROLLED_WINDOW(g.view_scroller), FALSE);
 	g_object_set(gtk_settings_get_default(),
 		"gtk-application-prefer-dark-theme", TRUE, NULL);
+
+	GtkWidget *view_toolbar = make_view_toolbar();
+	gtk_widget_set_halign(view_toolbar, GTK_ALIGN_CENTER);
+
+	// Need to put the toolbar at the top, because of the horizontal scrollbar.
+	g.view_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	gtk_box_pack_start(GTK_BOX(g.view_box), view_toolbar, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(g.view_box),
+		gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(g.view_box), view_scroller, TRUE, TRUE, 0);
+	gtk_widget_show_all(g.view_box);
 
 	g.browser_scroller = gtk_scrolled_window_new(NULL, NULL);
 	g.browser = g_object_new(FASTIV_TYPE_BROWSER, NULL);
@@ -696,7 +878,7 @@ main(int argc, char *argv[])
 	g.stack = gtk_stack_new();
 	gtk_stack_set_transition_type(
 		GTK_STACK(g.stack), GTK_STACK_TRANSITION_TYPE_NONE);
-	gtk_container_add(GTK_CONTAINER(g.stack), g.view_scroller);
+	gtk_container_add(GTK_CONTAINER(g.stack), g.view_box);
 	gtk_container_add(GTK_CONTAINER(g.stack), g.browser_paned);
 
 	g.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
@@ -704,6 +886,8 @@ main(int argc, char *argv[])
 		G_CALLBACK(gtk_main_quit), NULL);
 	g_signal_connect(g.window, "key-press-event",
 		G_CALLBACK(on_key_press), NULL);
+	g_signal_connect(g.window, "window-state-event",
+		G_CALLBACK(on_window_state_event), NULL);
 	gtk_container_add(GTK_CONTAINER(g.window), g.stack);
 
 	char **types = fastiv_io_all_supported_media_types();

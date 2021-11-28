@@ -530,7 +530,6 @@ start_animating(FastivView *self)
 static void
 switch_page(FastivView *self, cairo_surface_t *page)
 {
-	GtkWidget *widget = GTK_WIDGET(self);
 	self->frame = self->page = page;
 	if ((self->orientation = (uintptr_t) cairo_surface_get_user_data(
 			 self->page, &fastiv_io_key_orientation)) ==
@@ -538,7 +537,7 @@ switch_page(FastivView *self, cairo_surface_t *page)
 		self->orientation = FastivIoOrientation0;
 
 	start_animating(self);
-	gtk_widget_queue_resize(widget);
+	gtk_widget_queue_resize(GTK_WIDGET(self));
 }
 
 static void
@@ -697,6 +696,13 @@ save_as(FastivView *self, gboolean frame)
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+static inline gboolean
+command(FastivView *self, FastivViewCommand command)
+{
+	fastiv_view_command(self, command);
+	return TRUE;
+}
+
 static gboolean
 fastiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 {
@@ -712,15 +718,15 @@ fastiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 	if (state == GDK_CONTROL_MASK) {
 		switch (event->keyval) {
 		case GDK_KEY_0:
-			return set_scale(self, 1.0);
+			return command(self, FASTIV_VIEW_COMMAND_ZOOM_1);
 		case GDK_KEY_plus:
-			return set_scale(self, self->scale * SCALE_STEP);
+			return command(self, FASTIV_VIEW_COMMAND_ZOOM_IN);
 		case GDK_KEY_minus:
-			return set_scale(self, self->scale / SCALE_STEP);
+			return command(self, FASTIV_VIEW_COMMAND_ZOOM_OUT);
 		case GDK_KEY_p:
-			return print(self);
+			return command(self, FASTIV_VIEW_COMMAND_PRINT);
 		case GDK_KEY_s:
-			return save_as(self, FALSE);
+			return command(self, FASTIV_VIEW_COMMAND_SAVE_PAGE);
 		case GDK_KEY_S:
 			return save_as(self, TRUE);
 		}
@@ -740,9 +746,9 @@ fastiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 	case GDK_KEY_9:
 		return set_scale(self, event->keyval - GDK_KEY_0);
 	case GDK_KEY_plus:
-		return set_scale(self, self->scale * SCALE_STEP);
+		return command(self, FASTIV_VIEW_COMMAND_ZOOM_IN);
 	case GDK_KEY_minus:
-		return set_scale(self, self->scale / SCALE_STEP);
+		return command(self, FASTIV_VIEW_COMMAND_ZOOM_OUT);
 
 	case GDK_KEY_x:  // Inspired by gThumb.
 		return set_scale_to_fit(self, !self->scale_to_fit);
@@ -753,47 +759,21 @@ fastiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 		return TRUE;
 
 	case GDK_KEY_less:
-		self->orientation = view_left[self->orientation];
-		gtk_widget_queue_resize(widget);
-		return TRUE;
+		return command(self, FASTIV_VIEW_COMMAND_ROTATE_LEFT);
 	case GDK_KEY_equal:
-		self->orientation = view_mirror[self->orientation];
-		gtk_widget_queue_draw(widget);
-		return TRUE;
+		return command(self, FASTIV_VIEW_COMMAND_MIRROR);
 	case GDK_KEY_greater:
-		self->orientation = view_right[self->orientation];
-		gtk_widget_queue_resize(widget);
-		return TRUE;
+		return command(self, FASTIV_VIEW_COMMAND_ROTATE_RIGHT);
 
-	case GDK_KEY_bracketleft: {
-		cairo_surface_t *page = cairo_surface_get_user_data(
-			self->page, &fastiv_io_key_page_previous);
-		if (page)
-			switch_page(self, page);
-		return TRUE;
-	}
-	case GDK_KEY_bracketright: {
-		cairo_surface_t *page = cairo_surface_get_user_data(
-			self->page, &fastiv_io_key_page_next);
-		if (page)
-			switch_page(self, page);
-		return TRUE;
-	}
+	case GDK_KEY_bracketleft:
+		return command(self, FASTIV_VIEW_COMMAND_PAGE_PREVIOUS);
+	case GDK_KEY_bracketright:
+		return command(self, FASTIV_VIEW_COMMAND_PAGE_NEXT);
 
 	case GDK_KEY_braceleft:
-		stop_animating(self);
-		if (!(self->frame = cairo_surface_get_user_data(
-				self->frame, &fastiv_io_key_frame_previous)))
-			self->frame = self->page;
-		gtk_widget_queue_draw(widget);
-		return TRUE;
+		return command(self, FASTIV_VIEW_COMMAND_FRAME_PREVIOUS);
 	case GDK_KEY_braceright:
-		stop_animating(self);
-		if (!(self->frame = cairo_surface_get_user_data(
-				self->frame, &fastiv_io_key_frame_next)))
-			self->frame = self->page;
-		gtk_widget_queue_draw(widget);
-		return TRUE;
+		return command(self, FASTIV_VIEW_COMMAND_FRAME_NEXT);
 	}
 	return FALSE;
 }
@@ -857,4 +837,78 @@ fastiv_view_open(FastivView *self, const gchar *path, GError **error)
 	switch_page(self, self->image);
 	set_scale_to_fit(self, true);
 	return TRUE;
+}
+
+static void
+page_step(FastivView *self, int step)
+{
+	cairo_user_data_key_t *key =
+		step < 0 ? &fastiv_io_key_page_previous : &fastiv_io_key_page_next;
+	cairo_surface_t *page = cairo_surface_get_user_data(self->page, key);
+	if (page)
+		switch_page(self, page);
+}
+
+static void
+frame_step(FastivView *self, int step)
+{
+	stop_animating(self);
+	cairo_user_data_key_t *key =
+		step < 0 ? &fastiv_io_key_frame_previous : &fastiv_io_key_frame_next;
+	if (!step || !(self->frame = cairo_surface_get_user_data(self->frame, key)))
+		self->frame = self->page;
+	gtk_widget_queue_draw(GTK_WIDGET(self));
+}
+
+void
+fastiv_view_command(FastivView *self, FastivViewCommand command)
+{
+	g_return_if_fail(FASTIV_IS_VIEW(self));
+
+	GtkWidget *widget = GTK_WIDGET(self);
+	if (!self->image)
+		return;
+
+	switch (command) {
+	break; case FASTIV_VIEW_COMMAND_ROTATE_LEFT:
+		self->orientation = view_left[self->orientation];
+		gtk_widget_queue_resize(widget);
+	break; case FASTIV_VIEW_COMMAND_MIRROR:
+		self->orientation = view_mirror[self->orientation];
+		gtk_widget_queue_resize(widget);
+	break; case FASTIV_VIEW_COMMAND_ROTATE_RIGHT:
+		self->orientation = view_right[self->orientation];
+		gtk_widget_queue_resize(widget);
+
+	break; case FASTIV_VIEW_COMMAND_PAGE_FIRST:
+		switch_page(self, self->image);
+	break; case FASTIV_VIEW_COMMAND_PAGE_PREVIOUS:
+		page_step(self, -1);
+	break; case FASTIV_VIEW_COMMAND_PAGE_NEXT:
+		page_step(self, +1);
+	break; case FASTIV_VIEW_COMMAND_PAGE_LAST:
+		for (cairo_surface_t *s = self->page;
+			 (s = cairo_surface_get_user_data(s, &fastiv_io_key_page_next)); )
+			self->page = s;
+		switch_page(self, self->page);
+
+	break; case FASTIV_VIEW_COMMAND_FRAME_FIRST:
+		frame_step(self, 0);
+	break; case FASTIV_VIEW_COMMAND_FRAME_PREVIOUS:
+		frame_step(self, -1);
+	break; case FASTIV_VIEW_COMMAND_FRAME_NEXT:
+		frame_step(self, +1);
+
+	break; case FASTIV_VIEW_COMMAND_PRINT:
+		print(self);
+	break; case FASTIV_VIEW_COMMAND_SAVE_PAGE:
+		save_as(self, FALSE);
+
+	break; case FASTIV_VIEW_COMMAND_ZOOM_IN:
+		set_scale(self, self->scale * SCALE_STEP);
+	break; case FASTIV_VIEW_COMMAND_ZOOM_OUT:
+		set_scale(self, self->scale / SCALE_STEP);
+	break; case FASTIV_VIEW_COMMAND_ZOOM_1:
+		set_scale(self, 1.0);
+	}
 }
