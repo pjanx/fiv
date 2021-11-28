@@ -1134,34 +1134,57 @@ load_libtiff_directory(TIFF *tiff, GError **error)
 		set_error(error, emsg);
 		return NULL;
 	}
+
+	cairo_surface_t *surface = NULL;
 	if (image.width > G_MAXINT || image.height >= G_MAXINT ||
 		G_MAXUINT32 / image.width < image.height) {
 		set_error(error, "image dimensions too large");
-		TIFFRGBAImageEnd(&image);
-		return NULL;
+		goto fail;
 	}
 
-	cairo_surface_t *surface = cairo_image_surface_create(
+	surface = cairo_image_surface_create(
 		CAIRO_FORMAT_ARGB32, image.width, image.height);
-	uint32_t *raster = (uint32_t *) cairo_image_surface_get_data(surface);
 
 	image.req_orientation = ORIENTATION_LEFTTOP;
-	if (TIFFRGBAImageGet(&image, raster, image.width, image.height)) {
-		// Needs to be converted from ABGR to ARGB for Cairo,
-		// and then premultiplied.
-		for (uint32_t i = image.width * image.height; i--; ) {
-			uint32_t pixel = raster[i],
-				a = TIFFGetA(pixel),
-				b = TIFFGetB(pixel) * a / 255,
-				g = TIFFGetG(pixel) * a / 255,
-				r = TIFFGetR(pixel) * a / 255;
-			raster[i] = a << 24 | r << 16 | g << 8 | b;
-		}
-		cairo_surface_mark_dirty(surface);
-	} else {
+	uint32_t *raster = (uint32_t *) cairo_image_surface_get_data(surface);
+	if (!TIFFRGBAImageGet(&image, raster, image.width, image.height)) {
 		g_clear_pointer(&surface, cairo_surface_destroy);
+		goto fail;
 	}
 
+	// Needs to be converted from ABGR to alpha-premultiplied ARGB for Cairo.
+	for (uint32_t i = image.width * image.height; i--;) {
+		uint32_t pixel = raster[i],
+			a = TIFFGetA(pixel),
+			b = TIFFGetB(pixel) * a / 255,
+			g = TIFFGetG(pixel) * a / 255,
+			r = TIFFGetR(pixel) * a / 255;
+		raster[i] = a << 24 | r << 16 | g << 8 | b;
+	}
+
+	cairo_surface_mark_dirty(surface);
+	// XXX: The whole file is essentially an Exif, any ideas?
+
+	const uint32_t icc_length = 0;
+	const void *icc_profile = NULL;
+	if (TIFFGetField(tiff, TIFFTAG_ICCPROFILE, &icc_length, &icc_profile)) {
+		cairo_surface_set_user_data(surface, &fastiv_io_key_icc,
+			g_bytes_new(icc_profile, icc_length),
+			(cairo_destroy_func_t) g_bytes_unref);
+	}
+
+	// Don't ask. The API is high, alright, I'm just not sure about the level.
+	uint16_t orientation = 0;
+	if (TIFFGetField(tiff, TIFFTAG_ORIENTATION, &orientation)) {
+		if (orientation == 5 || orientation == 7)
+			cairo_surface_set_user_data(surface, &fastiv_io_key_orientation,
+				(void *) (uintptr_t) 5, NULL);
+		if (orientation == 6 || orientation == 8)
+			cairo_surface_set_user_data(surface, &fastiv_io_key_orientation,
+				(void *) (uintptr_t) 7, NULL);
+	}
+
+fail:
 	TIFFRGBAImageEnd(&image);
 	return surface;
 }
