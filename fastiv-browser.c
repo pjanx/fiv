@@ -364,7 +364,6 @@ entry_add_thumbnail(gpointer data, gpointer user_data)
 		G_FILE_ATTRIBUTE_STANDARD_NAME
 		"," G_FILE_ATTRIBUTE_STANDARD_SYMBOLIC_ICON,
 		G_FILE_QUERY_INFO_NONE, NULL, NULL);
-	g_object_unref(file);
 	if (info) {
 		GIcon *icon = g_file_info_get_symbolic_icon(info);
 		if (icon)
