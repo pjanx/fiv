@@ -272,8 +272,6 @@ load_wuffs_frame(struct load_wuffs_frame_context *ctx, GError **error)
 	// Starting to modify pixel data directly. Probably an unnecessary call.
 	cairo_surface_flush(surface);
 
-	// TODO(p): Composite/combine frames as intended.
-	// wuffs_base__image_config__first_frame_is_opaque() is problematic here.
 	status = wuffs_base__image_decoder__decode_frame(ctx->dec, &pb, ctx->src,
 		WUFFS_BASE__PIXEL_BLEND__SRC, ctx->workbuf, NULL);
 	if (!wuffs_base__status__is_ok(&status)) {
@@ -476,6 +474,8 @@ open_wuffs(
 
 	// Wuffs maps tRNS to BGRA in `decoder.decode_trns?`, we should be fine.
 	// wuffs_base__pixel_format__transparency() doesn't reflect the image file.
+	// TODO(p): See if wuffs_base__image_config__first_frame_is_opaque() causes
+	// issues with animations, and eventually ensure an alpha-capable format.
 	bool opaque = wuffs_base__image_config__first_frame_is_opaque(&ctx.cfg);
 
 	// Wuffs' API is kind of awful--we want to catch deep RGB and deep grey.
