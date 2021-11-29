@@ -4,7 +4,7 @@ CFLAGS = -g -O2 -Wall -Wextra `pkg-config --cflags $(deps)`
 LDLIBS = -ljq `pkg-config --libs $(deps)`
 
 deps = libpng
-targets = pnginfo
+targets = pnginfo jpeginfo
 
 all: $(targets)
 clean:
