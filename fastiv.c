@@ -423,6 +423,10 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 		case GDK_KEY_n:
 			spawn_path(g.directory);
 			return TRUE;
+		case GDK_KEY_q:
+		case GDK_KEY_w:
+			gtk_widget_destroy(g.window);
+			return TRUE;
 		}
 		break;
 	case 0:

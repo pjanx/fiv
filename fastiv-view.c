@@ -551,19 +551,44 @@ static gboolean
 fastiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 {
 	FastivView *self = FASTIV_VIEW(widget);
-	if (event->state & ~GDK_SHIFT_MASK & gtk_accelerator_get_default_mod_mask())
-		return FALSE;
 	if (!self->image)
+		return FALSE;
+
+	// It should not matter that GDK_KEY_plus involves holding Shift.
+	guint state = event->state & gtk_accelerator_get_default_mod_mask() &
+		~GDK_SHIFT_MASK;
+
+	// The standard, intuitive bindings.
+	if (state == GDK_CONTROL_MASK) {
+		switch (event->keyval) {
+		case GDK_KEY_0:
+			return set_scale(self, 1.0);
+		case GDK_KEY_plus:
+			return set_scale(self, self->scale * SCALE_STEP);
+		case GDK_KEY_minus:
+			return set_scale(self, self->scale / SCALE_STEP);
+		}
+	}
+	if (state != 0)
 		return FALSE;
 
 	switch (event->keyval) {
 	case GDK_KEY_1:
-		return set_scale(self, 1.0);
+	case GDK_KEY_2:
+	case GDK_KEY_3:
+	case GDK_KEY_4:
+	case GDK_KEY_5:
+	case GDK_KEY_6:
+	case GDK_KEY_7:
+	case GDK_KEY_8:
+	case GDK_KEY_9:
+		return set_scale(self, event->keyval - GDK_KEY_0);
 	case GDK_KEY_plus:
 		return set_scale(self, self->scale * SCALE_STEP);
 	case GDK_KEY_minus:
 		return set_scale(self, self->scale / SCALE_STEP);
-	case GDK_KEY_F:
+
+	case GDK_KEY_x:  // Inspired by gThumb.
 		return set_scale_to_fit(self, !self->scale_to_fit);
 
 	case GDK_KEY_i:
