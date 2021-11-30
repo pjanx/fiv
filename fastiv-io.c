@@ -299,8 +299,8 @@ load_wuffs_frame(struct load_wuffs_frame_context *ctx, GError **error)
 		uint32_t *out = (uint32_t *) surface_data;
 		for (uint32_t y = 0; y < ctx->height; y++) {
 			for (uint32_t x = 0; x < ctx->width; x++) {
-				uint16_t b = *in++, g = *in++, r = *in++, x = *in++;
-				*out++ = (x >> 14) << 30 |
+				uint32_t b = *in++, g = *in++, r = *in++, X = *in++;
+				*out++ = (X >> 14) << 30 |
 					(r >> 6) << 20 | (g >> 6) << 10 | (b >> 6);
 			}
 		}
@@ -1671,8 +1671,8 @@ read_spng_thumbnail(
 		ihdr.color_type == SPNG_COLOR_TYPE_TRUECOLOR_ALPHA ||
 		!spng_get_trns(ctx, &trns)) {
 		for (size_t i = size / sizeof *data; i--; ) {
-			const uint8_t *unit = (const uint8_t *) &data[i],
-				a = unit[3],
+			const uint8_t *unit = (const uint8_t *) &data[i];
+			uint32_t a = unit[3],
 				b = unit[2] * a / 255,
 				g = unit[1] * a / 255,
 				r = unit[0] * a / 255;

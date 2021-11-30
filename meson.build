@@ -6,6 +6,13 @@ add_project_arguments(
 	language : 'c',
 )
 
+if get_option('buildtype').startswith('debug')
+	flags = meson.get_compiler('c').get_supported_arguments(
+		'-fsanitize=address,undefined')
+	add_project_arguments(flags, language : ['c'])
+	add_project_link_arguments(flags, language : ['c'])
+endif
+
 # TODO(p): Use libraw_r later, when we start parallelizing/preloading.
 libraw = dependency('libraw', required : get_option('libraw'))
 librsvg = dependency('librsvg-2.0', required : get_option('librsvg'))
