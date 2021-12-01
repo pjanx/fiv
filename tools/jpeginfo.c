@@ -23,7 +23,141 @@
 #include <stdbool.h>
 #include <stdarg.h>
 
+// --- Analysis ----------------------------------------------------------------
+
+static jv
+add_to_subarray(jv o, const char *key, jv value)
+{
+	// Invalid values are not allocated, and we use up any valid one.
+	// Beware that jv_get() returns jv_null() rather than jv_invalid().
+	// Also, the header comment is lying, jv_is_valid() doesn't unreference.
+	jv a = jv_object_get(jv_copy(o), jv_string(key));
+	return jv_set(o, jv_string(key),
+		jv_is_valid(a) ? jv_array_append(a, value) : JV_ARRAY(value));
+}
+
+static jv
+add_warning(jv o, const char *message)
+{
+	return add_to_subarray(o, "warnings", jv_string(message));
+}
+
+static jv
+add_error(jv o, const char *message)
+{
+	return jv_object_set(o, jv_string("error"), jv_string(message));
+}
+
+// --- Exif --------------------------------------------------------------------
+
+static jv
+parse_exif(jv o, const uint8_t *p, size_t len)
+{
+	// TODO(p): Decode.
+	return o;
+}
+
+// --- ICC profiles ------------------------------------------------------------
+
+static uint32_t
+u32be(const uint8_t *p)
+{
+	return (uint32_t) p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3];
+}
+
+static jv
+parse_icc_mluc(jv o, const uint8_t *tag, uint32_t tag_length)
+{
+	// v4 10.13
+	if (tag_length < 16)
+		return add_warning(o, "invalid ICC 'mluc' structure length");
+
+	uint32_t count = u32be(tag + 8);
+	if (count == 0)
+		return add_warning(o, "unnamed ICC profile");
+
+	// There is no particularly good reason for us to iterate, take the first.
+	const uint8_t *record = tag + 16 /* + i * u32be(tag + 12) */;
+	uint32_t len = u32be(&record[4]);
+	uint32_t off = u32be(&record[8]);
+
+	if (off + len > tag_length)
+		return add_warning(o, "invalid ICC 'mluc' structure record");
+
+	// Blindly assume simple ASCII, ensure NUL-termination.
+	char name[len], *p = name;
+	for (uint32_t i = 0; i < len / 2; i++)
+		*p++ = tag[off + i * 2 + 1];
+	*p++ = 0;
+	return jv_set(o, jv_string("ICC"),
+		JV_OBJECT(jv_string("name"), jv_string(name),
+			jv_string("version"), jv_number(4)));
+}
+
+static jv
+parse_icc_desc(jv o, const uint8_t *profile, size_t profile_len,
+	uint32_t tag_offset, uint32_t tag_length)
+{
+	const uint8_t *tag = profile + tag_offset;
+	if (tag_offset + tag_length > profile_len)
+		return add_warning(o, "unexpected end of ICC profile");
+	if (tag_length < 4)
+		return add_warning(o, "invalid ICC tag structure length");
+
+	// v2 6.5.17
+	uint32_t sig = u32be(tag);
+	if (sig == 0x6D6C7563 /* mluc */)
+		return parse_icc_mluc(o, profile + tag_offset, tag_length);
+	if (sig != 0x64657363 /* desc */)
+		return add_warning(o, "invalid ICC 'desc' structure signature");
+	if (tag_length < 12)
+		return add_warning(o, "invalid ICC 'desc' structure length");
+
+	uint32_t count = u32be(tag + 8);
+	if (tag_length < 12 + count)
+		return add_warning(o, "invalid ICC 'desc' structure length");
+
+	// Double-ensure a trailing NUL byte.
+	char name[count + 1];
+	memcpy(name, tag + 12, count);
+	name[count] = 0;
+	return jv_set(o, jv_string("ICC"),
+		JV_OBJECT(jv_string("name"), jv_string(name),
+			jv_string("version"), jv_number(2)));
+}
+
+static jv
+parse_icc(jv o, const uint8_t *profile, size_t profile_len)
+{
+	// https://www.color.org/ICC_Minor_Revision_for_Web.pdf 6
+	// https://www.color.org/specification/ICC1v43_2010-12.pdf 7
+	if (profile_len < 132)
+		return add_warning(o, "ICC profile too short");
+	if (u32be(profile) != profile_len)
+		return add_warning(o, "ICC profile size mismatch");
+
+	// TODO(p): May decode more of the header fields, and validate them.
+	// Need to check both v2 and v4, this is all fairly annoying.
+	uint32_t count = u32be(profile + 128);
+	if (132 + count * 12 > profile_len)
+		return add_warning(o, "unexpected end of ICC profile");
+
+	for (uint32_t i = 0; i < count; i++) {
+		const uint8_t *entry = profile + 132 + i * 12;
+		uint32_t sig = u32be(&entry[0]);
+		uint32_t off = u32be(&entry[4]);
+		uint32_t len = u32be(&entry[8]);
+
+		// v2 6.4.32, v4 9.2.41
+		if (sig == 0x64657363 /* desc */)
+			return parse_icc_desc(o, profile, profile_len, off, len);
+	}
+	// The description is required, so this should be unreachable.
+	return jv_set(o, jv_string("ICC"), jv_bool(true));
+}
+
 // --- JPEG --------------------------------------------------------------------
+// Because the JPEG file format is simple, just do it manually.
 // See: https://www.w3.org/Graphics/JPEG/itu-t81.pdf
 
 enum {
@@ -145,35 +279,11 @@ static const char *marker_descriptions[0xFF] = {
 	[COM]   = "Comment",
 };
 
-// --- Analysis ----------------------------------------------------------------
-// Because the JPEG file format is simple, just do it manually.
-
-static jv
-add_to_subarray(jv o, const char *key, jv value)
-{
-	// Invalid values are not allocated, and we use up any valid one.
-	// Beware that jv_get() returns jv_null() rather than jv_invalid().
-	// Also, the header comment is lying, jv_is_valid() doesn't unreference.
-	jv a = jv_object_get(jv_copy(o), jv_string(key));
-	return jv_set(o, jv_string(key),
-		jv_is_valid(a) ? jv_array_append(a, value) : JV_ARRAY(value));
-}
-
-static jv
-add_warning(jv o, const char *message)
-{
-	return add_to_subarray(o, "warnings", jv_string(message));
-}
-
-static jv
-add_error(jv o, const char *message)
-{
-	return jv_object_set(o, jv_string("error"), jv_string(message));
-}
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 struct data {
 	bool ended;
-	char *exif, *icc;
+	uint8_t *exif, *icc;
 	size_t exif_len, icc_len;
 	int icc_sequence, icc_done;
 };
@@ -312,8 +422,6 @@ parse_marker(uint8_t marker, const uint8_t *p, const uint8_t *end,
 			jv_string("thumbnail-h"), jv_number(payload[8])
 		));
 	}
-
-	// https://www.w3.org/Graphics/JPEG/jfif3.pdf
 	if (marker == APP0 && p - payload >= 6 && !memcmp(payload, "JFXX\0", 5)) {
 		payload += 5;
 
@@ -391,21 +499,21 @@ parse_jpeg(jv o, const uint8_t *p, size_t len)
 	}
 
 	if (data.exif) {
-		// TODO(p): Decode.
+		o = parse_exif(o, data.exif, data.exif_len);
 		free(data.exif);
 	}
-
 	if (data.icc) {
-		if (data.icc_done) {
-			// TODO(p): Decode.
-		} else {
+		if (data.icc_done)
+			o = parse_icc(o, data.icc, data.icc_len);
+		else
 			o = add_warning(o, "bad ICC profile sequence");
-		}
 		free(data.icc);
 	}
 
 	return jv_set(o, jv_string("markers"), markers);
 }
+
+// --- I/O ---------------------------------------------------------------------
 
 static jv
 do_file(const char *filename, jv o)
