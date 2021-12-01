@@ -155,9 +155,10 @@ add_to_subarray(jv o, const char *key, jv value)
 {
 	// Invalid values are not allocated, and we use up any valid one.
 	// Beware that jv_get() returns jv_null() rather than jv_invalid().
+	// Also, the header comment is lying, jv_is_valid() doesn't unreference.
 	jv a = jv_object_get(jv_copy(o), jv_string(key));
 	return jv_set(o, jv_string(key),
-		jv_is_valid(jv_copy(a)) ? jv_array_append(a, value) : JV_ARRAY(value));
+		jv_is_valid(a) ? jv_array_append(a, value) : JV_ARRAY(value));
 }
 
 static jv
