@@ -77,7 +77,6 @@ static const char *marker_ids[0xFF] = {
 	[JPG12] = "JPG12", [JPG13] = "JPG13", [COM]   = "COM"
 };
 
-/*
 // The rest is "RES (Reserved)", except for 0xFF (filler) and 0x00 (invalid).
 static const char *marker_descriptions[0xFF] = {
 	[TEM]   = "For temporary private use in arithmetic coding",
@@ -145,7 +144,6 @@ static const char *marker_descriptions[0xFF] = {
 	[JPG13] = "Reserved for JPEG extensions, 13",
 	[COM]   = "Comment",
 };
-*/
 
 // --- Analysis ----------------------------------------------------------------
 // Because the JPEG file format is simple, just do it manually.
@@ -231,6 +229,7 @@ parse_marker(uint8_t marker, const uint8_t *p, const uint8_t *end,
 	case DHP:  // B.2.2 and B.3.2.
 		// As per B.2.5, Y can be zero, then there needs to be a DNL segment.
 		*o = add_to_subarray(*o, "info", JV_OBJECT(
+			jv_string("type"), jv_string(marker_descriptions[marker]),
 			jv_string("bits"), jv_number(payload[0]),
 			jv_string("height"), jv_number(payload[1] << 8 | payload[2]),
 			jv_string("width"), jv_number(payload[3] << 8 | payload[4]),
