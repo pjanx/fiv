@@ -63,7 +63,7 @@
 #endif
 
 // A subset of shared-mime-info that produces an appropriate list of
-// file extensions. Chiefly motivated by the suckiness of RAW images:
+// file extensions. Chiefly motivated by the suckiness of raw photo formats:
 // someone else will maintain the list of file extensions for us.
 const char *fastiv_io_supported_media_types[] = {
 	"image/bmp",

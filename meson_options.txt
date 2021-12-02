@@ -1,5 +1,5 @@
 option('libraw', type : 'feature', value : 'auto',
-    description : 'Build with RAW support, requires LibRaw')
+    description : 'Build with raw photo support, requires LibRaw')
 option('librsvg', type : 'feature', value : 'auto',
 	description : 'Build with SVG support, requires librsvg')
 option('xcursor', type : 'feature', value : 'auto',
