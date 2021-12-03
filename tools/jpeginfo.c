@@ -419,7 +419,7 @@ static struct tiff_entry tiff_entries[] = {
 	{"TransferRange", 342, NULL},
 	{"JPEGProc", 512, NULL},
 	{"JPEGInterchangeFormat", 513, NULL},
-	{"JPEGInterchangeFormatLngth", 514, NULL},
+	{"JPEGInterchangeFormatLength", 514, NULL},
 	{"JPEGRestartInterval", 515, NULL},
 	{"JPEGLosslessPredictors", 517, NULL},
 	{"JPEGPointTransforms", 518, NULL},
