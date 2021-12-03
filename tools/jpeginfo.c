@@ -58,6 +58,8 @@ parse_exif(jv o, const uint8_t *p, size_t len)
 }
 
 // --- ICC profiles ------------------------------------------------------------
+// v2 https://www.color.org/ICC_Minor_Revision_for_Web.pdf
+// v4 https://www.color.org/specification/ICC1v43_2010-12.pdf
 
 static uint32_t
 u32be(const uint8_t *p)
@@ -129,8 +131,7 @@ parse_icc_desc(jv o, const uint8_t *profile, size_t profile_len,
 static jv
 parse_icc(jv o, const uint8_t *profile, size_t profile_len)
 {
-	// https://www.color.org/ICC_Minor_Revision_for_Web.pdf 6
-	// https://www.color.org/specification/ICC1v43_2010-12.pdf 7
+	// v2 6, v4 7
 	if (profile_len < 132)
 		return add_warning(o, "ICC profile too short");
 	if (u32be(profile) != profile_len)
@@ -154,6 +155,64 @@ parse_icc(jv o, const uint8_t *profile, size_t profile_len)
 	}
 	// The description is required, so this should be unreachable.
 	return jv_set(o, jv_string("ICC"), jv_bool(true));
+}
+
+// --- Photoshop Image Resources -----------------------------------------------
+// Adobe XMP Specification Part 3: Storage in Files, 2020/1, 1.1.3 + 3.1.3
+// https://www.adobe.com/devnet-apps/photoshop/fileformatashtml/
+
+static jv
+parse_psir_block(jv o, uint16_t resource_id, const char *name,
+	const uint8_t *data, size_t len)
+{
+	// TODO(p): These is more to extract here. The name is most often empty.
+	(void) name;
+	(void) data;
+	(void) len;
+	return add_to_subarray(o, "PSIR", jv_number(resource_id));
+}
+
+static jv
+parse_psir(jv o, const uint8_t *p, size_t len)
+{
+	if (len == 0)
+		return add_warning(o, "empty PSIR data");
+
+	while (len) {
+		if (len < 8 || memcmp(p, "8BIM", 4))
+			return add_warning(o, "bad PSIR block header");
+
+		uint16_t resource_id = u16be(p + 4);
+		uint8_t name_len = p[6];
+		const uint8_t *name = &p[7];
+
+		// Add one byte for the Pascal-ish string length prefix,
+		// then another one for padding to make the length even.
+		size_t name_len_full = (name_len + 2) & ~1U;
+
+		size_t resource_len_offset = 6 + name_len_full,
+			header_len = resource_len_offset + 4;
+		if (len < header_len)
+			return add_warning(o, "bad PSIR block header");
+
+		uint32_t resource_len = u32be(p + resource_len_offset);
+		size_t resource_len_padded = (resource_len + 1) & ~1U;
+		if (resource_len_padded < resource_len ||
+			len < header_len + resource_len_padded)
+			return add_warning(o, "runaway PSIR block");
+
+		p += header_len;
+		len -= header_len;
+
+		char *cname = calloc(1, name_len_full);
+		strncpy(cname, (const char *) name, name_len);
+		o = parse_psir_block(o, resource_id, cname, p, resource_len);
+		free(cname);
+
+		p += resource_len_padded;
+		len -= resource_len_padded;
+	}
+	return o;
 }
 
 // --- JPEG --------------------------------------------------------------------
@@ -283,10 +342,19 @@ static const char *marker_descriptions[0xFF] = {
 
 struct data {
 	bool ended;
-	uint8_t *exif, *icc;
-	size_t exif_len, icc_len;
+	uint8_t *exif, *icc, *psir;
+	size_t exif_len, icc_len, psir_len;
 	int icc_sequence, icc_done;
 };
+
+static void
+parse_append(uint8_t **buffer, size_t *buffer_len, const uint8_t *p, size_t len)
+{
+	size_t buffer_longer = *buffer_len + len;
+	*buffer = realloc(*buffer, buffer_longer);
+	memcpy(*buffer + *buffer_len, p, len);
+	*buffer_len = buffer_longer;
+}
 
 static const uint8_t *
 parse_marker(uint8_t marker, const uint8_t *p, const uint8_t *end,
@@ -438,18 +506,14 @@ parse_marker(uint8_t marker, const uint8_t *p, const uint8_t *end,
 	}
 
 	// https://www.cipa.jp/std/documents/e/DC-008-2012_E.pdf 4.7.2
+	// Adobe XMP Specification Part 3: Storage in Files, 2020/1, 1.1.3
 	if (marker == APP1 && p - payload >= 6 && !memcmp(payload, "Exif\0", 5)) {
 		payload += 6;
-
 		if (payload[-1] != 0)
 			*o = add_warning(*o, "weirdly padded Exif header");
-
-		if (data->exif) {
-			*o = add_warning(*o, "multiple Exifs");
-		} else {
-			data->exif = realloc(data->exif, (data->exif_len = p - payload));
-			memcpy(data->exif, payload, data->exif_len);
-		}
+		if (data->exif)
+			*o = add_warning(*o, "multiple Exif segments");
+		parse_append(&data->exif, &data->exif_len, payload, p - payload);
 	}
 
 	// https://www.color.org/specification/ICC1v43_2010-12.pdf B.4
@@ -457,13 +521,16 @@ parse_marker(uint8_t marker, const uint8_t *p, const uint8_t *end,
 		!memcmp(payload, "ICC_PROFILE\0", 12) && !data->icc_done &&
 		payload[12] == ++data->icc_sequence && payload[13] >= payload[12]) {
 		payload += 14;
-
-		size_t icc_longer = data->icc_len + (p - payload);
-		data->icc = realloc(data->icc, icc_longer);
-		memcpy(data->icc + data->icc_len, payload, p - payload);
-		data->icc_len = icc_longer;
-
+		parse_append(&data->icc, &data->icc_len, payload, p - payload);
 		data->icc_done = payload[-1] == data->icc_sequence;
+	}
+
+	// Adobe XMP Specification Part 3: Storage in Files, 2020/1, 1.1.3 + 3.1.3
+	// https://www.adobe.com/devnet-apps/photoshop/fileformatashtml/
+	if (marker == APP13 && p - payload >= 14 &&
+		!memcmp(payload, "Photoshop 3.0\0", 14)) {
+		payload += 14;
+		parse_append(&data->psir, &data->psir_len, payload, p - payload);
 	}
 	return p;
 }
@@ -508,6 +575,10 @@ parse_jpeg(jv o, const uint8_t *p, size_t len)
 		else
 			o = add_warning(o, "bad ICC profile sequence");
 		free(data.icc);
+	}
+	if (data.psir) {
+		o = parse_psir(o, data.psir, data.psir_len);
+		free(data.psir);
 	}
 
 	return jv_set(o, jv_string("markers"), markers);
