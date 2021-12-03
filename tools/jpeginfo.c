@@ -23,14 +23,7 @@
 #include <stdbool.h>
 #include <stdarg.h>
 
-// --- TIFF --------------------------------------------------------------------
-// https://www.adobe.io/content/dam/udp/en/open/standards/tiff/TIFF6.pdf
-// https://www.adobe.io/content/dam/udp/en/open/standards/tiff/TIFFPM6.pdf
-// https://www.cipa.jp/std/documents/e/DC-008-2012_E.pdf
-//
-// libtiff is a mess, and the format is not particularly complicated.
-// Also, we'd still want to duplicate its tag tables.
-// Exif libraries are senselessly copylefted.
+// --- Utilities ---------------------------------------------------------------
 
 static uint32_t
 u32be(const uint8_t *p)
@@ -56,12 +49,19 @@ u16le(const uint8_t *p)
 	return (uint16_t) p[1] << 8 | p[0];
 }
 
+// --- TIFF --------------------------------------------------------------------
+// https://www.adobe.io/content/dam/udp/en/open/standards/tiff/TIFF6.pdf
+// https://www.adobe.io/content/dam/udp/en/open/standards/tiff/TIFFPM6.pdf
+// https://www.cipa.jp/std/documents/e/DC-008-2012_E.pdf
+//
+// libtiff is a mess, and the format is not particularly complicated.
+// Also, we'd still want to duplicate its tag tables.
+// Exif libraries are senselessly copylefted.
+
 static struct un {
 	uint32_t (*u32) (const uint8_t *);
 	uint16_t (*u16) (const uint8_t *);
 } unbe = {u32be, u16be}, unle = {u32le, u16le};
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 struct tiffer {
 	struct un *un;
@@ -467,7 +467,7 @@ parse_icc(jv o, const uint8_t *profile, size_t profile_len)
 // https://www.adobe.com/devnet-apps/photoshop/fileformatashtml/
 
 static jv
-parse_psir_block(jv o, uint16_t resource_id, const char *name,
+process_psir(jv o, uint16_t resource_id, const char *name,
 	const uint8_t *data, size_t len)
 {
 	// TODO(p): These is more to extract here. The name is most often empty.
@@ -478,44 +478,50 @@ parse_psir_block(jv o, uint16_t resource_id, const char *name,
 }
 
 static jv
+parse_psir_block(jv o, const uint8_t *p, size_t len, size_t *advance)
+{
+	*advance = 0;
+	if (len < 8 || memcmp(p, "8BIM", 4))
+		return add_warning(o, "bad PSIR block header");
+
+	uint16_t resource_id = u16be(p + 4);
+	uint8_t name_len = p[6];
+	const uint8_t *name = &p[7];
+
+	// Add one byte for the Pascal-ish string length prefix,
+	// then another one for padding to make the length even.
+	size_t name_len_full = (name_len + 2) & ~1U;
+
+	size_t resource_len_offset = 6 + name_len_full,
+		header_len = resource_len_offset + 4;
+	if (len < header_len)
+		return add_warning(o, "bad PSIR block header");
+
+	uint32_t resource_len = u32be(p + resource_len_offset);
+	size_t resource_len_padded = (resource_len + 1) & ~1U;
+	if (resource_len_padded < resource_len ||
+		len < header_len + resource_len_padded)
+		return add_warning(o, "runaway PSIR block");
+
+	char *cname = calloc(1, name_len_full);
+	strncpy(cname, (const char *) name, name_len);
+	o = process_psir(o, resource_id, cname, p + header_len, resource_len);
+	free(cname);
+
+	*advance = header_len + resource_len_padded;
+	return o;
+}
+
+static jv
 parse_psir(jv o, const uint8_t *p, size_t len)
 {
 	if (len == 0)
 		return add_warning(o, "empty PSIR data");
 
-	while (len) {
-		if (len < 8 || memcmp(p, "8BIM", 4))
-			return add_warning(o, "bad PSIR block header");
-
-		uint16_t resource_id = u16be(p + 4);
-		uint8_t name_len = p[6];
-		const uint8_t *name = &p[7];
-
-		// Add one byte for the Pascal-ish string length prefix,
-		// then another one for padding to make the length even.
-		size_t name_len_full = (name_len + 2) & ~1U;
-
-		size_t resource_len_offset = 6 + name_len_full,
-			header_len = resource_len_offset + 4;
-		if (len < header_len)
-			return add_warning(o, "bad PSIR block header");
-
-		uint32_t resource_len = u32be(p + resource_len_offset);
-		size_t resource_len_padded = (resource_len + 1) & ~1U;
-		if (resource_len_padded < resource_len ||
-			len < header_len + resource_len_padded)
-			return add_warning(o, "runaway PSIR block");
-
-		p += header_len;
-		len -= header_len;
-
-		char *cname = calloc(1, name_len_full);
-		strncpy(cname, (const char *) name, name_len);
-		o = parse_psir_block(o, resource_id, cname, p, resource_len);
-		free(cname);
-
-		p += resource_len_padded;
-		len -= resource_len_padded;
+	size_t advance = 0;
+	while (len && (o = parse_psir_block(o, p, len, &advance), advance)) {
+		p += advance;
+		len -= advance;
 	}
 	return o;
 }
