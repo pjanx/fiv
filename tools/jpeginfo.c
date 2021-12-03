@@ -309,7 +309,7 @@ tiffer_next_entry(struct tiffer *self, struct tiffer_entry *entry)
 		entry->p = self->p;
 		self->p += sizeof offset;
 	} else if (tiffer_u32(self, &offset)) {
-		entry->p = self->p + offset;
+		entry->p = self->begin + offset;
 	} else {
 		return false;
 	}
@@ -326,111 +326,111 @@ tiffer_next_entry(struct tiffer *self, struct tiffer_entry *entry)
 
 // --- TIFF/Exif/MPF/* tags ----------------------------------------------------
 
+struct tiff_value {
+	const char *name;
+	uint16_t value;
+};
+
 struct tiff_entry {
 	const char *name;
 	uint16_t tag;
+	struct tiff_value *values;
 };
 
 static struct tiff_entry tiff_entries[] = {
-	{"NewSubfileType", 254},
-	{"SubfileType", 255},
-	{"ImageWidth", 256},
-	{"ImageLength", 257},
-	{"BitsPerSample", 258},
-	{"Compression", 259},
-	{"PhotometricInterpretation", 262},
-	{"Threshholding", 263},
-	{"CellWidth", 264},
-	{"CellLength", 265},
-	{"FillOrder", 266},
-	{"DocumentName", 269},
-	{"ImageDescription", 270},
-	{"Make", 271},
-	{"Model", 272},
-	{"StripOffsets", 273},
-	{"Orientation", 274},
-	{"SamplesPerPixel", 277},
-	{"RowsPerStrip", 278},
-	{"StripByteCounts", 279},
-	{"MinSampleValue", 280},
-	{"MaxSampleValue", 281},
-	{"XResolution", 282},
-	{"YResolution", 283},
-	{"PlanarConfiguration", 284},
-	{"PageName", 285},
-	{"XPosition", 286},
-	{"YPosition", 287},
-	{"FreeOffsets", 288},
-	{"FreeByteCounts", 289},
-	{"GrayResponseUnit", 290},
-	{"GrayResponseCurve", 291},
-	{"T4Options", 292},
-	{"T6Options", 293},
-	{"ResolutionUnit", 296},
-	{"PageNumber", 297},
-	{"TransferFunction", 301},
-	{"Software", 305},
-	{"DateTime", 306},
-	{"Artist", 315},
-	{"HostComputer", 316},
-	{"Predictor", 317},
-	{"WhitePoint", 318},
-	{"PrimaryChromaticities", 319},
-	{"ColorMap", 320},
-	{"HalftoneHints", 321},
-	{"TileWidth", 322},
-	{"TileLength", 323},
-	{"TileOffsets", 324},
-	{"TileByteCounts", 325},
-	{"InkSet", 332},
-	{"InkNames", 333},
-	{"NumberOfInks", 334},
-	{"DotRange", 336},
-	{"TargetPrinter", 337},
-	{"ExtraSamples", 338},
-	{"SampleFormat", 339},
-	{"SMinSampleValue", 340},
-	{"SMaxSampleValue", 341},
-	{"TransferRange", 342},
-	{"JPEGProc", 512},
-	{"JPEGInterchangeFormat", 513},
-	{"JPEGInterchangeFormatLngth", 514},
-	{"JPEGRestartInterval", 515},
-	{"JPEGLosslessPredictors", 517},
-	{"JPEGPointTransforms", 518},
-	{"JPEGQTables", 519},
-	{"JPEGDCTables", 520},
-	{"JPEGACTables", 521},
-	{"YCbCrCoefficients", 529},
-	{"YCbCrSubSampling", 530},
-	{"YCbCrPositioning", 531},
-	{"ReferenceBlackWhite", 532},
-	{"Copyright", 33432},
-	{}
-};
-
-// Compression
-static struct tiff_entry tiff_compression_values[] = {
-	{"Uncompressed", 1},
-	{"CCITT 1D", 2},
-	{"Group 3 Fax", 3},
-	{"Group 4 Fax", 4},
-	{"LZW", 5},
-	{"JPEG", 6},
-	{"PackBits", 32773},
-	{}
-};
-
-// PhotometricInterpretation
-static struct tiff_entry tiff_photometric_interpretation_values[] = {
-	{"WhiteIsZero", 0},
-	{"BlackIsZero", 1},
-	{"RGB", 2},
-	{"RGB Palette", 3},
-	{"Transparency mask", 4},
-	{"CMYK", 5},
-	{"YCbCr", 6},
-	{"CIELab", 8},
+	{"NewSubfileType", 254, NULL},
+	{"SubfileType", 255, NULL},
+	{"ImageWidth", 256, NULL},
+	{"ImageLength", 257, NULL},
+	{"BitsPerSample", 258, NULL},
+	{"Compression", 259, (struct tiff_value[]) {
+		{"Uncompressed", 1},
+		{"CCITT 1D", 2},
+		{"Group 3 Fax", 3},
+		{"Group 4 Fax", 4},
+		{"LZW", 5},
+		{"JPEG", 6},
+		{"PackBits", 32773},
+		{}
+	}},
+	{"PhotometricInterpretation", 262, (struct tiff_value[]) {
+		{"WhiteIsZero", 0},
+		{"BlackIsZero", 1},
+		{"RGB", 2},
+		{"RGB Palette", 3},
+		{"Transparency mask", 4},
+		{"CMYK", 5},
+		{"YCbCr", 6},
+		{"CIELab", 8},
+		{}
+	}},
+	{"Threshholding", 263, NULL},
+	{"CellWidth", 264, NULL},
+	{"CellLength", 265, NULL},
+	{"FillOrder", 266, NULL},
+	{"DocumentName", 269, NULL},
+	{"ImageDescription", 270, NULL},
+	{"Make", 271, NULL},
+	{"Model", 272, NULL},
+	{"StripOffsets", 273, NULL},
+	{"Orientation", 274, NULL},
+	{"SamplesPerPixel", 277, NULL},
+	{"RowsPerStrip", 278, NULL},
+	{"StripByteCounts", 279, NULL},
+	{"MinSampleValue", 280, NULL},
+	{"MaxSampleValue", 281, NULL},
+	{"XResolution", 282, NULL},
+	{"YResolution", 283, NULL},
+	{"PlanarConfiguration", 284, NULL},
+	{"PageName", 285, NULL},
+	{"XPosition", 286, NULL},
+	{"YPosition", 287, NULL},
+	{"FreeOffsets", 288, NULL},
+	{"FreeByteCounts", 289, NULL},
+	{"GrayResponseUnit", 290, NULL},
+	{"GrayResponseCurve", 291, NULL},
+	{"T4Options", 292, NULL},
+	{"T6Options", 293, NULL},
+	{"ResolutionUnit", 296, NULL},
+	{"PageNumber", 297, NULL},
+	{"TransferFunction", 301, NULL},
+	{"Software", 305, NULL},
+	{"DateTime", 306, NULL},
+	{"Artist", 315, NULL},
+	{"HostComputer", 316, NULL},
+	{"Predictor", 317, NULL},
+	{"WhitePoint", 318, NULL},
+	{"PrimaryChromaticities", 319, NULL},
+	{"ColorMap", 320, NULL},
+	{"HalftoneHints", 321, NULL},
+	{"TileWidth", 322, NULL},
+	{"TileLength", 323, NULL},
+	{"TileOffsets", 324, NULL},
+	{"TileByteCounts", 325, NULL},
+	{"InkSet", 332, NULL},
+	{"InkNames", 333, NULL},
+	{"NumberOfInks", 334, NULL},
+	{"DotRange", 336, NULL},
+	{"TargetPrinter", 337, NULL},
+	{"ExtraSamples", 338, NULL},
+	{"SampleFormat", 339, NULL},
+	{"SMinSampleValue", 340, NULL},
+	{"SMaxSampleValue", 341, NULL},
+	{"TransferRange", 342, NULL},
+	{"JPEGProc", 512, NULL},
+	{"JPEGInterchangeFormat", 513, NULL},
+	{"JPEGInterchangeFormatLngth", 514, NULL},
+	{"JPEGRestartInterval", 515, NULL},
+	{"JPEGLosslessPredictors", 517, NULL},
+	{"JPEGPointTransforms", 518, NULL},
+	{"JPEGQTables", 519, NULL},
+	{"JPEGDCTables", 520, NULL},
+	{"JPEGACTables", 521, NULL},
+	{"YCbCrCoefficients", 529, NULL},
+	{"YCbCrSubSampling", 530, NULL},
+	{"YCbCrPositioning", 531, NULL},
+	{"ReferenceBlackWhite", 532, NULL},
+	{"Copyright", 33432, NULL},
 	{}
 };
 
@@ -465,15 +465,36 @@ add_error(jv o, const char *message)
 
 // --- Exif --------------------------------------------------------------------
 
-// TODO(p): Decode more and better.
 static jv
-process_exif_entry(jv o, const struct tiffer_entry *entry)
+process_exif_entry(jv o, struct tiffer *T, const struct tiffer_entry *entry)
 {
-	for (const struct tiff_entry *p = tiff_entries; p->name; p++) {
-		if (p->tag == entry->tag)
-			return add_to_subarray(o, "TIFF", jv_string(p->name));
+	jv value = jv_true();
+
+	// TODO(p): Decode much more, and also descend into sub-IFD trees.
+	bool numeric = false;
+	double real = 0;
+	if (!entry->remaining_count) {
+		value = jv_null();
+	} else if (entry->type == ASCII) {
+		value = jv_string_sized((const char *) entry->p,
+			entry->remaining_count - 1);
+	} else if ((numeric = tiffer_real(T, entry, &real))) {
+		value = jv_number(real);
 	}
-	return add_to_subarray(o, "TIFF", jv_number(entry->tag));
+
+	for (const struct tiff_entry *p = tiff_entries; p->name; p++) {
+		if (p->tag != entry->tag)
+			continue;
+
+		if (numeric && p->values) {
+			for (const struct tiff_value *q = p->values; q->name; q++) {
+				if (q->value == real)
+					return jv_set(o, jv_string(p->name), jv_string(q->name));
+			}
+		}
+		return jv_set(o, jv_string(p->name), value);
+	}
+	return jv_set(o, jv_string_fmt("%u", entry->tag), value);
 }
 
 static jv
@@ -483,12 +504,12 @@ parse_exif(jv o, const uint8_t *p, size_t len)
 	if (!tiffer_init(&T, p, len))
 		return add_warning(o, "invalid Exif");
 
-	// TODO(p): Turn this into an array of objects indexed by tag name.
 	struct tiffer_entry entry;
 	while (tiffer_next_ifd(&T)) {
-		while (tiffer_next_entry(&T, &entry)) {
-			o = process_exif_entry(o, &entry);
-		}
+		jv ifd = jv_object();
+		while (tiffer_next_entry(&T, &entry))
+			ifd = process_exif_entry(ifd, &T, &entry);
+		o = add_to_subarray(o, "TIFF", ifd);
 	}
 	return o;
 }
