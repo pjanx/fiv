@@ -50,12 +50,19 @@ u16le(const uint8_t *p)
 }
 
 // --- TIFF --------------------------------------------------------------------
+// TIFF Revision 6.0
 // https://www.adobe.io/content/dam/udp/en/open/standards/tiff/TIFF6.pdf
+//
+// TIFF Technical Note 1: TIFF Trees
+// https://download.osgeo.org/libtiff/old/TTN1.ps
+//
+// Adobe PageMaker 6.0 TIFF Technical Notes [includes TTN1]
 // https://www.adobe.io/content/dam/udp/en/open/standards/tiff/TIFFPM6.pdf
+//
+// Exif Version 2.3
 // https://www.cipa.jp/std/documents/e/DC-008-2012_E.pdf
 //
 // libtiff is a mess, and the format is not particularly complicated.
-// Also, we'd still want to duplicate its tag tables.
 // Exif libraries are senselessly copylefted.
 
 static struct un {
@@ -149,7 +156,7 @@ tiffer_subifd(struct tiffer *self, uint32_t offset, struct tiffer *subreader)
 enum tiffer_type {
 	BYTE = 1, ASCII, SHORT, LONG, RATIONAL,
 	SBYTE, UNDEFINED, SSHORT, SLONG, SRATIONAL, FLOAT, DOUBLE,
-	IFD // This last type isn't really used much.
+	IFD  // This last type from TIFF Technical Note 1 isn't really used much.
 };
 
 static size_t
@@ -339,7 +346,12 @@ struct tiff_entry {
 
 static struct tiff_entry tiff_entries[] = {
 	{"NewSubfileType", 254, NULL},
-	{"SubfileType", 255, NULL},
+	{"SubfileType", 255, (struct tiff_value[]) {
+		{"Full-resolution image data", 1},
+		{"Reduced-resolution image data", 2},
+		{"Page of a multi-page image", 3},
+		{}
+	}},
 	{"ImageWidth", 256, NULL},
 	{"ImageLength", 257, NULL},
 	{"BitsPerSample", 258, NULL},
@@ -362,18 +374,38 @@ static struct tiff_entry tiff_entries[] = {
 		{"CMYK", 5},
 		{"YCbCr", 6},
 		{"CIELab", 8},
+		{"ICC CIELab", 9},  // Adobe PageMaker 6.0 TIFF Technical Notes
 		{}
 	}},
-	{"Threshholding", 263, NULL},
+	{"Threshholding", 263, (struct tiff_value[]) {
+		{"No dithering or halftoning", 1},
+		{"Ordered dither or halftoning", 2},
+		{"Randomized process", 3},
+		{}
+	}},
 	{"CellWidth", 264, NULL},
 	{"CellLength", 265, NULL},
-	{"FillOrder", 266, NULL},
+	{"FillOrder", 266, (struct tiff_value[]) {
+		{"MSB-first", 1},
+		{"LSB-first", 2},
+		{}
+	}},
 	{"DocumentName", 269, NULL},
 	{"ImageDescription", 270, NULL},
 	{"Make", 271, NULL},
 	{"Model", 272, NULL},
 	{"StripOffsets", 273, NULL},
-	{"Orientation", 274, NULL},
+	{"Orientation", 274, (struct tiff_value[]) {
+		{"TopLeft", 1},
+		{"TopRight", 2},
+		{"BottomRight", 3},
+		{"BottomLeft", 4},
+		{"LeftTop", 5},
+		{"RightTop", 6},
+		{"RightBottom", 7},
+		{"LeftBottom", 8},
+		{}
+	}},
 	{"SamplesPerPixel", 277, NULL},
 	{"RowsPerStrip", 278, NULL},
 	{"StripByteCounts", 279, NULL},
@@ -381,24 +413,44 @@ static struct tiff_entry tiff_entries[] = {
 	{"MaxSampleValue", 281, NULL},
 	{"XResolution", 282, NULL},
 	{"YResolution", 283, NULL},
-	{"PlanarConfiguration", 284, NULL},
+	{"PlanarConfiguration", 284, (struct tiff_value[]) {
+		{"Chunky", 1},
+		{"Planar", 2},
+		{}
+	}},
 	{"PageName", 285, NULL},
 	{"XPosition", 286, NULL},
 	{"YPosition", 287, NULL},
 	{"FreeOffsets", 288, NULL},
 	{"FreeByteCounts", 289, NULL},
-	{"GrayResponseUnit", 290, NULL},
+	{"GrayResponseUnit", 290, (struct tiff_value[]) {
+		{"1/10", 1},
+		{"1/100", 2},
+		{"1/1000", 3},
+		{"1/10000", 4},
+		{"1/100000", 5},
+		{}
+	}},
 	{"GrayResponseCurve", 291, NULL},
 	{"T4Options", 292, NULL},
 	{"T6Options", 293, NULL},
-	{"ResolutionUnit", 296, NULL},
+	{"ResolutionUnit", 296, (struct tiff_value[]) {
+		{"None", 1},
+		{"Inch", 2},
+		{"Centimeter", 3},
+		{}
+	}},
 	{"PageNumber", 297, NULL},
 	{"TransferFunction", 301, NULL},
 	{"Software", 305, NULL},
 	{"DateTime", 306, NULL},
 	{"Artist", 315, NULL},
 	{"HostComputer", 316, NULL},
-	{"Predictor", 317, NULL},
+	{"Predictor", 317, (struct tiff_value[]) {
+		{"None", 1},
+		{"Horizontal", 2},
+		{}
+	}},
 	{"WhitePoint", 318, NULL},
 	{"PrimaryChromaticities", 319, NULL},
 	{"ColorMap", 320, NULL},
@@ -407,36 +459,74 @@ static struct tiff_entry tiff_entries[] = {
 	{"TileLength", 323, NULL},
 	{"TileOffsets", 324, NULL},
 	{"TileByteCounts", 325, NULL},
-	{"InkSet", 332, NULL},
+	{"SubIFDs", 330, NULL},  // TIFF Technical Note 1: TIFF Trees
+	{"InkSet", 332, (struct tiff_value[]) {
+		{"CMYK", 1},
+		{"Non-CMYK", 2},
+		{}
+	}},
 	{"InkNames", 333, NULL},
 	{"NumberOfInks", 334, NULL},
 	{"DotRange", 336, NULL},
 	{"TargetPrinter", 337, NULL},
-	{"ExtraSamples", 338, NULL},
-	{"SampleFormat", 339, NULL},
+	{"ExtraSamples", 338, (struct tiff_value[]) {
+		{"Unspecified", 0},
+		{"Associated alpha", 1},
+		{"Unassociated alpha", 2},
+		{}
+	}},
+	{"SampleFormat", 339, (struct tiff_value[]) {
+		{"Unsigned integer", 1},
+		{"Two's complement signed integer", 2},
+		{"IEEE floating-point", 3},
+		{"Undefined", 4},
+		{}
+	}},
 	{"SMinSampleValue", 340, NULL},
 	{"SMaxSampleValue", 341, NULL},
 	{"TransferRange", 342, NULL},
-	{"JPEGProc", 512, NULL},
+	{"ClipPath", 343, NULL},  // TIFF Technical Note 2: Clipping Path
+	{"XClipPathUnits", 344, NULL},  // TIFF Technical Note 2: Clipping Path
+	{"YClipPathUnits", 345, NULL},  // TIFF Technical Note 2: Clipping Path
+	{"Indexed", 346, NULL},  // TIFF Technical Note 3: Indexed Images
+	{"OPIProxy", 351, NULL},  // Adobe PageMaker 6.0 TIFF Technical Notes
+	{"JPEGProc", 512, (struct tiff_value[]) {
+		{"Baseline sequential", 1},
+		{"Lossless Huffman", 14},
+		{}
+	}},
 	{"JPEGInterchangeFormat", 513, NULL},
 	{"JPEGInterchangeFormatLength", 514, NULL},
 	{"JPEGRestartInterval", 515, NULL},
-	{"JPEGLosslessPredictors", 517, NULL},
+	{"JPEGLosslessPredictors", 517, (struct tiff_value[]) {
+		{"A", 1},
+		{"B", 2},
+		{"C", 3},
+		{"A+B+C", 4},
+		{"A+((B-C)/2)", 5},
+		{"B+((A-C)/2)", 6},
+		{"(A+B)/2", 7},
+		{}
+	}},
 	{"JPEGPointTransforms", 518, NULL},
 	{"JPEGQTables", 519, NULL},
 	{"JPEGDCTables", 520, NULL},
 	{"JPEGACTables", 521, NULL},
 	{"YCbCrCoefficients", 529, NULL},
 	{"YCbCrSubSampling", 530, NULL},
-	{"YCbCrPositioning", 531, NULL},
+	{"YCbCrPositioning", 531, (struct tiff_value[]) {
+		{"Centered", 1},
+		{"Cosited", 2},
+		{}
+	}},
 	{"ReferenceBlackWhite", 532, NULL},
+	{"ImageID", 32781, NULL},  // Adobe PageMaker 6.0 TIFF Technical Notes
 	{"Copyright", 33432, NULL},
 	{}
 };
 
 // TODO(p): Insert tags and values from other documentation,
-// so far only Appendix A from TIFF 6.0 is present.
-// There are still quite a few missing constant names from there.
+// so far only tags and non-bit-field values from TIFF 6.0 and PM6 are present.
 
 // --- Analysis ----------------------------------------------------------------
 
@@ -465,23 +555,69 @@ add_error(jv o, const char *message)
 
 // --- Exif --------------------------------------------------------------------
 
+static jv parse_exif_ifd(struct tiffer *T);
+
 static jv
-process_exif_entry(jv o, struct tiffer *T, const struct tiffer_entry *entry)
+parse_exif_subifds(struct tiffer *T, const struct tiffer_entry *entry)
+{
+	int64_t offset = 0;
+	struct tiffer subT = {};
+	if (!tiffer_integer(T, entry, &offset) ||
+		offset < 0 || offset > UINT32_MAX || !tiffer_subifd(T, offset, &subT))
+		return jv_null();
+
+	// The chain should correspond to the values in the entry,
+	// we are not going to verify it.
+	jv a = jv_array();
+	do a = jv_array_append(a, parse_exif_ifd(&subT));
+	while (tiffer_next_ifd(&subT));
+	return a;
+}
+
+static jv
+parse_exif_ascii(struct tiffer_entry *entry)
+{
+	// Adobe XMP Specification Part 3: Storage in Files, 2020/1, 2.4.2
+	// The text may in practice contain any 8-bit encoding, but likely UTF-8.
+	// TODO(p): Validate UTF-8, and assume Latin 1 if unsuccessful.
+	jv a = jv_array();
+	uint8_t *nul = 0;
+	while ((nul = memchr(entry->p, 0, entry->remaining_count))) {
+		size_t len = nul - entry->p;
+		a = jv_array_append(a, jv_string_sized((const char *) entry->p, len));
+		entry->remaining_count -= len + 1;
+		entry->p += len + 1;
+	}
+
+	// Trailing NULs are required, but let's extract everything.
+	if (entry->remaining_count) {
+		a = jv_array_append(a,
+			jv_string_sized((const char *) entry->p, entry->remaining_count));
+	}
+
+	// TODO(p): May extract this into a function, and reuse it below.
+	if (jv_array_length(jv_copy(a)) == 1)
+		return jv_array_get(a, 0);
+	return a;
+}
+
+static jv
+parse_exif_entry(jv o, struct tiffer *T, struct tiffer_entry *entry)
 {
 	jv value = jv_true();
-
-	// TODO(p): Decode much more, and also descend into sub-IFD trees.
 	bool numeric = false;
 	double real = 0;
 	if (!entry->remaining_count) {
 		value = jv_null();
+	} else if (entry->type == IFD) {
+		value = parse_exif_subifds(T, entry);
 	} else if (entry->type == ASCII) {
-		value = jv_string_sized((const char *) entry->p,
-			entry->remaining_count - 1);
+		value = parse_exif_ascii(entry);
 	} else if ((numeric = tiffer_real(T, entry, &real))) {
 		value = jv_number(real);
 	}
 
+	// TODO(p): Decode UNDEFINED as a hex dump, and iterate over all values.
 	for (const struct tiff_entry *p = tiff_entries; p->name; p++) {
 		if (p->tag != entry->tag)
 			continue;
@@ -498,19 +634,23 @@ process_exif_entry(jv o, struct tiffer *T, const struct tiffer_entry *entry)
 }
 
 static jv
+parse_exif_ifd(struct tiffer *T)
+{
+	jv ifd = jv_object();
+	struct tiffer_entry entry;
+	while (tiffer_next_entry(T, &entry))
+		ifd = parse_exif_entry(ifd, T, &entry);
+	return ifd;
+}
+
+static jv
 parse_exif(jv o, const uint8_t *p, size_t len)
 {
 	struct tiffer T;
 	if (!tiffer_init(&T, p, len))
 		return add_warning(o, "invalid Exif");
-
-	struct tiffer_entry entry;
-	while (tiffer_next_ifd(&T)) {
-		jv ifd = jv_object();
-		while (tiffer_next_entry(&T, &entry))
-			ifd = process_exif_entry(ifd, &T, &entry);
-		o = add_to_subarray(o, "TIFF", ifd);
-	}
+	while (tiffer_next_ifd(&T))
+		o = add_to_subarray(o, "TIFF", parse_exif_ifd(&T));
 	return o;
 }
 

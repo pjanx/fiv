@@ -1247,6 +1247,7 @@ load_libtiff_directory(TIFF *tiff, GError **error)
 
 fail:
 	TIFFRGBAImageEnd(&image);
+	// TODO(p): It's possible to implement ClipPath easily with Cairo.
 	return surface;
 }
 
