@@ -258,11 +258,11 @@ tiffer_rational(const struct tiffer *self, const struct tiffer_entry *entry,
 		*denominator = (int32_t) self->un->u32(entry->p + 4);
 		return true;
 	default:
-		if (!tiffer_integer(self, entry, numerator))
-			return false;
-
-		*denominator = 1;
-		return true;
+		if (tiffer_integer(self, entry, numerator)) {
+			*denominator = 1;
+			return true;
+		}
+		return false;
 	}
 }
 
@@ -275,14 +275,7 @@ tiffer_real(
 
 	// Somewhat excessively lenient, intended for display.
 	switch (entry->type) {
-		int64_t integer;
-	case RATIONAL:
-		*out = self->un->u32(entry->p) / (double) self->un->u32(entry->p + 4);
-		return true;
-	case SRATIONAL:
-		*out = (int32_t) self->un->u32(entry->p) /
-			(double) (int32_t) self->un->u32(entry->p + 4);
-		return true;
+		int64_t numerator, denominator;
 	case FLOAT:
 		*out = *(float *) entry->p;
 		return true;
@@ -290,11 +283,11 @@ tiffer_real(
 		*out = *(double *) entry->p;
 		return true;
 	default:
-		if (!tiffer_integer(self, entry, &integer))
-			return false;
-
-		*out = integer;
-		return true;
+		if (tiffer_rational(self, entry, &numerator, &denominator)) {
+			*out = (double) numerator / denominator;
+			return true;
+		}
+		return false;
 	}
 }
 
