@@ -594,10 +594,6 @@ parse_exif_ascii(struct tiffer_entry *entry)
 		a = jv_array_append(a,
 			jv_string_sized((const char *) entry->p, entry->remaining_count));
 	}
-
-	// TODO(p): May extract this into a function, and reuse it below.
-	if (jv_array_length(jv_copy(a)) == 1)
-		return jv_array_get(a, 0);
 	return a;
 }
 
@@ -616,37 +612,49 @@ parse_exif_undefined(struct tiffer_entry *entry)
 }
 
 static jv
+parse_exif_value(const struct tiff_value *values, double real)
+{
+	if (values) {
+		for (; values->name; values++)
+			if (values->value == real)
+				return jv_string(values->name);
+	}
+	return jv_number(real);
+}
+static jv
+parse_exif_extract_sole_array_element(jv a)
+{
+	return jv_array_length(jv_copy(a)) == 1 ? jv_array_get(a, 0) : a;
+}
+
+static jv
 parse_exif_entry(jv o, struct tiffer *T, struct tiffer_entry *entry)
 {
-	jv value = jv_true();
-	bool numeric = false;
+	const struct tiff_entry *info = tiff_entries;
+	for (; info->name; info++)
+		if (info->tag == entry->tag)
+			break;
+
+	jv v = jv_true();
 	double real = 0;
 	if (!entry->remaining_count) {
-		value = jv_null();
+		v = jv_null();
 	} else if (entry->type == IFD) {
-		value = parse_exif_subifds(T, entry);
+		v = parse_exif_subifds(T, entry);
 	} else if (entry->type == ASCII) {
-		value = parse_exif_ascii(entry);
+		v = parse_exif_extract_sole_array_element(parse_exif_ascii(entry));
 	} else if (entry->type == UNDEFINED) {
-		value = parse_exif_undefined(entry);
-	} else if ((numeric = tiffer_real(T, entry, &real))) {
-		value = jv_number(real);
+		v = parse_exif_undefined(entry);
+	} else if (tiffer_real(T, entry, &real)) {
+		v = jv_array();
+		do v = jv_array_append(v, parse_exif_value(info->values, real));
+		while (tiffer_next_value(entry) && tiffer_real(T, entry, &real));
+		v = parse_exif_extract_sole_array_element(v);
 	}
 
-	// TODO(p): Iterate over all numeric values.
-	for (const struct tiff_entry *p = tiff_entries; p->name; p++) {
-		if (p->tag != entry->tag)
-			continue;
-
-		if (numeric && p->values) {
-			for (const struct tiff_value *q = p->values; q->name; q++) {
-				if (q->value == real)
-					return jv_set(o, jv_string(p->name), jv_string(q->name));
-			}
-		}
-		return jv_set(o, jv_string(p->name), value);
-	}
-	return jv_set(o, jv_string_fmt("%u", entry->tag), value);
+	if (info->name)
+		return jv_set(o, jv_string(info->name), v);
+	return jv_set(o, jv_string_fmt("%u", entry->tag), v);
 }
 
 static jv
