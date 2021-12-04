@@ -602,6 +602,20 @@ parse_exif_ascii(struct tiffer_entry *entry)
 }
 
 static jv
+parse_exif_undefined(struct tiffer_entry *entry)
+{
+	const char *alphabet = "0123456789abcdef";
+	char *buf = calloc(1, 2 * entry->remaining_count + 1);
+	for (uint32_t i = 0; i < entry->remaining_count; i++) {
+		buf[2 * i + 0] = alphabet[entry->p[i] >> 4];
+		buf[2 * i + 1] = alphabet[entry->p[i] & 0xF];
+	}
+	jv s = jv_string(buf);
+	free(buf);
+	return s;
+}
+
+static jv
 parse_exif_entry(jv o, struct tiffer *T, struct tiffer_entry *entry)
 {
 	jv value = jv_true();
@@ -613,11 +627,13 @@ parse_exif_entry(jv o, struct tiffer *T, struct tiffer_entry *entry)
 		value = parse_exif_subifds(T, entry);
 	} else if (entry->type == ASCII) {
 		value = parse_exif_ascii(entry);
+	} else if (entry->type == UNDEFINED) {
+		value = parse_exif_undefined(entry);
 	} else if ((numeric = tiffer_real(T, entry, &real))) {
 		value = jv_number(real);
 	}
 
-	// TODO(p): Decode UNDEFINED as a hex dump, and iterate over all values.
+	// TODO(p): Iterate over all numeric values.
 	for (const struct tiff_entry *p = tiff_entries; p->name; p++) {
 		if (p->tag != entry->tag)
 			continue;
