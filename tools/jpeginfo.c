@@ -539,6 +539,10 @@ static uint16_t tiff_subifd_tags[] = {
 
 // TODO(p): Insert tags and values from other documentation,
 // so far only tags and non-bit-field values from TIFF 6.0 and PM6 are present.
+//
+// TODO(p): Exif 2.3 4.6.5 and on.
+// TODO(p): Exif 2.3 4.6.6 and on (note it starts at 0).
+// TODO(p): Exif 2.3 4.6.7 and on (note it starts at 1, and collides with GPS).
 
 // --- Analysis ----------------------------------------------------------------
 
@@ -677,7 +681,7 @@ static jv
 parse_exif_ifd(struct tiffer *T)
 {
 	jv ifd = jv_object();
-	struct tiffer_entry entry;
+	struct tiffer_entry entry = {};
 	while (tiffer_next_entry(T, &entry))
 		ifd = parse_exif_entry(ifd, T, &entry);
 	return ifd;
@@ -686,11 +690,11 @@ parse_exif_ifd(struct tiffer *T)
 static jv
 parse_exif(jv o, const uint8_t *p, size_t len)
 {
-	struct tiffer T;
+	struct tiffer T = {};
 	if (!tiffer_init(&T, p, len))
 		return add_warning(o, "invalid Exif");
 	while (tiffer_next_ifd(&T))
-		o = add_to_subarray(o, "TIFF", parse_exif_ifd(&T));
+		o = add_to_subarray(o, "Exif", parse_exif_ifd(&T));
 	return o;
 }
 
@@ -982,7 +986,80 @@ struct data {
 	uint8_t *exif, *icc, *psir;
 	size_t exif_len, icc_len, psir_len;
 	int icc_sequence, icc_done;
+	const uint8_t **mpf_offsets, **mpf_next;
 };
+
+enum {
+	MPFVersion = 45056,
+	NumberOfImages = 45057,
+	MPEntry = 45058,
+	ImageUIDList = 45059,
+	TotalFrames = 45060,
+};
+
+static void
+parse_mpf_entries(
+	struct data *data, struct tiffer *T, const struct tiffer_entry *entry)
+{
+	// 5.2.3.3. MP Entry
+	if (entry->tag != MPEntry || entry->type != UNDEFINED ||
+		entry->remaining_count % 16)
+		return;
+
+	uint32_t count = entry->remaining_count / 16;
+	const uint8_t **out = data->mpf_next = data->mpf_offsets =
+		calloc(sizeof *data->mpf_offsets, count + 1);
+	for (uint32_t i = 0; i < count; i++) {
+		const uint8_t *p = entry->p + i * 16;
+		// uint32_t attribute = T->un->u32(p);
+		// uint32_t size = T->un->u32(p + 4);
+		uint32_t offset = T->un->u32(p + 8);
+		// uint16_t dependent1 = T->un->u16(p + 12);
+		// uint16_t dependent2 = T->un->u16(p + 14);
+
+		if (offset)
+			*out++ = T->begin + offset;
+	}
+}
+
+static jv
+parse_mpf_index_ifd(struct data *data, struct tiffer *T)
+{
+	jv ifd = jv_object();
+	struct tiffer_entry entry = {};
+	while (tiffer_next_entry(T, &entry)) {
+		struct tiffer_entry copy = entry;
+		parse_mpf_entries(data, T, &entry);
+
+		// TODO(p): Parse the special tags instead.
+		ifd = parse_exif_entry(ifd, T, &copy);
+	}
+	return ifd;
+}
+
+static jv
+parse_mpf_attribute_ifd(struct tiffer *T)
+{
+	// TODO(p): Parse the special tags instead.
+	return parse_exif_ifd(T);
+}
+
+static jv
+parse_mpf(jv o, struct data *data, const uint8_t *p, size_t len)
+{
+	struct tiffer T;
+	if (!tiffer_init(&T, p, len) || !tiffer_next_ifd(&T))
+		return add_warning(o, "invalid MPF segment");
+
+	// First image: IFD0 is Index IFD, any IFD1 is Attribute IFD.
+	// Other images: IFD0 is Attribute IFD, there is no Index IFD.
+	if (!data->mpf_offsets) {
+		o = add_to_subarray(o, "MPF", parse_mpf_index_ifd(data, &T));
+		if (!tiffer_next_ifd(&T))
+			return o;
+	}
+	return add_to_subarray(o, "MPF", parse_mpf_attribute_ifd(&T));
+}
 
 static void
 parse_append(uint8_t **buffer, size_t *buffer_len, const uint8_t *p, size_t len)
@@ -999,8 +1076,13 @@ parse_marker(uint8_t marker, const uint8_t *p, const uint8_t *end,
 {
 	// Suspected: MJPEG? Undetected format recursion, e.g., thumbnails?
 	// Found: Random metadata! Multi-Picture Format!
-	if ((data->ended = marker == EOI) && p != end)
-		*o = add_warning(*o, "trailing data");
+	if ((data->ended = marker == EOI)) {
+		// TODO(p): Handle Exifs independently--flush the last one.
+		if (data->mpf_offsets && *data->mpf_next)
+			return *data->mpf_next++;
+		if (p != end)
+			*o = add_warning(*o, "trailing data");
+	}
 
 	// These markers stand alone, not starting a marker segment.
 	switch (marker) {
@@ -1098,12 +1180,14 @@ parse_marker(uint8_t marker, const uint8_t *p, const uint8_t *end,
 			unprintable ? jv_null() : jv_string((const char *) payload));
 	}
 
-	// CIPA DC-007 (Multi-Picture Format)
+	// CIPA DC-007 (Multi-Picture Format) 5.2
 	// http://fileformats.archiveteam.org/wiki/Multi-Picture_Format
-	// TODO(p): Handle by properly skipping trailing data (use MPF offsets).
+	if (marker == APP2 && p - payload >= 8 && !memcmp(payload, "MPF\0", 4)) {
+		payload += 4;
+		*o = parse_mpf(*o, data, payload, p - payload);
+	}
 
 	// CIPA DC-006 (Stereo Still Image Format for Digital Cameras)
-	// http://fileformats.archiveteam.org/wiki/Multi-Picture_Format
 	// TODO(p): Handle by properly skipping trailing data (use Stim offsets).
 
 	// https://www.w3.org/Graphics/JPEG/jfif3.pdf
@@ -1218,6 +1302,7 @@ parse_jpeg(jv o, const uint8_t *p, size_t len)
 		free(data.psir);
 	}
 
+	free(data.mpf_offsets);
 	return jv_set(o, jv_string("markers"), markers);
 }
 
