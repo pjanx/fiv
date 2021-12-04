@@ -522,7 +522,19 @@ static struct tiff_entry tiff_entries[] = {
 	{"ReferenceBlackWhite", 532, NULL},
 	{"ImageID", 32781, NULL},  // Adobe PageMaker 6.0 TIFF Technical Notes
 	{"Copyright", 33432, NULL},
+	{"Exif IFD Pointer", 34665, NULL},  // Exif 2.3
+	{"GPS Info IFD Pointer", 34853, NULL},  // Exif 2.3
+	{"Interoperability IFD Pointer", 40965, NULL},  // Exif 2.3
 	{}
+};
+
+// TODO(p): Consider if these can't be inlined into the above table.
+static uint16_t tiff_subifd_tags[] = {
+	330,    // SubIFDs
+	34665,  // Exif IFD Pointer
+	34853,  // GPS Info IFD Pointer
+	40965,  // Interoperability IFD Pointer
+	0
 };
 
 // TODO(p): Insert tags and values from other documentation,
@@ -635,11 +647,15 @@ parse_exif_entry(jv o, struct tiffer *T, struct tiffer_entry *entry)
 		if (info->tag == entry->tag)
 			break;
 
+	bool is_subifd = false;
+	for (const uint16_t *p = tiff_subifd_tags; *p; p++)
+		is_subifd |= *p == entry->tag;
+
 	jv v = jv_true();
 	double real = 0;
 	if (!entry->remaining_count) {
 		v = jv_null();
-	} else if (entry->type == IFD) {
+	} else if (entry->type == IFD || is_subifd) {
 		v = parse_exif_subifds(T, entry);
 	} else if (entry->type == ASCII) {
 		v = parse_exif_extract_sole_array_element(parse_exif_ascii(entry));
