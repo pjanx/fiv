@@ -50,16 +50,28 @@ u16le(const uint8_t *p)
 }
 
 // --- TIFF --------------------------------------------------------------------
-// TIFF Revision 6.0
+// TIFF Revision 6.0 (1992)
 // https://www.adobe.io/content/dam/udp/en/open/standards/tiff/TIFF6.pdf
 //
-// TIFF Technical Note 1: TIFF Trees
+// TIFF Technical Note 1: TIFF Trees (1993)
 // https://download.osgeo.org/libtiff/old/TTN1.ps
 //
-// Adobe PageMaker 6.0 TIFF Technical Notes [includes TTN1]
+// DRAFT TIFF Technical Note 2 (1995)
+// https://www.awaresystems.be/imaging/tiff/specification/TIFFTechNote2.txt
+//
+// Adobe PageMaker 6.0 TIFF Technical Notes (1995) [includes TTN1]
 // https://www.adobe.io/content/dam/udp/en/open/standards/tiff/TIFFPM6.pdf
 //
-// Exif Version 2.3
+// Adobe Photoshop TIFF Technical Notes (2002)
+// https://www.adobe.io/content/dam/udp/en/open/standards/tiff/TIFFphotoshop.pdf
+//  - Note that ImageSourceData 8BIM frames are specified differently
+//    from how Adobe XMP Specification Part 3 defines them.
+//  - The document places a condition on SubIFDs, without further explanation.
+//
+// Adobe Photoshop TIFF Technical Note 3 (2005)
+// http://chriscox.org/TIFFTN3d1.pdf
+//
+// Exif Version 2.3 (2012)
 // https://www.cipa.jp/std/documents/e/DC-008-2012_E.pdf
 //
 // libtiff is a mess, and the format is not particularly complicated.
@@ -120,7 +132,8 @@ tiffer_init(struct tiffer *self, const uint8_t *tiff, size_t len)
 		return false;
 
 	self->p = tiff + 4;
-	// The first IFD needs to be read by caller explicitly.
+	// The first IFD needs to be read by caller explicitly,
+	// even though it's required to be present by TIFF 6.0.
 	return true;
 }
 
@@ -140,6 +153,8 @@ tiffer_next_ifd(struct tiffer *self)
 	if (!ifd_offset)
 		return false;
 
+	// Note that TIFF 6.0 requires there to be at least one entry,
+	// but there is no need for us to check it.
 	self->p = self->begin + ifd_offset;
 	return tiffer_u16(self, &self->remaining_fields);
 }
@@ -213,6 +228,8 @@ tiffer_integer(
 		return false;
 
 	// Somewhat excessively lenient, intended for display.
+	// TIFF 6.0 only directly suggests that a reader is should accept
+	// any of BYTE/SHORT/LONG for unsigned integers.
 	switch (entry->type) {
 	case BYTE:
 	case ASCII:
@@ -274,6 +291,7 @@ tiffer_real(
 		return false;
 
 	// Somewhat excessively lenient, intended for display.
+	// Assuming the host architecture uses IEEE 754.
 	switch (entry->type) {
 		int64_t numerator, denominator;
 	case FLOAT:
@@ -297,6 +315,7 @@ tiffer_next_entry(struct tiffer *self, struct tiffer_entry *entry)
 	if (!self->remaining_fields)
 		return false;
 
+	// Note that Multi-Picture Format doesn't require ascending tag order.
 	uint16_t type = entry->type = 0xFFFF;
 	if (!tiffer_u16(self, &entry->tag) || !tiffer_u16(self, &type) ||
 		!tiffer_u32(self, &entry->remaining_count))
@@ -355,7 +374,10 @@ static struct tiff_entry tiff_entries[] = {
 		{"Group 4 Fax", 4},
 		{"LZW", 5},
 		{"JPEG", 6},
+		{"JPEG datastream", 7},  // DRAFT TIFF Technical Note 2 + TIFFphotoshop
+		{"Deflate/zlib", 8},  // Adobe Photoshop TIFF Technical Notes
 		{"PackBits", 32773},
+		{"Deflate/zlib", 32946},  // Adobe Photoshop TIFF Technical Notes
 		{}
 	}},
 	{"PhotometricInterpretation", 262, (struct tiff_value[]) {
@@ -367,7 +389,7 @@ static struct tiff_entry tiff_entries[] = {
 		{"CMYK", 5},
 		{"YCbCr", 6},
 		{"CIELab", 8},
-		{"ICC CIELab", 9},  // Adobe PageMaker 6.0 TIFF Technical Notes
+		{"ICCLab", 9},  // Adobe PageMaker 6.0 TIFF Technical Notes
 		{}
 	}},
 	{"Threshholding", 263, (struct tiff_value[]) {
@@ -442,6 +464,7 @@ static struct tiff_entry tiff_entries[] = {
 	{"Predictor", 317, (struct tiff_value[]) {
 		{"None", 1},
 		{"Horizontal", 2},
+		{"Floating point", 3},  // Adobe Photoshop TIFF Technical Note 3
 		{}
 	}},
 	{"WhitePoint", 318, NULL},
@@ -482,6 +505,7 @@ static struct tiff_entry tiff_entries[] = {
 	{"XClipPathUnits", 344, NULL},  // TIFF Technical Note 2: Clipping Path
 	{"YClipPathUnits", 345, NULL},  // TIFF Technical Note 2: Clipping Path
 	{"Indexed", 346, NULL},  // TIFF Technical Note 3: Indexed Images
+	{"JPEGTables", 347, NULL},  // DRAFT TIFF Technical Note 2 + TIFFphotoshop
 	{"OPIProxy", 351, NULL},  // Adobe PageMaker 6.0 TIFF Technical Notes
 	{"JPEGProc", 512, (struct tiff_value[]) {
 		{"Baseline sequential", 1},
@@ -517,6 +541,7 @@ static struct tiff_entry tiff_entries[] = {
 	{"Copyright", 33432, NULL},
 	{"Exif IFD Pointer", 34665, NULL},  // Exif 2.3
 	{"GPS Info IFD Pointer", 34853, NULL},  // Exif 2.3
+	{"ImageSourceData", 37724, NULL},  // Adobe Photoshop TIFF Technical Notes
 	{"Interoperability IFD Pointer", 40965, NULL},  // Exif 2.3
 	{}
 };
@@ -609,6 +634,7 @@ parse_exif_ascii(struct tiffer_entry *entry)
 static jv
 parse_exif_undefined(struct tiffer_entry *entry)
 {
+	// Sometimes, it can be ASCII, but the safe bet is to hex-encode it.
 	const char *alphabet = "0123456789abcdef";
 	char *buf = calloc(1, 2 * entry->remaining_count + 1);
 	for (uint32_t i = 0; i < entry->remaining_count; i++) {
