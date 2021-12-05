@@ -25,6 +25,18 @@
 
 // --- Utilities ---------------------------------------------------------------
 
+static char *
+binhex(const uint8_t *data, size_t len)
+{
+	static const char *alphabet = "0123456789abcdef";
+	char *buf = calloc(1, len * 2 + 1), *p = buf;
+	for (size_t i = 0; i < len; i++) {
+		*p++ = alphabet[data[i] >> 4];
+		*p++ = alphabet[data[i] & 0xF];
+	}
+	return buf;
+}
+
 static uint32_t
 u32be(const uint8_t *p)
 {
@@ -78,7 +90,8 @@ u16le(const uint8_t *p)
 // https://www.cipa.jp/e/std/std-sec.html
 //
 // libtiff is a mess, and the format is not particularly complicated.
-// Exif libraries are senselessly copylefted.
+// Exiv2 is senselessly copylefted, and cannot do much.
+// ExifTool is too user-oriented.
 
 static struct un {
 	uint32_t (*u32) (const uint8_t *);
@@ -542,8 +555,12 @@ static struct tiff_entry tiff_entries[] = {
 	{"ReferenceBlackWhite", 532, NULL},
 	{"ImageID", 32781, NULL},  // Adobe PageMaker 6.0 TIFF Technical Notes
 	{"Copyright", 33432, NULL},
+	// TODO(p): Extract PSIRs, like we do directly with the JPEG segment.
+	{"Photoshop", 34377, NULL},  // Adobe XMP Specification Part 3 Table 12/39
 	{"Exif IFD Pointer", 34665, NULL},  // Exif 2.3
 	{"GPS Info IFD Pointer", 34853, NULL},  // Exif 2.3
+	// TODO(p): Extract IPTC DataSets, like we do directly with PSIRs.
+	{"IPTC", 37723, NULL},  // Adobe XMP Specification Part 3 Table 12/39
 	{"ImageSourceData", 37724, NULL},  // Adobe Photoshop TIFF Technical Notes
 	{}
 };
@@ -906,12 +923,7 @@ static jv
 parse_exif_undefined(struct tiffer_entry *entry)
 {
 	// Sometimes, it can be ASCII, but the safe bet is to hex-encode it.
-	const char *alphabet = "0123456789abcdef";
-	char *buf = calloc(1, 2 * entry->remaining_count + 1);
-	for (uint32_t i = 0; i < entry->remaining_count; i++) {
-		buf[2 * i + 0] = alphabet[entry->p[i] >> 4];
-		buf[2 * i + 1] = alphabet[entry->p[i] & 0xF];
-	}
+	char *buf = binhex(entry->p, entry->remaining_count);
 	jv s = jv_string(buf);
 	free(buf);
 	return s;
@@ -1090,16 +1102,213 @@ parse_icc(jv o, const uint8_t *profile, size_t profile_len)
 // --- Photoshop Image Resources -----------------------------------------------
 // Adobe XMP Specification Part 3: Storage in Files, 2020/1, 1.1.3 + 3.1.3
 // https://www.adobe.com/devnet-apps/photoshop/fileformatashtml/
+// Unless otherwise noted, the descriptions are derived from the above document.
+
+static struct {
+	uint16_t id;
+	const char *description;
+} psir_descriptions[] = {
+	{1000, "Number of channels, rows, columns, depth, mode"},
+	{1001, "Macintosh print manager print info record"},
+	{1002, "Macintosh page format information"},
+	{1003, "Indexed color table"},
+	{1005, "Resolution information"},
+	{1006, "Names of alpha channels (Pascal strings)"},
+	{1007, "Display information"},
+	{1008, "Caption (Pascal string)"},  // XMP Part 3 3.3.3
+	{1009, "Border information"},
+	{1010, "Background color"},
+	{1011, "Print flags"},
+	{1012, "Grayscale and multichannel halftoning information"},
+	{1013, "Color halftoning information"},
+	{1014, "Duotone halftoning information"},
+	{1015, "Grayscale and multichannel transfer function"},
+	{1016, "Color transfer functions"},
+	{1017, "Duotone transfer functions"},
+	{1018, "Duotone image information"},
+	{1019, "Effective B/W values for the dot range"},
+	{1020, "Caption"},  // XMP Part 3 3.3.3
+	{1021, "EPS options"},
+	{1022, "Quick Mask information"},
+	{1023, "(Obsolete)"},
+	{1024, "Layer state information"},
+	{1025, "Working path (not saved)"},
+	{1026, "Layers group information"},
+	{1027, "(Obsolete)"},
+	{1028, "IPTC DataSets"},  // XMP Part 3 3.3.3
+	{1029, "Image mode for raw format files"},
+	{1030, "JPEG quality"},
+	{1032, "Grid and guides information"},
+	{1033, "Thumbnail resource"},
+	{1034, "Copyright flag"},
+	{1035, "Copyright information URL"},  // XMP Part 3 3.3.3
+	{1036, "Thumbnail resource"},
+	{1037, "Global lighting angle for effects layer"},
+	{1038, "Color samplers information"},
+	{1039, "ICC profile"},
+	{1040, "Watermark"},
+	{1041, "ICC untagged profile flag"},
+	{1042, "Effects visible flag"},
+	{1043, "Spot halftone"},
+	{1044, "Document-specific IDs seed number"},
+	{1045, "Unicode alpha names"},
+	{1046, "Indexed color table count"},
+	{1047, "Transparent color index"},
+	{1049, "Global altitude"},
+	{1050, "Slices"},
+	{1051, "Workflow URL"},
+	{1052, "Jump To XPEP"},
+	{1053, "Alpha identifiers"},
+	{1054, "URL list"},
+	{1057, "Version info"},
+	{1058, "Exif metadata 1"},
+	{1059, "Exif metadata 3"},
+	{1060, "XMP metadata"},
+	{1061, "MD5 digest of IPTC data"},  // XMP Part 3 3.3.3
+	{1062, "Print scale"},
+	{1064, "Pixel aspect ratio"},
+	{1065, "Layer comps"},
+	{1066, "Alternate duotone colors"},
+	{1067, "Alternate spot colors"},
+	{1069, "Layer selection IDs"},
+	{1070, "HDR toning information"},
+	{1071, "Print info"},
+	{1072, "Layer group(s) enabled ID"},
+	{1073, "Color samplers"},
+	{1074, "Measurement scale"},
+	{1075, "Timeline information"},
+	{1076, "Sheet disclosure"},
+	{1077, "Display information to support floating point colors"},
+	{1078, "Onion skins"},
+	{1080, "Count information"},
+	{1082, "Print information"},
+	{1083, "Print style"},
+	{1084, "Macintosh NSPrintInfo"},
+	{1085, "Windows DEVMODE"},
+	{1086, "Autosave file path"},
+	{1087, "Autosave format"},
+	{1088, "Path selection state"},
+	// {2000-2997, "Saved paths"},
+	{2999, "Name of clipping path"},
+	{3000, "Origin path information"},
+	// {4000-4999, "Plug-in resource"},
+	{7000, "Image Ready variables"},
+	{7001, "Image Ready data sets"},
+	{7002, "Image Ready default selected state"},
+	{7003, "Image Ready 7 rollover expanded state"},
+	{7004, "Image Ready rollover expanded state"},
+	{7005, "Image Ready save layer settings"},
+	{7006, "Image Ready version"},
+	{8000, "Lightroom workflow"},
+	{10000, "Print flags"},
+	{}
+};
+
+static jv
+process_psir_thumbnail(jv res, const uint8_t *data, size_t len)
+{
+	uint32_t format_number   = u32be(data + 0);
+	uint32_t compressed_size = u32be(data + 20);
+
+	// TODO(p): Recurse into the thumbnail if it's a JPEG.
+	jv format = jv_number(format_number);
+	switch (format_number) {
+	break; case 0: format = jv_string("kJpegRGB");
+	break; case 1: format = jv_string("kRawRGB");
+	}
+
+	res = jv_object_merge(res, JV_OBJECT(
+		jv_string("Format"),         format,
+		jv_string("Width"),          jv_number(u32be(data + 4)),
+		jv_string("Height"),         jv_number(u32be(data + 8)),
+		jv_string("Stride"),         jv_number(u32be(data + 12)),
+		jv_string("TotalSize"),      jv_number(u32be(data + 16)),
+		jv_string("CompressedSize"), jv_number(compressed_size),
+		jv_string("BitsPerPixel"),   jv_number(u16be(data + 24)),
+		jv_string("Planes"),         jv_number(u16be(data + 26))
+	));
+	if (28 + compressed_size <= len) {
+		char *buf = binhex(data + 28, compressed_size);
+		res = jv_set(res, jv_string("Data"), jv_string(buf));
+		free(buf);
+	}
+	return res;
+}
+
+static const char *
+process_iptc_dataset(jv *a, const uint8_t **p, size_t len)
+{
+	const uint8_t *header = *p;
+	if (len < 5)
+		return "unexpected end of IPTC data";
+	if (*header != 0x1c)
+		return "invalid tag marker";
+
+	uint8_t record = header[1];
+	uint8_t dataset = header[2];
+	uint16_t byte_count = header[3] << 8 | header[4];
+
+	// TODO(p): Although highly unlikely to appear, we could decode it.
+	if (byte_count & 0x8000)
+		return "unsupported extended DataSet";
+	if (len - 5 < byte_count)
+		return "data overrun";
+
+	char *buf = binhex(header + 5, byte_count);
+	*p += 5 + byte_count;
+	*a = jv_array_append(*a, JV_OBJECT(
+		jv_string("DataSet"), jv_string_fmt("%u:%u", record, dataset),
+		jv_string("Data"), jv_string(buf)
+	));
+	free(buf);
+	return NULL;
+}
+
+static jv
+process_psir_iptc(jv res, const uint8_t *data, size_t len)
+{
+	// https://iptc.org/standards/iim/
+	// https://iptc.org/std/IIM/4.2/specification/IIMV4.2.pdf
+	jv a = jv_array();
+	const uint8_t *end = data + len;
+	while (data < end) {
+		const char *err = process_iptc_dataset(&a, &data, end - data);
+		if (err) {
+			a = jv_array_append(a, jv_string(err));
+			break;
+		}
+	}
+	return jv_set(res, jv_string("DataSets"), a);
+}
 
 static jv
 process_psir(jv o, uint16_t resource_id, const char *name,
 	const uint8_t *data, size_t len)
 {
-	// TODO(p): These is more to extract here. The name is most often empty.
-	(void) name;
-	(void) data;
-	(void) len;
-	return add_to_subarray(o, "PSIR", jv_number(resource_id));
+	const char *description = NULL;
+	if (resource_id >= 2000 && resource_id <= 2997)
+		description = "Saved paths";
+	if (resource_id >= 4000 && resource_id <= 4999)
+		description = "Plug-in resource";
+	for (size_t i = 0; psir_descriptions[i].id; i++)
+		if (psir_descriptions[i].id == resource_id)
+			description = psir_descriptions[i].description;
+
+	jv res = JV_OBJECT(
+		jv_string("name"), jv_string(name),
+		jv_string("id"), jv_number(resource_id),
+		jv_string("description"),
+			description ? jv_string(description) : jv_null(),
+		jv_string("size"), jv_number(len)
+	);
+
+	// Both are thumbnails, older is BGR, newer is RGB.
+	if ((resource_id == 1033 || resource_id == 1036) && len >= 28)
+		res = process_psir_thumbnail(res, data, len);
+	if (resource_id == 1028)
+		res = process_psir_iptc(res, data, len);
+
+	return add_to_subarray(o, "PSIR", res);
 }
 
 static jv
