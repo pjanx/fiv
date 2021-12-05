@@ -990,29 +990,65 @@ enum {
 	TotalFrames = 45060,
 };
 
-static void
-parse_mpf_entries(
-	struct data *data, struct tiffer *T, const struct tiffer_entry *entry)
+static jv
+parse_mpf_index_entry(
+	jv o, struct data *data, struct tiffer *T, struct tiffer_entry *entry)
 {
 	// 5.2.3.3. MP Entry
 	if (entry->tag != MPEntry || entry->type != UNDEFINED ||
-		entry->remaining_count % 16)
-		return;
+		entry->remaining_count % 16) {
+		// TODO(p): Parse the remaining special tags instead.
+		return parse_exif_entry(o, T, entry);
+	}
 
 	uint32_t count = entry->remaining_count / 16;
+	jv a = jv_array_sized(count);
+
 	const uint8_t **out = data->mpf_next = data->mpf_offsets =
 		calloc(sizeof *data->mpf_offsets, count + 1);
 	for (uint32_t i = 0; i < count; i++) {
 		const uint8_t *p = entry->p + i * 16;
-		// uint32_t attribute = T->un->u32(p);
-		// uint32_t size = T->un->u32(p + 4);
+		uint32_t attrs = T->un->u32(p);
+		uint32_t size = T->un->u32(p + 4);
 		uint32_t offset = T->un->u32(p + 8);
-		// uint16_t dependent1 = T->un->u16(p + 12);
-		// uint16_t dependent2 = T->un->u16(p + 14);
+		uint16_t dependent1 = T->un->u16(p + 12);
+		uint16_t dependent2 = T->un->u16(p + 14);
 
+		uint32_t type_number = attrs & 0xFFFFFF;
+		jv type = jv_number(type_number);
+		switch (type_number) {
+		break; case 0x030000: type = jv_string("Baseline MP Primary Image");
+		break; case 0x010001: type = jv_string("Large Thumbnail VGA");
+		break; case 0x010002: type = jv_string("Large Thumbnail Full HD");
+		break; case 0x020001: type = jv_string("Multi-Frame Image Panorama");
+		break; case 0x020002: type = jv_string("Multi-Frame Image Disparity");
+		break; case 0x020003: type = jv_string("Multi-Frame Image Multi-Angle");
+		break; case 0x000000: type = jv_string("Undefined");
+		}
+
+		uint32_t format_number = (attrs >> 24) & 0x7;
+		jv format = jv_number(format_number);
+		if (format_number == 0)
+			format = jv_string("JPEG");
+
+		a = jv_array_append(a, JV_OBJECT(
+			jv_string("Individual Image Attribute"), JV_OBJECT(
+				jv_string("Dependent Parent Image"), jv_bool((attrs >> 31) & 1),
+				jv_string("Dependent Child Image"), jv_bool((attrs >> 30) & 1),
+				jv_string("Representative Image"), jv_bool((attrs >> 29) & 1),
+				jv_string("Reserved"), jv_number((attrs >> 27) & 0x3),
+				jv_string("Image Data Format"), format,
+				jv_string("MP Type Code"), type
+			),
+			jv_string("Individual Image Size"), jv_number(size),
+			jv_string("Individual Image Data Offset"), jv_number(offset),
+			jv_string("Dependent Image 1 Entry Number"), jv_number(dependent1),
+			jv_string("Dependent Image 2 Entry Number"), jv_number(dependent2)
+		));
 		if (offset)
 			*out++ = T->begin + offset;
 	}
+	return jv_set(o, jv_string("MPEntry"), a);
 }
 
 static jv
@@ -1020,13 +1056,8 @@ parse_mpf_index_ifd(struct data *data, struct tiffer *T)
 {
 	jv ifd = jv_object();
 	struct tiffer_entry entry = {};
-	while (tiffer_next_entry(T, &entry)) {
-		struct tiffer_entry copy = entry;
-		parse_mpf_entries(data, T, &entry);
-
-		// TODO(p): Parse the special tags instead.
-		ifd = parse_exif_entry(ifd, T, &copy);
-	}
+	while (tiffer_next_entry(T, &entry))
+		ifd = parse_mpf_index_entry(ifd, data, T, &entry);
 	return ifd;
 }
 
