@@ -74,6 +74,9 @@ u16le(const uint8_t *p)
 // Exif Version 2.3 (2012)
 // https://www.cipa.jp/std/documents/e/DC-008-2012_E.pdf
 //
+// Exif Version 2.32 (2019)
+// https://www.cipa.jp/e/std/std-sec.html
+//
 // libtiff is a mess, and the format is not particularly complicated.
 // Exif libraries are senselessly copylefted.
 
@@ -533,7 +536,7 @@ static struct tiff_entry tiff_entries[] = {
 	{"YCbCrSubSampling", 530, NULL},
 	{"YCbCrPositioning", 531, (struct tiff_value[]) {
 		{"Centered", 1},
-		{"Cosited", 2},
+		{"Co-sited", 2},
 		{}
 	}},
 	{"ReferenceBlackWhite", 532, NULL},
@@ -542,7 +545,6 @@ static struct tiff_entry tiff_entries[] = {
 	{"Exif IFD Pointer", 34665, NULL},  // Exif 2.3
 	{"GPS Info IFD Pointer", 34853, NULL},  // Exif 2.3
 	{"ImageSourceData", 37724, NULL},  // Adobe Photoshop TIFF Technical Notes
-	{"Interoperability IFD Pointer", 40965, NULL},  // Exif 2.3
 	{}
 };
 
@@ -584,6 +586,9 @@ static struct tiff_entry exif_entries[] = {
 	{"ExifVersion", 36864, NULL},
 	{"DateTimeOriginal", 36867, NULL},
 	{"DateTimeDigitized", 36868, NULL},
+	{"OffsetTime", 36880, NULL},  // 2.31
+	{"OffsetTimeOriginal", 36881, NULL},  // 2.31
+	{"OffsetTimeDigitized", 36882, NULL},  // 2.31
 	{"ComponentsConfiguration", 37121, (struct tiff_value[]) {
 		{"Does not exist", 0},
 		{"Y", 1},
@@ -646,6 +651,12 @@ static struct tiff_entry exif_entries[] = {
 	{"SubSecTime", 37520, NULL},
 	{"SubSecTimeOriginal", 37521, NULL},
 	{"SubSecTimeDigitized", 37522, NULL},
+	{"Temperature", 37888, NULL},  // 2.31
+	{"Humidity", 37889, NULL},  // 2.31
+	{"Pressure", 37890, NULL},  // 2.31
+	{"WaterDepth", 37891, NULL},  // 2.31
+	{"Acceleration", 37892, NULL},  // 2.31
+	{"CameraElevationAngle", 37893, NULL},  // 2.31
 	{"FlashpixVersion", 40960, NULL},
 	{"ColorSpace", 40961, (struct tiff_value[]) {
 		{"sRGB", 1},
@@ -655,6 +666,7 @@ static struct tiff_entry exif_entries[] = {
 	{"PixelXDimension", 40962, NULL},
 	{"PixelYDimension", 40963, NULL},
 	{"RelatedSoundFile", 40964, NULL},
+	{"Interoperability IFD Pointer", 40965, NULL},
 	{"FlashEnergy", 41483, NULL},
 	{"SpatialFrequencyResponse", 41484, NULL},
 	{"FocalPlaneXResolution", 41486, NULL},
@@ -750,18 +762,63 @@ static struct tiff_entry exif_entries[] = {
 	{"LensMake", 42035, NULL},
 	{"LensModel", 42036, NULL},
 	{"LensSerialNumber", 42037, NULL},
+	{"CompositeImage", 42080, NULL},  // 2.32
+	{"SourceImageNumberOfCompositeImage", 42081, NULL},  // 2.32
+	{"SourceExposureTimesOfCompositeImage", 42082, NULL},  // 2.32
 	{"Gamma", 42240, NULL},
 	{}
 };
 
-// TODO(p): Exif 2.3 4.6.6 and on (note it starts at 0).
-// sed 'N; s/\n/ /g' | sort -nk2 | awk '{print "\t{\"" $1 "\", " $2 ", NULL},"}'
-static struct tiff_entry exif_gps_entries[] = {{}};
+// Exif 2.3 4.6.6 (Notice it starts at 0.)
+static struct tiff_entry exif_gps_entries[] = {
+	{"GPSVersionID", 0, NULL},
+	{"GPSLatitudeRef", 1, NULL},
+	{"GPSLatitude", 2, NULL},
+	{"GPSLongitudeRef", 3, NULL},
+	{"GPSLongitude", 4, NULL},
+	{"GPSAltitudeRef", 5, (struct tiff_value[]) {
+		{"Sea level", 0},
+		{"Sea level reference (negative value)", 1},
+		{}
+	}},
+	{"GPSAltitude", 6, NULL},
+	{"GPSTimeStamp", 7, NULL},
+	{"GPSSatellites", 8, NULL},
+	{"GPSStatus", 9, NULL},
+	{"GPSMeasureMode", 10, NULL},
+	{"GPSDOP", 11, NULL},
+	{"GPSSpeedRef", 12, NULL},
+	{"GPSSpeed", 13, NULL},
+	{"GPSTrackRef", 14, NULL},
+	{"GPSTrack", 15, NULL},
+	{"GPSImgDirectionRef", 16, NULL},
+	{"GPSImgDirection", 17, NULL},
+	{"GPSMapDatum", 18, NULL},
+	{"GPSDestLatitudeRef", 19, NULL},
+	{"GPSDestLatitude", 20, NULL},
+	{"GPSDestLongitudeRef", 21, NULL},
+	{"GPSDestLongitude", 22, NULL},
+	{"GPSDestBearingRef", 23, NULL},
+	{"GPSDestBearing", 24, NULL},
+	{"GPSDestDistanceRef", 25, NULL},
+	{"GPSDestDistance", 26, NULL},
+	{"GPSProcessingMethod", 27, NULL},
+	{"GPSAreaInformation", 28, NULL},
+	{"GPSDateStamp", 29, NULL},
+	{"GPSDifferential", 30, (struct tiff_value[]) {
+		{"Measurement without differential correction", 0},
+		{"Differential correction applied", 1},
+		{}
+	}},
+	{"GPSHPositioningError", 31, NULL},
+	{}
+};
 
-// TODO(p): Exif 2.3 4.6.7 and on (note it starts at 1, and collides with GPS).
-static struct tiff_entry exif_interop_entries[] = {{}};
-
-// TODO(p): Review Exif version history afterwards.
+// Exif 2.3 4.6.7 (Notice it starts at 1, and collides with GPS.)
+static struct tiff_entry exif_interop_entries[] = {
+	{"InteroperabilityIndex", 1, NULL},
+	{}
+};
 
 // TODO(p): Consider if these can't be inlined into `tiff_entries`.
 static struct {
