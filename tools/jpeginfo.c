@@ -546,21 +546,234 @@ static struct tiff_entry tiff_entries[] = {
 	{}
 };
 
-// TODO(p): Consider if these can't be inlined into the above table.
-static uint16_t tiff_subifd_tags[] = {
-	330,    // SubIFDs
-	34665,  // Exif IFD Pointer
-	34853,  // GPS Info IFD Pointer
-	40965,  // Interoperability IFD Pointer
-	0
+// Exif 2.3 4.6.5
+static struct tiff_entry exif_entries[] = {
+	{"ExposureTime", 33434, NULL},
+	{"FNumber", 33437, NULL},
+	{"ExposureProgram", 34850, (struct tiff_value[]) {
+		{"Not defined", 0},
+		{"Manual", 1},
+		{"Normal program", 2},
+		{"Aperture priority", 3},
+		{"Shutter priority", 4},
+		{"Creative program", 5},
+		{"Action program", 6},
+		{"Portrait mode", 7},
+		{"Landscape mode", 8},
+		{}
+	}},
+	{"SpectralSensitivity", 34852, NULL},
+	{"PhotographicSensitivity", 34855, NULL},
+	{"OECF", 34856, NULL},
+	{"SensitivityType", 34864, (struct tiff_value[]) {
+		{"Unknown", 0},
+		{"Standard output sensitivity", 1},
+		{"Recommended exposure index", 2},
+		{"ISO speed", 3},
+		{"SOS and REI", 4},
+		{"SOS and ISO speed", 5},
+		{"REI and ISO speed", 6},
+		{"SOS and REI and ISO speed", 7},
+		{}
+	}},
+	{"StandardOutputSensitivity", 34865, NULL},
+	{"RecommendedExposureIndex", 34866, NULL},
+	{"ISOSpeed", 34867, NULL},
+	{"ISOSpeedLatitudeyyy", 34868, NULL},
+	{"ISOSpeedLatitudezzz", 34869, NULL},
+	{"ExifVersion", 36864, NULL},
+	{"DateTimeOriginal", 36867, NULL},
+	{"DateTimeDigitized", 36868, NULL},
+	{"ComponentsConfiguration", 37121, (struct tiff_value[]) {
+		{"Does not exist", 0},
+		{"Y", 1},
+		{"Cb", 2},
+		{"Cr", 3},
+		{"R", 4},
+		{"G", 5},
+		{"B", 6},
+		{}
+	}},
+	{"CompressedBitsPerPixel", 37122, NULL},
+	{"ShutterSpeedValue", 37377, NULL},
+	{"ApertureValue", 37378, NULL},
+	{"BrightnessValue", 37379, NULL},
+	{"ExposureBiasValue", 37380, NULL},
+	{"MaxApertureValue", 37381, NULL},
+	{"SubjectDistance", 37382, NULL},
+	{"MeteringMode", 37383, (struct tiff_value[]) {
+		{"Unknown", 0},
+		{"Average", 1},
+		{"CenterWeightedAverage", 2},
+		{"Spot", 3},
+		{"MultiSpot", 4},
+		{"Pattern", 5},
+		{"Partial", 6},
+		{"Other", 255},
+		{}
+	}},
+	{"LightSource", 37384, (struct tiff_value[]) {
+		{"Unknown", 0},
+		{"Daylight", 1},
+		{"Fluorescent", 2},
+		{"Tungsten (incandescent light)", 3},
+		{"Flash", 4},
+		{"Fine weather", 9},
+		{"Cloudy weather", 10},
+		{"Shade", 11},
+		{"Daylight fluorescent (D 5700 - 7100K)", 12},
+		{"Day white fluorescent (N 4600 - 5500K)", 13},
+		{"Cool white fluorescent (W 3800 - 4500K)", 14},
+		{"White fluorescent (WW 3250 - 3800K)", 15},
+		{"Warm white fluorescent (L 2600 - 3250K)", 16},
+		{"Standard light A", 17},
+		{"Standard light B", 18},
+		{"Standard light C", 19},
+		{"D55", 20},
+		{"D65", 21},
+		{"D75", 22},
+		{"D50", 23},
+		{"ISO studio tungsten", 24},
+		{"Other light source", 255},
+		{}
+	}},
+	{"Flash", 37385, NULL},
+	{"FocalLength", 37386, NULL},
+	{"SubjectArea", 37396, NULL},
+	{"MakerNote", 37500, NULL},
+	// TODO(p): Decode.
+	{"UserComment", 37510, NULL},
+	{"SubSecTime", 37520, NULL},
+	{"SubSecTimeOriginal", 37521, NULL},
+	{"SubSecTimeDigitized", 37522, NULL},
+	{"FlashpixVersion", 40960, NULL},
+	{"ColorSpace", 40961, (struct tiff_value[]) {
+		{"sRGB", 1},
+		{"Uncalibrated", 0xFFFF},
+		{}
+	}},
+	{"PixelXDimension", 40962, NULL},
+	{"PixelYDimension", 40963, NULL},
+	{"RelatedSoundFile", 40964, NULL},
+	{"FlashEnergy", 41483, NULL},
+	{"SpatialFrequencyResponse", 41484, NULL},
+	{"FocalPlaneXResolution", 41486, NULL},
+	{"FocalPlaneYResolution", 41487, NULL},
+	{"FocalPlaneResolutionUnit", 41488, NULL},
+	{"SubjectLocation", 41492, NULL},
+	{"ExposureIndex", 41493, NULL},
+	{"SensingMethod", 41495, (struct tiff_value[]) {
+		{"Not defined", 1},
+		{"One-chip color area sensor", 2},
+		{"Two-chip color area sensor", 3},
+		{"Three-chip color area sensor", 4},
+		{"Color sequential area sensor", 5},
+		{"Trilinear sensor", 7},
+		{"Color sequential linear sensor", 8},
+		{}
+	}},
+	{"FileSource", 41728, (struct tiff_value[]) {
+		{"Others", 0},
+		{"Scanner of transparent type", 1},
+		{"Scanner of reflex type", 2},
+		{"DSC", 3},
+		{}
+	}},
+	{"SceneType", 41729, (struct tiff_value[]) {
+		{"Directly-photographed image", 1},
+		{}
+	}},
+	{"CFAPattern", 41730, NULL},
+	{"CustomRendered", 41985, (struct tiff_value[]) {
+		{"Normal process", 0},
+		{"Custom process", 1},
+		{}
+	}},
+	{"ExposureMode", 41986, (struct tiff_value[]) {
+		{"Auto exposure", 0},
+		{"Manual exposure", 1},
+		{"Auto bracket", 2},
+		{}
+	}},
+	{"WhiteBalance", 41987, (struct tiff_value[]) {
+		{"Auto white balance", 0},
+		{"Manual white balance", 1},
+		{}
+	}},
+	{"DigitalZoomRatio", 41988, NULL},
+	{"FocalLengthIn35mmFilm", 41989, NULL},
+	{"SceneCaptureType", 41990, (struct tiff_value[]) {
+		{"Standard", 0},
+		{"Landscape", 1},
+		{"Portrait", 2},
+		{"Night scene", 3},
+		{}
+	}},
+	{"GainControl", 41991, (struct tiff_value[]) {
+		{"None", 0},
+		{"Low gain up", 1},
+		{"High gain up", 2},
+		{"Low gain down", 3},
+		{"High gain down", 4},
+		{}
+	}},
+	{"Contrast", 41992, (struct tiff_value[]) {
+		{"Normal", 0},
+		{"Soft", 1},
+		{"Hard", 2},
+		{}
+	}},
+	{"Saturation", 41993, (struct tiff_value[]) {
+		{"Normal", 0},
+		{"Low", 1},
+		{"High", 2},
+		{}
+	}},
+	{"Sharpness", 41994, (struct tiff_value[]) {
+		{"Normal", 0},
+		{"Soft", 1},
+		{"Hard", 2},
+		{}
+	}},
+	{"DeviceSettingDescription", 41995, NULL},
+	{"SubjectDistanceRange", 41996, (struct tiff_value[]) {
+		{"Unknown", 0},
+		{"Macro", 1},
+		{"Close view", 2},
+		{"Distant view", 3},
+		{}
+	}},
+	{"ImageUniqueID", 42016, NULL},
+	{"CameraOwnerName", 42032, NULL},
+	{"BodySerialNumber", 42033, NULL},
+	{"LensSpecification", 42034, NULL},
+	{"LensMake", 42035, NULL},
+	{"LensModel", 42036, NULL},
+	{"LensSerialNumber", 42037, NULL},
+	{"Gamma", 42240, NULL},
+	{}
 };
 
-// TODO(p): Insert tags and values from other documentation,
-// so far only tags and non-bit-field values from TIFF 6.0 and PM6 are present.
-//
-// TODO(p): Exif 2.3 4.6.5 and on.
 // TODO(p): Exif 2.3 4.6.6 and on (note it starts at 0).
+// sed 'N; s/\n/ /g' | sort -nk2 | awk '{print "\t{\"" $1 "\", " $2 ", NULL},"}'
+static struct tiff_entry exif_gps_entries[] = {{}};
+
 // TODO(p): Exif 2.3 4.6.7 and on (note it starts at 1, and collides with GPS).
+static struct tiff_entry exif_interop_entries[] = {{}};
+
+// TODO(p): Review Exif version history afterwards.
+
+// TODO(p): Consider if these can't be inlined into `tiff_entries`.
+static struct {
+	uint16_t tag;
+	struct tiff_entry *entries;
+} tiff_subifds[] = {
+	{330, tiff_entries},   // SubIFDs
+	{34665, exif_entries},  // Exif IFD Pointer
+	{34853, exif_gps_entries},  // GPS Info IFD Pointer
+	{40965, exif_interop_entries},  // Interoperability IFD Pointer
+	{}
+};
 
 // --- Analysis ----------------------------------------------------------------
 
@@ -589,10 +802,11 @@ add_error(jv o, const char *message)
 
 // --- Exif --------------------------------------------------------------------
 
-static jv parse_exif_ifd(struct tiffer *T);
+static jv parse_exif_ifd(struct tiffer *T, const struct tiff_entry *info);
 
 static jv
-parse_exif_subifds(struct tiffer *T, const struct tiffer_entry *entry)
+parse_exif_subifds(struct tiffer *T, const struct tiffer_entry *entry,
+	struct tiff_entry *info)
 {
 	int64_t offset = 0;
 	struct tiffer subT = {};
@@ -603,7 +817,7 @@ parse_exif_subifds(struct tiffer *T, const struct tiffer_entry *entry)
 	// The chain should correspond to the values in the entry,
 	// we are not going to verify it.
 	jv a = jv_array();
-	do a = jv_array_append(a, parse_exif_ifd(&subT));
+	do a = jv_array_append(a, parse_exif_ifd(&subT, info));
 	while (tiffer_next_ifd(&subT));
 	return a;
 }
@@ -663,26 +877,31 @@ parse_exif_extract_sole_array_element(jv a)
 }
 
 static jv
-parse_exif_entry(jv o, struct tiffer *T, struct tiffer_entry *entry)
+parse_exif_entry(jv o, struct tiffer *T, struct tiffer_entry *entry,
+	const struct tiff_entry *info)
 {
-	const struct tiff_entry *info = tiff_entries;
+	if (!info)
+		info = (struct tiff_entry[]) {{}};
+
 	for (; info->name; info++)
 		if (info->tag == entry->tag)
 			break;
 
-	bool is_subifd = false;
-	for (const uint16_t *p = tiff_subifd_tags; *p; p++)
-		is_subifd |= *p == entry->tag;
+	struct tiff_entry *subentries = NULL;
+	for (size_t i = 0; tiff_subifds[i].tag; i++)
+		if (tiff_subifds[i].tag == entry->tag)
+			subentries = tiff_subifds[i].entries;
 
 	jv v = jv_true();
 	double real = 0;
 	if (!entry->remaining_count) {
 		v = jv_null();
-	} else if (entry->type == IFD || is_subifd) {
-		v = parse_exif_subifds(T, entry);
+	} else if (entry->type == IFD || subentries) {
+		v = parse_exif_subifds(T, entry, subentries);
 	} else if (entry->type == ASCII) {
 		v = parse_exif_extract_sole_array_element(parse_exif_ascii(entry));
-	} else if (entry->type == UNDEFINED) {
+	} else if (entry->type == UNDEFINED && !info->values) {
+		// Several Exif entries of UNDEFINED type contain single-byte numbers.
 		v = parse_exif_undefined(entry);
 	} else if (tiffer_real(T, entry, &real)) {
 		v = jv_array();
@@ -697,12 +916,12 @@ parse_exif_entry(jv o, struct tiffer *T, struct tiffer_entry *entry)
 }
 
 static jv
-parse_exif_ifd(struct tiffer *T)
+parse_exif_ifd(struct tiffer *T, const struct tiff_entry *info)
 {
 	jv ifd = jv_object();
 	struct tiffer_entry entry = {};
 	while (tiffer_next_entry(T, &entry))
-		ifd = parse_exif_entry(ifd, T, &entry);
+		ifd = parse_exif_entry(ifd, T, &entry, info);
 	return ifd;
 }
 
@@ -713,7 +932,7 @@ parse_exif(jv o, const uint8_t *p, size_t len)
 	if (!tiffer_init(&T, p, len))
 		return add_warning(o, "invalid Exif");
 	while (tiffer_next_ifd(&T))
-		o = add_to_subarray(o, "Exif", parse_exif_ifd(&T));
+		o = add_to_subarray(o, "Exif", parse_exif_ifd(&T, tiff_entries));
 	return o;
 }
 
@@ -1024,7 +1243,7 @@ parse_mpf_index_entry(
 	if (entry->tag != MPEntry || entry->type != UNDEFINED ||
 		entry->remaining_count % 16) {
 		// TODO(p): Parse the remaining special tags instead.
-		return parse_exif_entry(o, T, entry);
+		return parse_exif_entry(o, T, entry, NULL);
 	}
 
 	uint32_t count = entry->remaining_count / 16;
@@ -1091,7 +1310,7 @@ static jv
 parse_mpf_attribute_ifd(struct tiffer *T)
 {
 	// TODO(p): Parse the special tags instead.
-	return parse_exif_ifd(T);
+	return parse_exif_ifd(T, NULL);
 }
 
 static jv
