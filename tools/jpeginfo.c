@@ -331,7 +331,6 @@ tiffer_next_entry(struct tiffer *self, struct tiffer_entry *entry)
 	if (!self->remaining_fields)
 		return false;
 
-	// Note that Multi-Picture Format doesn't require ascending tag order.
 	uint16_t type = entry->type = 0xFFFF;
 	if (!tiffer_u16(self, &entry->tag) || !tiffer_u16(self, &type) ||
 		!tiffer_u32(self, &entry->remaining_count))
@@ -359,7 +358,7 @@ tiffer_next_entry(struct tiffer *self, struct tiffer_entry *entry)
 	return true;
 }
 
-// --- TIFF/Exif/MPF/* tags ----------------------------------------------------
+// --- TIFF/Exif tags ----------------------------------------------------------
 
 struct tiff_value {
 	const char *name;
@@ -1360,6 +1359,151 @@ parse_psir(jv o, const uint8_t *p, size_t len)
 	return o;
 }
 
+// --- Multi-Picture Format ----------------------------------------------------
+
+enum {
+	MPF_MPFVersion = 45056,
+	MPF_NumberOfImages = 45057,
+	MPF_MPEntry = 45058,
+	MPF_ImageUIDList = 45059,
+	MPF_TotalFrames = 45060,
+
+	MPF_MPIndividualNum = 45313,
+	MPF_PanOrientation = 45569,
+	MPF_PanOverlap_H = 45570,
+	MPF_PanOverlap_V = 45571,
+	MPF_BaseViewpointNum = 45572,
+	MPF_ConvergenceAngle = 45573,
+	MPF_BaselineLength = 45574,
+	MPF_VerticalDivergence = 45575,
+	MPF_AxisDistance_X = 45576,
+	MPF_AxisDistance_Y = 45577,
+	MPF_AxisDistance_Z = 45578,
+	MPF_YawAngle = 45579,
+	MPF_PitchAngle = 45580,
+	MPF_RollAngle = 45581
+};
+
+static struct tiff_entry mpf_entries[] = {
+	{"MP Format Version Number", MPF_MPFVersion, NULL},
+	{"Number of Images", MPF_NumberOfImages, NULL},
+	{"MP Entry", MPF_MPEntry, NULL},
+	{"Individual Image Unique ID List", MPF_ImageUIDList, NULL},
+	{"Total Number of Captured Frames", MPF_TotalFrames, NULL},
+
+	{"MP Individual Image Number", MPF_MPIndividualNum, NULL},
+	{"Panorama Scanning Orientation", MPF_PanOrientation, NULL},
+	{"Panorama Horizontal Overlap", MPF_PanOverlap_H, NULL},
+	{"Panorama Vertical Overlap", MPF_PanOverlap_V, NULL},
+	{"Base Viewpoint Number", MPF_BaseViewpointNum, NULL},
+	{"Convergence Angle", MPF_ConvergenceAngle, NULL},
+	{"Baseline Length", MPF_BaselineLength, NULL},
+	{"Divergence Angle", MPF_VerticalDivergence, NULL},
+	{"Horizontal Axis Distance", MPF_AxisDistance_X, NULL},
+	{"Vertical Axis Distance", MPF_AxisDistance_Y, NULL},
+	{"Collimation Axis Distance", MPF_AxisDistance_Z, NULL},
+	{"Yaw Angle", MPF_YawAngle, NULL},
+	{"Pitch Angle", MPF_PitchAngle, NULL},
+	{"Roll Angle", MPF_RollAngle, NULL},
+	{}
+};
+
+static uint32_t
+parse_mpf_mpentry(jv *a, const uint8_t *p, struct tiffer *T)
+{
+	uint32_t attrs = T->un->u32(p);
+	uint32_t offset = T->un->u32(p + 8);
+
+	uint32_t type_number = attrs & 0xFFFFFF;
+	jv type = jv_number(type_number);
+	switch (type_number) {
+	break; case 0x030000: type = jv_string("Baseline MP Primary Image");
+	break; case 0x010001: type = jv_string("Large Thumbnail - VGA");
+	break; case 0x010002: type = jv_string("Large Thumbnail - Full HD");
+	break; case 0x020001: type = jv_string("Multi-Frame Image Panorama");
+	break; case 0x020002: type = jv_string("Multi-Frame Image Disparity");
+	break; case 0x020003: type = jv_string("Multi-Frame Image Multi-Angle");
+	break; case 0x000000: type = jv_string("Undefined");
+	}
+
+	uint32_t format_number = (attrs >> 24) & 0x7;
+	jv format = jv_number(format_number);
+	if (format_number == 0)
+		format = jv_string("JPEG");
+
+	*a = jv_array_append(*a, JV_OBJECT(
+		jv_string("Individual Image Attribute"), JV_OBJECT(
+			jv_string("Dependent Parent Image"), jv_bool((attrs >> 31) & 1),
+			jv_string("Dependent Child Image"), jv_bool((attrs >> 30) & 1),
+			jv_string("Representative Image"), jv_bool((attrs >> 29) & 1),
+			jv_string("Reserved"), jv_number((attrs >> 27) & 0x3),
+			jv_string("Image Data Format"), format,
+			jv_string("MP Type Code"), type
+		),
+		jv_string("Individual Image Size"),
+		jv_number(T->un->u32(p + 4)),
+		jv_string("Individual Image Data Offset"),
+		jv_number(offset),
+		jv_string("Dependent Image 1 Entry Number"),
+		jv_number(T->un->u16(p + 12)),
+		jv_string("Dependent Image 2 Entry Number"),
+		jv_number(T->un->u16(p + 14))
+	));
+
+	// Don't report non-JPEGs, even though they're unlikely.
+	return format_number == 0 ? offset : 0;
+}
+
+static jv
+parse_mpf_index_entry(jv o, const uint8_t ***offsets, struct tiffer *T,
+	struct tiffer_entry *entry)
+{
+	// 5.2.3.3. MP Entry
+	if (entry->tag != MPF_MPEntry || entry->type != UNDEFINED ||
+		entry->remaining_count % 16) {
+		return parse_exif_entry(o, T, entry, mpf_entries);
+	}
+
+	uint32_t count = entry->remaining_count / 16;
+	jv a = jv_array_sized(count);
+	const uint8_t **out = *offsets = calloc(sizeof *out, count + 1);
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t offset = parse_mpf_mpentry(&a, entry->p + i * 16, T);
+		if (offset)
+			*out++ = T->begin + offset;
+	}
+	return jv_set(o, jv_string("MP Entry"), a);
+}
+
+static jv
+parse_mpf_index_ifd(const uint8_t ***offsets, struct tiffer *T)
+{
+	jv ifd = jv_object();
+	struct tiffer_entry entry = {};
+	while (tiffer_next_entry(T, &entry))
+		ifd = parse_mpf_index_entry(ifd, offsets, T, &entry);
+	return ifd;
+}
+
+static jv
+parse_mpf(jv o, const uint8_t ***offsets, const uint8_t *p, size_t len)
+{
+	struct tiffer T;
+	if (!tiffer_init(&T, p, len) || !tiffer_next_ifd(&T))
+		return add_warning(o, "invalid MPF segment");
+
+	// First image: IFD0 is Index IFD, any IFD1 is Attribute IFD.
+	// Other images: IFD0 is Attribute IFD, there is no Index IFD.
+	if (!*offsets) {
+		o = add_to_subarray(o, "MPF", parse_mpf_index_ifd(offsets, &T));
+		if (!tiffer_next_ifd(&T))
+			return o;
+	}
+
+	// This isn't optimal, but it will do.
+	return add_to_subarray(o, "MPF", parse_exif_ifd(&T, mpf_entries));
+}
+
 // --- JPEG --------------------------------------------------------------------
 // Because the JPEG file format is simple, just do it manually.
 // See: https://www.w3.org/Graphics/JPEG/itu-t81.pdf
@@ -1493,109 +1637,6 @@ struct data {
 	const uint8_t **mpf_offsets, **mpf_next;
 };
 
-enum {
-	MPFVersion = 45056,
-	NumberOfImages = 45057,
-	MPEntry = 45058,
-	ImageUIDList = 45059,
-	TotalFrames = 45060,
-};
-
-static jv
-parse_mpf_index_entry(
-	jv o, struct data *data, struct tiffer *T, struct tiffer_entry *entry)
-{
-	// 5.2.3.3. MP Entry
-	if (entry->tag != MPEntry || entry->type != UNDEFINED ||
-		entry->remaining_count % 16) {
-		// TODO(p): Parse the remaining special tags instead.
-		return parse_exif_entry(o, T, entry, NULL);
-	}
-
-	uint32_t count = entry->remaining_count / 16;
-	jv a = jv_array_sized(count);
-
-	const uint8_t **out = data->mpf_next = data->mpf_offsets =
-		calloc(sizeof *data->mpf_offsets, count + 1);
-	for (uint32_t i = 0; i < count; i++) {
-		const uint8_t *p = entry->p + i * 16;
-		uint32_t attrs = T->un->u32(p);
-		uint32_t size = T->un->u32(p + 4);
-		uint32_t offset = T->un->u32(p + 8);
-		uint16_t dependent1 = T->un->u16(p + 12);
-		uint16_t dependent2 = T->un->u16(p + 14);
-
-		uint32_t type_number = attrs & 0xFFFFFF;
-		jv type = jv_number(type_number);
-		switch (type_number) {
-		break; case 0x030000: type = jv_string("Baseline MP Primary Image");
-		break; case 0x010001: type = jv_string("Large Thumbnail VGA");
-		break; case 0x010002: type = jv_string("Large Thumbnail Full HD");
-		break; case 0x020001: type = jv_string("Multi-Frame Image Panorama");
-		break; case 0x020002: type = jv_string("Multi-Frame Image Disparity");
-		break; case 0x020003: type = jv_string("Multi-Frame Image Multi-Angle");
-		break; case 0x000000: type = jv_string("Undefined");
-		}
-
-		uint32_t format_number = (attrs >> 24) & 0x7;
-		jv format = jv_number(format_number);
-		if (format_number == 0)
-			format = jv_string("JPEG");
-
-		a = jv_array_append(a, JV_OBJECT(
-			jv_string("Individual Image Attribute"), JV_OBJECT(
-				jv_string("Dependent Parent Image"), jv_bool((attrs >> 31) & 1),
-				jv_string("Dependent Child Image"), jv_bool((attrs >> 30) & 1),
-				jv_string("Representative Image"), jv_bool((attrs >> 29) & 1),
-				jv_string("Reserved"), jv_number((attrs >> 27) & 0x3),
-				jv_string("Image Data Format"), format,
-				jv_string("MP Type Code"), type
-			),
-			jv_string("Individual Image Size"), jv_number(size),
-			jv_string("Individual Image Data Offset"), jv_number(offset),
-			jv_string("Dependent Image 1 Entry Number"), jv_number(dependent1),
-			jv_string("Dependent Image 2 Entry Number"), jv_number(dependent2)
-		));
-		if (offset)
-			*out++ = T->begin + offset;
-	}
-	return jv_set(o, jv_string("MPEntry"), a);
-}
-
-static jv
-parse_mpf_index_ifd(struct data *data, struct tiffer *T)
-{
-	jv ifd = jv_object();
-	struct tiffer_entry entry = {};
-	while (tiffer_next_entry(T, &entry))
-		ifd = parse_mpf_index_entry(ifd, data, T, &entry);
-	return ifd;
-}
-
-static jv
-parse_mpf_attribute_ifd(struct tiffer *T)
-{
-	// TODO(p): Parse the special tags instead.
-	return parse_exif_ifd(T, NULL);
-}
-
-static jv
-parse_mpf(jv o, struct data *data, const uint8_t *p, size_t len)
-{
-	struct tiffer T;
-	if (!tiffer_init(&T, p, len) || !tiffer_next_ifd(&T))
-		return add_warning(o, "invalid MPF segment");
-
-	// First image: IFD0 is Index IFD, any IFD1 is Attribute IFD.
-	// Other images: IFD0 is Attribute IFD, there is no Index IFD.
-	if (!data->mpf_offsets) {
-		o = add_to_subarray(o, "MPF", parse_mpf_index_ifd(data, &T));
-		if (!tiffer_next_ifd(&T))
-			return o;
-	}
-	return add_to_subarray(o, "MPF", parse_mpf_attribute_ifd(&T));
-}
-
 static void
 parse_append(uint8_t **buffer, size_t *buffer_len, const uint8_t *p, size_t len)
 {
@@ -1613,7 +1654,8 @@ parse_marker(uint8_t marker, const uint8_t *p, const uint8_t *end,
 	// Found: Random metadata! Multi-Picture Format!
 	if ((data->ended = marker == EOI)) {
 		// TODO(p): Handle Exifs independently--flush the last one.
-		if (data->mpf_offsets && *data->mpf_next)
+		if ((data->mpf_next || (data->mpf_next = data->mpf_offsets)) &&
+			*data->mpf_next)
 			return *data->mpf_next++;
 		if (p != end)
 			*o = add_warning(*o, "trailing data");
@@ -1719,7 +1761,7 @@ parse_marker(uint8_t marker, const uint8_t *p, const uint8_t *end,
 	// http://fileformats.archiveteam.org/wiki/Multi-Picture_Format
 	if (marker == APP2 && p - payload >= 8 && !memcmp(payload, "MPF\0", 4)) {
 		payload += 4;
-		*o = parse_mpf(*o, data, payload, p - payload);
+		*o = parse_mpf(*o, &data->mpf_offsets, payload, p - payload);
 	}
 
 	// CIPA DC-006 (Stereo Still Image Format for Digital Cameras)
@@ -1805,7 +1847,8 @@ parse_jpeg(jv o, const uint8_t *p, size_t len)
 			break;
 		}
 		if (*p++ != 0xFF || *p == 0) {
-			o = add_error(o, "no marker found where one was expected");
+			if (!data.ended)
+				o = add_error(o, "no marker found where one was expected");
 			break;
 		}
 
