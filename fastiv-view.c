@@ -504,7 +504,7 @@ start_animating(FastivView *self)
 	stop_animating(self);
 
 	GdkFrameClock *clock = gtk_widget_get_frame_clock(GTK_WIDGET(self));
-	if (!clock ||
+	if (!clock || !self->image ||
 		!cairo_surface_get_user_data(self->page, &fastiv_io_key_frame_next))
 		return;
 
