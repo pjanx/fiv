@@ -91,6 +91,7 @@ u16le(const uint8_t *p)
 //
 // libtiff is a mess, and the format is not particularly complicated.
 // Exiv2 is senselessly copylefted, and cannot do much.
+// libexif is only marginally better.
 // ExifTool is too user-oriented.
 
 static struct un {
