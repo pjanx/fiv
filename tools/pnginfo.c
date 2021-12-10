@@ -20,6 +20,7 @@
 #include <png.h>
 #include <jv.h>
 
+#include <ctype.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
@@ -65,28 +66,120 @@ strfmt(const char *format, ...)
 	return result;
 }
 
+static uint8_t *
+hexbin(const char *string, size_t *len)
+{
+	static const char *alphabet = "0123456789abcdef";
+	uint8_t *buf = calloc(1, strlen(string) / 2 + 1), *p = buf;
+	while (true) {
+		while (*string && strchr(" \t\n\r\v\f", *string))
+			string++;
+		if (!*string)
+			break;
+
+		const char *hi, *lo;
+		if (!(hi = strchr(alphabet, tolower(*string++))) || !*string ||
+			!(lo = strchr(alphabet, tolower(*string++)))) {
+			free(buf);
+			return NULL;
+		}
+
+		*p++ = (hi - alphabet) << 4 | (lo - alphabet);
+	}
+	*len = p - buf;
+	return buf;
+}
+
 // --- Analysis ----------------------------------------------------------------
 
-static void
-redirect_libpng_error(png_structp pngp, const char* message)
+static uint8_t *
+extract_imagemagick_attribute(const char *string, size_t *len)
 {
-	char **storage = png_get_error_ptr(pngp);
-	*storage = strfmt("%s", message);
+	if (*string++ != '\n')
+		return NULL;
+
+	// TODO(p): Try to verify this profile type, also present in the key,
+	// though beware that it may contain "generic profile" for APP1, etc.
+	const char *type = string;
+	if (!(string = strchr(type, '\n')))
+		return NULL;
+
+	// strtol() skips initial whitespace, this is mostly desired.
+	char *end = NULL;
+	long size = strtol(++string, &end, 10);
+	if (size < 0 || end == string || *end++ != '\n')
+		return NULL;
+
+	uint8_t *bin = hexbin(end, len);
+	if (!bin || (long) *len != size) {
+		free(bin);
+		return NULL;
+	}
+	return bin;
 }
 
 static jv
-retrieve_texts(png_structp pngp, png_infop infop)
+extract_imagemagick_exif(jv o, const char *string)
+{
+	size_t exif_len = 0;
+	uint8_t *exif = extract_imagemagick_attribute(string, &exif_len);
+	if (!exif)
+		return add_warning(o, "invalid ImageMagick 'exif'");
+
+	o = parse_exif(o, exif, exif_len);
+	free(exif);
+	return o;
+}
+
+static jv
+extract_imagemagick_psir(jv o, const char *string)
+{
+	size_t psir_len = 0;
+	uint8_t *psir = extract_imagemagick_attribute(string, &psir_len);
+	if (!psir)
+		return add_warning(o, "invalid ImageMagick '8bim'");
+
+	o = parse_psir(o, psir, psir_len);
+	free(psir);
+	return o;
+}
+
+static bool
+process_text(jv *o, png_textp text)
+{
+	// TODO(p): Refactor info.h, so that it's the value of the text chunk,
+	// and that warnings are added to the top-level JSON.
+
+	// These seem to originate in ImageMagick,
+	// but are also used by ExifTool and GIMP, among others.
+	// https://exiftool.org/TagNames/PNG.html
+	// TODO(p): "iptc": may contain 8BIM or IPTC IIM directly.
+	// TODO(p): "APP1": may contain Exif or XMP.
+	if (!strcmp(text->key, "Raw profile type exif")) {
+		*o = extract_imagemagick_exif(*o, text->text);
+		return true;
+	}
+	if (!strcmp(text->key, "Raw profile type 8bim")) {
+		*o = extract_imagemagick_psir(*o, text->text);
+		return true;
+	}
+	return false;
+}
+
+static jv
+retrieve_texts(jv o, png_structp pngp, png_infop infop)
 {
 	int texts_len = 0;
 	png_textp texts = NULL;
 	png_get_text(pngp, infop, &texts, &texts_len);
 
-	jv o = jv_object();
+	jv to = jv_object();
 	for (int i = 0; i < texts_len; i++) {
 		png_textp text = texts + i;
-		o = jv_object_set(o, jv_string(text->key), jv_string(text->text));
+		to = jv_object_set(to, jv_string(text->key),
+			process_text(&o, text) ? jv_true() : jv_string(text->text));
 	}
-	return o;
+	return jv_object_set(o, jv_string("texts"), to);
 }
 
 static jv
@@ -145,13 +238,19 @@ extract_chunks(png_structp pngp, png_infop infop)
 	if (png_get_iCCP(pngp, infop, &name, NULL, &profile, &profile_len))
 		o = jv_object_set(o, jv_string("ICC"), jv_string(name));
 
-	// https://ftp-osl.osuosl.org/pub/libpng/documents/pngext-1.5.0.html#C.eXIf
 	jv set = jv_object();
 	png_unknown_chunkp unknowns = NULL;
 	int unknowns_len = png_get_unknown_chunks(pngp, infop, &unknowns);
 	for (int i = 0; i < unknowns_len; i++) {
 		set = jv_object_set(set,
 			jv_string((const char *) unknowns[i].name), jv_true());
+
+		// https://ftp-osl.osuosl.org/pub/libpng/documents/pngext-1.5.0.html
+		//
+		// Some software also supports the adjacent zXIf proposal,
+		// which ended up being rejected. Such files are rare, and best ignored.
+		// http://www.simplesystems.org/png-group/proposals/zXIf/history
+		// /png-proposed-zXIf-chunk-2017-03-05.html
 		if (!strcmp((const char *) unknowns[i].name, "eXIf"))
 			o = parse_exif(o, unknowns[i].data, unknowns[i].size);
 	}
@@ -162,8 +261,14 @@ extract_chunks(png_structp pngp, png_infop infop)
 	o = jv_object_set(o, jv_string("chunks"), a);
 	jv_free(set);
 
-	o = jv_object_set(o, jv_string("texts"), retrieve_texts(pngp, infop));
-	return o;
+	return retrieve_texts(o, pngp, infop);
+}
+
+static void
+redirect_libpng_error(png_structp pngp, const char* message)
+{
+	char **storage = png_get_error_ptr(pngp);
+	*storage = strfmt("%s", message);
 }
 
 static jv
@@ -179,6 +284,7 @@ do_file(const char *filename, volatile jv o)
 		goto error;
 	}
 
+	// TODO(p): Extract libpng warnings.
 	png_structp pngp = png_create_read_struct(PNG_LIBPNG_VER_STRING,
 		(png_voidp) &err, redirect_libpng_error, NULL);
 	if (!pngp) {
