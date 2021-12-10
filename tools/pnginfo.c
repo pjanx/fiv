@@ -15,6 +15,8 @@
 // CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 //
 
+#include "info.h"
+
 #include <png.h>
 #include <jv.h>
 
@@ -143,12 +145,16 @@ extract_chunks(png_structp pngp, png_infop infop)
 	if (png_get_iCCP(pngp, infop, &name, NULL, &profile, &profile_len))
 		o = jv_object_set(o, jv_string("ICC"), jv_string(name));
 
+	// https://ftp-osl.osuosl.org/pub/libpng/documents/pngext-1.5.0.html#C.eXIf
 	jv set = jv_object();
 	png_unknown_chunkp unknowns = NULL;
 	int unknowns_len = png_get_unknown_chunks(pngp, infop, &unknowns);
-	for (int i = 0; i < unknowns_len; i++)
+	for (int i = 0; i < unknowns_len; i++) {
 		set = jv_object_set(set,
 			jv_string((const char *) unknowns[i].name), jv_true());
+		if (!strcmp((const char *) unknowns[i].name, "eXIf"))
+			o = parse_exif(o, unknowns[i].data, unknowns[i].size);
+	}
 
 	jv a = jv_array();
 	jv_object_keys_foreach(set, key)
@@ -227,7 +233,7 @@ error_png:
 	fclose(fp);
 error:
 	if (err) {
-		o = jv_object_set(o, jv_string("error"), jv_string(err));
+		o = add_error(o, err);
 		free(err);
 	}
 	return o;
