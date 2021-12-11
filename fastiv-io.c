@@ -33,6 +33,9 @@
 #ifdef HAVE_XCURSOR
 #include <X11/Xcursor/Xcursor.h>
 #endif  // HAVE_XCURSOR
+#ifdef HAVE_LIBWEBP
+#include <webp/decode.h>
+#endif  // HAVE_LIBWEBP
 #ifdef HAVE_LIBHEIF
 #include <libheif/heif.h>
 #endif  // HAVE_LIBHEIF
@@ -1110,6 +1113,67 @@ open_xcursor(const gchar *data, gsize len, GError **error)
 }
 
 #endif  // HAVE_XCURSOR --------------------------------------------------------
+#ifdef HAVE_LIBWEBP  //---------------------------------------------------------
+
+static cairo_surface_t *
+open_libwebp(const gchar *data, gsize len, GError **error)
+{
+	// It is wholly zero-initialized by libwebp.
+	WebPDecoderConfig config = {};
+	if (!WebPInitDecoderConfig(&config)) {
+		set_error(error, "libwebp version mismatch");
+		return NULL;
+	}
+
+	// TODO(p): Differentiate between a bad WebP, and not a WebP.
+	VP8StatusCode err = 0;
+	if ((err = WebPGetFeatures((const uint8_t *) data, len, &config.input))) {
+		set_error(error, "WebP decoding error");
+		return NULL;
+	}
+
+	cairo_surface_t *result = NULL;
+
+	cairo_surface_t *surface = cairo_image_surface_create(
+		config.input.has_alpha ? CAIRO_FORMAT_ARGB32 : CAIRO_FORMAT_RGB24,
+		config.input.width, config.input.height);
+	cairo_status_t surface_status = cairo_surface_status(surface);
+	if (surface_status != CAIRO_STATUS_SUCCESS) {
+		set_error(error, cairo_status_to_string(surface_status));
+		goto fail;
+	}
+
+	config.options.use_threads = true;
+
+	config.output.width = config.input.width;
+	config.output.height = config.input.height;
+	config.output.is_external_memory = true;
+	config.output.u.RGBA.rgba = cairo_image_surface_get_data(surface);
+	config.output.u.RGBA.stride = cairo_image_surface_get_stride(surface);
+	config.output.u.RGBA.size =
+		config.output.u.RGBA.stride * cairo_image_surface_get_height(surface);
+	if (G_BYTE_ORDER == G_LITTLE_ENDIAN)
+		config.output.colorspace = MODE_bgrA;
+	else
+		config.output.colorspace = MODE_Argb;
+
+	if ((err = WebPDecode((const uint8_t *) data, len, &config))) {
+		set_error(error, "WebP decoding error");
+		goto fail;
+	}
+
+	// TODO(p): Extract metadata, support animations (has_animation).
+	result = surface;
+
+fail:
+	if (!result)
+		cairo_surface_destroy(surface);
+
+	WebPFreeDecBuffer(&config.output);
+	return result;
+}
+
+#endif  // HAVE_LIBWEBP --------------------------------------------------------
 #ifdef HAVE_LIBHEIF  //---------------------------------------------------------
 
 static cairo_surface_t *
@@ -1683,6 +1747,14 @@ fastiv_io_open_from_data(const char *data, size_t len, const gchar *path,
 			g_clear_error(error);
 		}
 #endif  // HAVE_XCURSOR --------------------------------------------------------
+#ifdef HAVE_LIBWEBP  //---------------------------------------------------------
+		if ((surface = open_libwebp(data, len, error)))
+			break;
+		if (error) {
+			g_debug("%s", (*error)->message);
+			g_clear_error(error);
+		}
+#endif  // HAVE_LIBWEBP --------------------------------------------------------
 #ifdef HAVE_LIBHEIF  //---------------------------------------------------------
 		if ((surface = open_libheif(data, len, path, error)))
 			break;
