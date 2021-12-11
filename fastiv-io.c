@@ -1109,15 +1109,8 @@ open_xcursor(const gchar *data, gsize len, GError **error)
 #ifdef HAVE_LIBHEIF  //---------------------------------------------------------
 
 static cairo_surface_t *
-load_libheif_image(struct heif_context *ctx, heif_item_id id, GError **error)
+load_libheif_image(struct heif_image_handle *handle, GError **error)
 {
-	struct heif_image_handle *handle = NULL;
-	struct heif_error err = heif_context_get_image_handle(ctx, id, &handle);
-	if (err.code != heif_error_Ok) {
-		set_error(error, err.message);
-		return NULL;
-	}
-
 	cairo_surface_t *surface = NULL;
 	int has_alpha = heif_image_handle_has_alpha_channel(handle);
 	int bit_depth = heif_image_handle_get_luma_bits_per_pixel(handle);
@@ -1131,8 +1124,8 @@ load_libheif_image(struct heif_context *ctx, heif_item_id id, GError **error)
 
 	// TODO(p): We can get 16-bit depth, in reality most likely 10-bit.
 	struct heif_image *image = NULL;
-	err = heif_decode_image(handle, &image, heif_colorspace_RGB,
-		heif_chroma_interleaved_RGBA, opts);
+	struct heif_error err = heif_decode_image(handle, &image,
+		heif_colorspace_RGB, heif_chroma_interleaved_RGBA, opts);
 	if (err.code != heif_error_Ok) {
 		set_error(error, err.message);
 		goto fail_decode;
@@ -1141,7 +1134,6 @@ load_libheif_image(struct heif_context *ctx, heif_item_id id, GError **error)
 	int w = heif_image_get_width(image, heif_channel_interleaved);
 	int h = heif_image_get_height(image, heif_channel_interleaved);
 
-	// TODO(p): Add more pages with depth, thumbnails, and auxiliary images.
 	surface = cairo_image_surface_create(
 		has_alpha ? CAIRO_FORMAT_ARGB32 : CAIRO_FORMAT_RGB24, w, h);
 	cairo_status_t surface_status = cairo_surface_status(surface);
@@ -1222,8 +1214,39 @@ fail_process:
 fail_decode:
 	heif_decoding_options_free(opts);
 fail:
-	heif_image_handle_release(handle);
 	return surface;
+}
+
+static void
+load_libheif_aux_images(const gchar *path, struct heif_image_handle *top,
+	cairo_surface_t **result, cairo_surface_t **result_tail)
+{
+	// Include the depth image, we have no special processing for it now.
+	int filter = LIBHEIF_AUX_IMAGE_FILTER_OMIT_ALPHA;
+
+	int n = heif_image_handle_get_number_of_auxiliary_images(top, filter);
+	heif_item_id *ids = g_malloc0_n(n, sizeof *ids);
+	n = heif_image_handle_get_list_of_auxiliary_image_IDs(top, filter, ids, n);
+	for (int i = 0; i < n; i++) {
+		struct heif_image_handle *handle = NULL;
+		struct heif_error err = heif_image_handle_get_auxiliary_image_handle(
+			top, ids[i], &handle);
+		if (err.code != heif_error_Ok) {
+			g_warning("%s: %s", path, err.message);
+			continue;
+		}
+
+		GError *e = NULL;
+		if (!try_append_page(
+				load_libheif_image(handle, &e), result, result_tail)) {
+			g_warning("%s: %s", path, e->message);
+			g_error_free(e);
+		}
+
+		heif_image_handle_release(handle);
+	}
+
+	g_free(ids);
 }
 
 static cairo_surface_t *
@@ -1245,12 +1268,23 @@ open_libheif(const gchar *data, gsize len, const gchar *path, GError **error)
 	heif_item_id *ids = g_malloc0_n(n, sizeof *ids);
 	n = heif_context_get_list_of_top_level_image_IDs(ctx, ids, n);
 	for (int i = 0; i < n; i++) {
-		GError *err = NULL;
-		if (!try_append_page(
-			load_libheif_image(ctx, ids[i], &err), &result, &result_tail)) {
-			g_warning("%s: %s", path, err->message);
-			g_error_free(err);
+		struct heif_image_handle *handle = NULL;
+		err = heif_context_get_image_handle(ctx, ids[i], &handle);
+		if (err.code != heif_error_Ok) {
+			g_warning("%s: %s", path, err.message);
+			continue;
 		}
+
+		GError *e = NULL;
+		if (!try_append_page(
+				load_libheif_image(handle, &e), &result, &result_tail)) {
+			g_warning("%s: %s", path, e->message);
+			g_error_free(e);
+		}
+
+		// TODO(p): Possibly add thumbnail images as well.
+		load_libheif_aux_images(path, handle, &result, &result_tail);
+		heif_image_handle_release(handle);
 	}
 	if (!result) {
 		g_clear_pointer(&result, cairo_surface_destroy);
