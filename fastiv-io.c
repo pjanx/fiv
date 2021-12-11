@@ -1492,6 +1492,26 @@ open_libtiff(const gchar *data, gsize len, const gchar *path, GError **error)
 	if (!tiff)
 		goto fail;
 
+	// In Nikon NEF files, IFD0 is a tiny uncompressed thumbnail with SubIFDs--
+	// two of them JPEGs, the remaining one is raw. libtiff cannot read either
+	// of those better versions.
+	//
+	// TODO(p): If NewSubfileType is ReducedImage, and it has SubIFDs compressed
+	// as old JPEG (6), decode JPEGInterchangeFormat/JPEGInterchangeFormatLength
+	// with libjpeg-turbo and insert them as the starting pages.
+	//
+	// This is not possible with libtiff directly, because TIFFSetSubDirectory()
+	// requires an ImageLength tag that's missing, and TIFFReadCustomDirectory()
+	// takes a privately defined struct that cannot be omitted.
+	uint32_t subtype = 0;
+	uint16_t subifd_count = 0;
+	const uint64_t *subifd_offsets = NULL;
+	if (TIFFGetField(tiff, TIFFTAG_SUBFILETYPE, &subtype) &&
+		(subtype & FILETYPE_REDUCEDIMAGE) &&
+		TIFFGetField(tiff, TIFFTAG_SUBIFD, &subifd_count, &subifd_offsets) &&
+		subifd_count > 0 && subifd_offsets) {
+	}
+
 	do {
 		// We inform about unsupported directories, but do not fail on them.
 		GError *err = NULL;
