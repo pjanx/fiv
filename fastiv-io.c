@@ -33,6 +33,9 @@
 #ifdef HAVE_XCURSOR
 #include <X11/Xcursor/Xcursor.h>
 #endif  // HAVE_XCURSOR
+#ifdef HAVE_LIBHEIF
+#include <libheif/heif.h>
+#endif  // HAVE_LIBHEIF
 #ifdef HAVE_LIBTIFF
 #include <tiff.h>
 #include <tiffio.h>
@@ -79,6 +82,11 @@ const char *fastiv_io_supported_media_types[] = {
 #ifdef HAVE_XCURSOR
 	"image/x-xcursor",
 #endif  // HAVE_XCURSOR
+#ifdef HAVE_LIBHEIF
+	"image/heic",
+	"image/heif",
+	"image/avif",
+#endif  // HAVE_LIBHEIF
 #ifdef HAVE_LIBTIFF
 	"image/tiff",
 #endif  // HAVE_LIBTIFF
@@ -1078,6 +1086,146 @@ open_xcursor(const gchar *data, gsize len, GError **error)
 }
 
 #endif  // HAVE_XCURSOR --------------------------------------------------------
+#ifdef HAVE_LIBHEIF  //---------------------------------------------------------
+
+static cairo_surface_t *
+load_libheif_image(struct heif_context *ctx, heif_item_id id, GError **error)
+{
+	struct heif_image_handle *handle = NULL;
+	struct heif_error err = heif_context_get_image_handle(ctx, id, &handle);
+	if (err.code != heif_error_Ok) {
+		set_error(error, err.message);
+		return NULL;
+	}
+
+	cairo_surface_t *surface = NULL;
+	int has_alpha = heif_image_handle_has_alpha_channel(handle);
+	int bit_depth = heif_image_handle_get_luma_bits_per_pixel(handle);
+	if (bit_depth < 0) {
+		set_error(error, "undefined bit depth");
+		goto fail;
+	}
+
+	// Setting `convert_hdr_to_8bit` seems to be a no-op for RGBA32/64.
+	struct heif_decoding_options *opts = heif_decoding_options_alloc();
+
+	// TODO(p): We can get 16-bit depth, in reality most likely 10-bit.
+	struct heif_image *image = NULL;
+	err = heif_decode_image(handle, &image, heif_colorspace_RGB,
+		heif_chroma_interleaved_RGBA, opts);
+	if (err.code != heif_error_Ok) {
+		set_error(error, err.message);
+		goto fail_decode;
+	}
+
+	int w = heif_image_get_width(image, heif_channel_interleaved);
+	int h = heif_image_get_height(image, heif_channel_interleaved);
+
+	// TODO(p): Add more pages with depth, thumbnails, and auxiliary images.
+	surface = cairo_image_surface_create(
+		has_alpha ? CAIRO_FORMAT_ARGB32 : CAIRO_FORMAT_RGB24, w, h);
+	cairo_status_t surface_status = cairo_surface_status(surface);
+	if (surface_status != CAIRO_STATUS_SUCCESS) {
+		set_error(error, cairo_status_to_string(surface_status));
+		cairo_surface_destroy(surface);
+		surface = NULL;
+		goto fail_process;
+	}
+
+	// As of writing, the library is using 16-byte alignment, unlike Cairo.
+	int src_stride = 0;
+	const uint8_t *src = heif_image_get_plane_readonly(
+		image, heif_channel_interleaved, &src_stride);
+	int dst_stride = cairo_image_surface_get_stride(surface);
+	const uint8_t *dst = cairo_image_surface_get_data(surface);
+
+	for (int y = 0; y < h; y++) {
+		uint32_t *dstp = (uint32_t *) (dst + dst_stride * y);
+		const uint32_t *srcp = (const uint32_t *) (src + src_stride * y);
+		for (int x = 0; x < w; x++) {
+			uint32_t rgba = g_ntohl(srcp[x]);
+			*dstp++ = rgba << 24 | rgba >> 8;
+		}
+	}
+
+	// TODO(p): Test real behaviour on real transparent images.
+	if (has_alpha && !heif_image_handle_is_premultiplied_alpha(handle)) {
+		for (int y = 0; y < h; y++) {
+			uint32_t *dstp = (uint32_t *) (dst + dst_stride * y);
+			for (int x = 0; x < w; x++) {
+				uint32_t pixel = dstp[x], a = pixel >> 24;
+				uint8_t r = pixel >> 16;
+				uint8_t g = pixel >> 8;
+				uint8_t b = pixel;
+				dstp[x] = a << 24 |
+					(r * a / 255) << 16 | (g * a / 255) << 8 | (b * a / 255);
+			}
+		}
+	}
+
+	// TODO(p): Attach any ICC color profile and Exif data.
+	cairo_surface_mark_dirty(surface);
+
+fail_process:
+	heif_image_release(image);
+fail_decode:
+	heif_decoding_options_free(opts);
+fail:
+	heif_image_handle_release(handle);
+	return surface;
+}
+
+static cairo_surface_t *
+open_libheif(const gchar *data, gsize len, GError **error)
+{
+	// libheif will throw C++ exceptions on allocation failures.
+	// The library is generally awful through and through.
+	struct heif_context *ctx = heif_context_alloc();
+	cairo_surface_t *result = NULL, *result_tail = NULL;
+
+	struct heif_error err;
+	err = heif_context_read_from_memory_without_copy(ctx, data, len, NULL);
+	if (err.code != heif_error_Ok) {
+		set_error(error, err.message);
+		goto fail_read;
+	}
+
+	// TODO(p): Only fail if there is absolutely nothing to extract,
+	// see open_libtiff() below.
+	int n = heif_context_get_number_of_top_level_images(ctx);
+	heif_item_id *ids = g_malloc0_n(n, sizeof *ids);
+	n = heif_context_get_list_of_top_level_image_IDs(ctx, ids, n);
+
+	for (int i = 0; i < n; i++) {
+		cairo_surface_t *surface = load_libheif_image(ctx, ids[i], error);
+		if (!surface) {
+			if (result) {
+				cairo_surface_destroy(result);
+				result = NULL;
+			}
+			goto fail_decode;
+		}
+
+		if (result) {
+			cairo_surface_set_user_data(result_tail,
+				&fastiv_io_key_page_next, surface,
+				(cairo_destroy_func_t) cairo_surface_destroy);
+			cairo_surface_set_user_data(surface,
+				&fastiv_io_key_page_previous, result_tail, NULL);
+			result_tail = surface;
+		} else {
+			result = result_tail = surface;
+		}
+	}
+
+fail_decode:
+	g_free(ids);
+fail_read:
+	heif_context_free(ctx);
+	return result;
+}
+
+#endif  // HAVE_LIBHEIF --------------------------------------------------------
 #ifdef HAVE_LIBTIFF  //---------------------------------------------------------
 
 struct fastiv_io_tiff {
@@ -1452,6 +1600,14 @@ fastiv_io_open_from_data(const char *data, size_t len, const gchar *path,
 			g_clear_error(error);
 		}
 #endif  // HAVE_XCURSOR --------------------------------------------------------
+#ifdef HAVE_LIBHEIF  //---------------------------------------------------------
+		if ((surface = open_libheif(data, len, error)))
+			break;
+		if (error) {
+			g_debug("%s", (*error)->message);
+			g_clear_error(error);
+		}
+#endif  // HAVE_LIBHEIF --------------------------------------------------------
 #ifdef HAVE_LIBTIFF  //---------------------------------------------------------
 		// This needs to be positioned after LibRaw.
 		if ((surface = open_libtiff(data, len, path, error)))
@@ -1463,8 +1619,9 @@ fastiv_io_open_from_data(const char *data, size_t len, const gchar *path,
 #endif  // HAVE_LIBTIFF --------------------------------------------------------
 #ifdef HAVE_GDKPIXBUF  // ------------------------------------------------------
 		// This is only used as a last resort, the rest above is special-cased.
-		if ((surface = open_gdkpixbuf(data, len, error)) ||
-			(error && (*error)->code != GDK_PIXBUF_ERROR_UNKNOWN_TYPE))
+		if ((surface = open_gdkpixbuf(data, len, error)))
+			break;
+		if (error && (*error)->code != GDK_PIXBUF_ERROR_UNKNOWN_TYPE)
 			break;
 
 		if (error) {

@@ -4,6 +4,8 @@ option('librsvg', type : 'feature', value : 'auto',
 	description : 'Build with SVG support, requires librsvg')
 option('xcursor', type : 'feature', value : 'auto',
 	description : 'Build with Xcursor support, requires libXcursor')
+option('libheif', type : 'feature', value : 'auto',
+	description : 'Build with HEIF/AVIF support, requires libheif')
 option('libtiff', type : 'feature', value : 'auto',
 	description : 'Build with TIFF support, requires libtiff')
 option('gdk-pixbuf', type : 'feature', value : 'auto',
