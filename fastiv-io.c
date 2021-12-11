@@ -131,6 +131,26 @@ set_error(GError **error, const char *message)
 	g_set_error_literal(error, FASTIV_IO_ERROR, FASTIV_IO_ERROR_OPEN, message);
 }
 
+static bool
+try_append_page(cairo_surface_t *surface, cairo_surface_t **result,
+	cairo_surface_t **result_tail)
+{
+	if (!surface)
+		return false;
+
+	if (*result) {
+		cairo_surface_set_user_data(*result_tail,
+			&fastiv_io_key_page_next, surface,
+			(cairo_destroy_func_t) cairo_surface_destroy);
+		cairo_surface_set_user_data(surface,
+			&fastiv_io_key_page_previous, *result_tail, NULL);
+		*result_tail = surface;
+	} else {
+		*result = *result_tail = surface;
+	}
+	return true;
+}
+
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 static bool
@@ -1207,7 +1227,7 @@ fail:
 }
 
 static cairo_surface_t *
-open_libheif(const gchar *data, gsize len, GError **error)
+open_libheif(const gchar *data, gsize len, const gchar *path, GError **error)
 {
 	// libheif will throw C++ exceptions on allocation failures.
 	// The library is generally awful through and through.
@@ -1221,35 +1241,22 @@ open_libheif(const gchar *data, gsize len, GError **error)
 		goto fail_read;
 	}
 
-	// TODO(p): Only fail if there is absolutely nothing to extract,
-	// see open_libtiff() below.
 	int n = heif_context_get_number_of_top_level_images(ctx);
 	heif_item_id *ids = g_malloc0_n(n, sizeof *ids);
 	n = heif_context_get_list_of_top_level_image_IDs(ctx, ids, n);
-
 	for (int i = 0; i < n; i++) {
-		cairo_surface_t *surface = load_libheif_image(ctx, ids[i], error);
-		if (!surface) {
-			if (result) {
-				cairo_surface_destroy(result);
-				result = NULL;
-			}
-			goto fail_decode;
-		}
-
-		if (result) {
-			cairo_surface_set_user_data(result_tail,
-				&fastiv_io_key_page_next, surface,
-				(cairo_destroy_func_t) cairo_surface_destroy);
-			cairo_surface_set_user_data(surface,
-				&fastiv_io_key_page_previous, result_tail, NULL);
-			result_tail = surface;
-		} else {
-			result = result_tail = surface;
+		GError *err = NULL;
+		if (!try_append_page(
+			load_libheif_image(ctx, ids[i], &err), &result, &result_tail)) {
+			g_warning("%s: %s", path, err->message);
+			g_error_free(err);
 		}
 	}
+	if (!result) {
+		g_clear_pointer(&result, cairo_surface_destroy);
+		set_error(error, "empty or unsupported image");
+	}
 
-fail_decode:
 	g_free(ids);
 fail_read:
 	heif_context_free(ctx);
@@ -1454,23 +1461,10 @@ open_libtiff(const gchar *data, gsize len, const gchar *path, GError **error)
 	do {
 		// We inform about unsupported directories, but do not fail on them.
 		GError *err = NULL;
-		cairo_surface_t *surface = load_libtiff_directory(tiff, &err);
-		if (err) {
+		if (!try_append_page(
+			load_libtiff_directory(tiff, &err), &result, &result_tail)) {
 			g_warning("%s: %s", path, err->message);
 			g_error_free(err);
-		}
-		if (!surface)
-			continue;
-
-		if (result) {
-			cairo_surface_set_user_data(result_tail,
-				&fastiv_io_key_page_next, surface,
-				(cairo_destroy_func_t) cairo_surface_destroy);
-			cairo_surface_set_user_data(surface,
-				&fastiv_io_key_page_previous, result_tail, NULL);
-			result_tail = surface;
-		} else {
-			result = result_tail = surface;
 		}
 	} while (TIFFReadDirectory(tiff));
 	TIFFClose(tiff);
@@ -1632,7 +1626,7 @@ fastiv_io_open_from_data(const char *data, size_t len, const gchar *path,
 		}
 #endif  // HAVE_XCURSOR --------------------------------------------------------
 #ifdef HAVE_LIBHEIF  //---------------------------------------------------------
-		if ((surface = open_libheif(data, len, error)))
+		if ((surface = open_libheif(data, len, path, error)))
 			break;
 		if (error) {
 			g_debug("%s", (*error)->message);
