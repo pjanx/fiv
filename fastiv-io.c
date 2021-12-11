@@ -1163,7 +1163,38 @@ load_libheif_image(struct heif_context *ctx, heif_item_id id, GError **error)
 		}
 	}
 
-	// TODO(p): Attach any ICC color profile and Exif data.
+	heif_item_id exif_id = 0;
+	if (heif_image_handle_get_list_of_metadata_block_IDs(
+			handle, "Exif", &exif_id, 1)) {
+		size_t exif_len = heif_image_handle_get_metadata_size(handle, exif_id);
+		void *exif = g_malloc0(exif_len);
+		err = heif_image_handle_get_metadata(handle, exif_id, exif);
+		if (err.code) {
+			g_warning("%s", err.message);
+			g_free(exif);
+		} else {
+			cairo_surface_set_user_data(surface, &fastiv_io_key_exif,
+				g_bytes_new_take(exif, exif_len),
+				(cairo_destroy_func_t) g_bytes_unref);
+		}
+	}
+
+	// https://loc.gov/preservation/digital/formats/fdd/fdd000526.shtml#factors
+	if (heif_image_handle_get_color_profile_type(handle) ==
+		heif_color_profile_type_prof) {
+		size_t icc_len = heif_image_handle_get_raw_color_profile_size(handle);
+		void *icc = g_malloc0(icc_len);
+		err = heif_image_handle_get_raw_color_profile(handle, icc);
+		if (err.code) {
+			g_warning("%s", err.message);
+			g_free(icc);
+		} else {
+			cairo_surface_set_user_data(surface, &fastiv_io_key_icc,
+				g_bytes_new_take(icc, icc_len),
+				(cairo_destroy_func_t) g_bytes_unref);
+		}
+	}
+
 	cairo_surface_mark_dirty(surface);
 
 fail_process:
