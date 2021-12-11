@@ -551,14 +551,15 @@ static struct tiff_entry tiff_entries[] = {
 		{}
 	}},
 	{"ReferenceBlackWhite", 532, NULL},
+	{"XMP", 700, NULL},  // Adobe XMP Specification Part 3 Table 12/13/39
 	{"ImageID", 32781, NULL},  // Adobe PageMaker 6.0 TIFF Technical Notes
 	{"Copyright", 33432, NULL},
+	// TODO(p): Extract IPTC DataSets, like we do directly with PSIRs.
+	{"IPTC", 33723, NULL},  // Adobe XMP Specification Part 3 Table 12/39
 	// TODO(p): Extract PSIRs, like we do directly with the JPEG segment.
 	{"Photoshop", 34377, NULL},  // Adobe XMP Specification Part 3 Table 12/39
 	{"Exif IFD Pointer", 34665, NULL},  // Exif 2.3
 	{"GPS Info IFD Pointer", 34853, NULL},  // Exif 2.3
-	// TODO(p): Extract IPTC DataSets, like we do directly with PSIRs.
-	{"IPTC", 37723, NULL},  // Adobe XMP Specification Part 3 Table 12/39
 	{"ImageSourceData", 37724, NULL},  // Adobe Photoshop TIFF Technical Notes
 	{}
 };
@@ -886,8 +887,9 @@ parse_exif_subifds(struct tiffer *T, const struct tiffer_entry *entry,
 		offset < 0 || offset > UINT32_MAX || !tiffer_subifd(T, offset, &subT))
 		return jv_null();
 
-	// The chain should correspond to the values in the entry,
-	// we are not going to verify it.
+	// The chain should correspond to the values in the entry
+	// (TIFF Technical Note 1), we are not going to verify it.
+	// Note that Nikon NEFs do not follow this rule.
 	jv a = jv_array();
 	do a = jv_array_append(a, parse_exif_ifd(&subT, info));
 	while (tiffer_next_ifd(&subT));
