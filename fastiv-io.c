@@ -86,6 +86,9 @@ const char *fastiv_io_supported_media_types[] = {
 #ifdef HAVE_XCURSOR
 	"image/x-xcursor",
 #endif  // HAVE_XCURSOR
+#ifdef HAVE_LIBWEBP
+	"image/webp",
+#endif  // HAVE_LIBWEBP
 #ifdef HAVE_LIBHEIF
 	"image/heic",
 	"image/heif",
@@ -1117,6 +1120,134 @@ open_xcursor(const gchar *data, gsize len, GError **error)
 #ifdef HAVE_LIBWEBP  //---------------------------------------------------------
 
 static cairo_surface_t *
+load_libwebp_nonanimated(
+	WebPDecoderConfig *config, const WebPData *wd, GError **error)
+{
+	cairo_surface_t *surface = cairo_image_surface_create(
+		config->input.has_alpha ? CAIRO_FORMAT_ARGB32 : CAIRO_FORMAT_RGB24,
+		config->input.width, config->input.height);
+	cairo_status_t surface_status = cairo_surface_status(surface);
+	if (surface_status != CAIRO_STATUS_SUCCESS) {
+		set_error(error, cairo_status_to_string(surface_status));
+		cairo_surface_destroy(surface);
+		return NULL;
+	}
+
+	config->options.use_threads = true;
+
+	config->output.width = config->input.width;
+	config->output.height = config->input.height;
+	config->output.is_external_memory = true;
+	config->output.u.RGBA.rgba = cairo_image_surface_get_data(surface);
+	config->output.u.RGBA.stride = cairo_image_surface_get_stride(surface);
+	config->output.u.RGBA.size =
+		config->output.u.RGBA.stride * cairo_image_surface_get_height(surface);
+	if (G_BYTE_ORDER == G_LITTLE_ENDIAN)
+		config->output.colorspace = MODE_bgrA;
+	else
+		config->output.colorspace = MODE_Argb;
+
+	VP8StatusCode err = 0;
+	if ((err = WebPDecode(wd->bytes, wd->size, config))) {
+		set_error(error, "WebP decoding error");
+		cairo_surface_destroy(surface);
+		return NULL;
+	}
+
+	cairo_surface_mark_dirty(surface);
+	return surface;
+}
+
+static cairo_surface_t *
+load_libwebp_frame(WebPAnimDecoder *dec, const WebPAnimInfo *info,
+	int *last_timestamp, GError **error)
+{
+	uint8_t *buf = NULL;
+	int timestamp = 0;
+	if (!WebPAnimDecoderGetNext(dec, &buf, &timestamp)) {
+		set_error(error, "WebP decoding error");
+		return NULL;
+	}
+
+	bool is_opaque = (info->bgcolor & 0xFF) == 0xFF;
+	uint64_t area = info->canvas_width * info->canvas_height;
+	cairo_surface_t *surface = cairo_image_surface_create(
+		is_opaque ? CAIRO_FORMAT_RGB24 : CAIRO_FORMAT_ARGB32,
+		info->canvas_width, info->canvas_height);
+
+	cairo_status_t surface_status = cairo_surface_status(surface);
+	if (surface_status != CAIRO_STATUS_SUCCESS) {
+		set_error(error, cairo_status_to_string(surface_status));
+		cairo_surface_destroy(surface);
+		return NULL;
+	}
+
+	uint32_t *dst = (uint32_t *) cairo_image_surface_get_data(surface);
+	if (G_BYTE_ORDER == G_LITTLE_ENDIAN) {
+		memcpy(dst, buf, area * sizeof *dst);
+	} else {
+		uint32_t *src = (uint32_t *) buf;
+		for (uint64_t i = 0; i < area; i++)
+			*dst++ = GUINT32_FROM_LE(*src++);
+	}
+
+	cairo_surface_mark_dirty(surface);
+
+	// This API is confusing and awkward.
+	cairo_surface_set_user_data(surface, &fastiv_io_key_frame_duration,
+		(void *) (intptr_t) (timestamp - *last_timestamp), NULL);
+	*last_timestamp = timestamp;
+	return surface;
+}
+
+static cairo_surface_t *
+load_libwebp_animated(const WebPData *wd, GError **error)
+{
+	WebPAnimDecoderOptions options = {};
+	WebPAnimDecoderOptionsInit(&options);
+	options.use_threads = true;
+	options.color_mode = MODE_bgrA;
+
+	WebPAnimInfo info = {};
+	WebPAnimDecoder *dec = WebPAnimDecoderNew(wd, &options);
+	WebPAnimDecoderGetInfo(dec, &info);
+
+	int last_timestamp = 0;
+	cairo_surface_t *frames = NULL, *frames_tail = NULL;
+	while (WebPAnimDecoderHasMoreFrames(dec)) {
+		cairo_surface_t *surface =
+			load_libwebp_frame(dec, &info, &last_timestamp, error);
+		if (!surface) {
+			g_clear_pointer(&frames, cairo_surface_destroy);
+			goto fail;
+		}
+
+		if (frames_tail)
+			cairo_surface_set_user_data(frames_tail,
+				&fastiv_io_key_frame_next, surface,
+				(cairo_destroy_func_t) cairo_surface_destroy);
+		else
+			frames = surface;
+
+		cairo_surface_set_user_data(surface,
+			&fastiv_io_key_frame_previous, frames_tail, NULL);
+		frames_tail = surface;
+	}
+
+	if (frames) {
+		cairo_surface_set_user_data(frames, &fastiv_io_key_frame_previous,
+			frames_tail, NULL);
+	} else {
+		set_error(error, "the animation has no frames");
+		g_clear_pointer(&frames, cairo_surface_destroy);
+	}
+
+fail:
+	WebPAnimDecoderDelete(dec);
+	return frames;
+}
+
+static cairo_surface_t *
 open_libwebp(const gchar *data, gsize len, const gchar *path, GError **error)
 {
 	// It is wholly zero-initialized by libwebp.
@@ -1128,75 +1259,49 @@ open_libwebp(const gchar *data, gsize len, const gchar *path, GError **error)
 
 	// TODO(p): Differentiate between a bad WebP, and not a WebP.
 	VP8StatusCode err = 0;
-	if ((err = WebPGetFeatures((const uint8_t *) data, len, &config.input))) {
+	WebPData wd = {.bytes = (const uint8_t *) data, .size = len};
+	if ((err = WebPGetFeatures(wd.bytes, wd.size, &config.input))) {
 		set_error(error, "WebP decoding error");
 		return NULL;
 	}
 
-	// TODO(p): Support animations through WebPAnimDecoder (has_animation).
-	cairo_surface_t *result = NULL;
-
-	cairo_surface_t *surface = cairo_image_surface_create(
-		config.input.has_alpha ? CAIRO_FORMAT_ARGB32 : CAIRO_FORMAT_RGB24,
-		config.input.width, config.input.height);
-	cairo_status_t surface_status = cairo_surface_status(surface);
-	if (surface_status != CAIRO_STATUS_SUCCESS) {
-		set_error(error, cairo_status_to_string(surface_status));
+	cairo_surface_t *result = config.input.has_animation
+		? load_libwebp_animated(&wd, error)
+		: load_libwebp_nonanimated(&config, &wd, error);
+	if (!result)
 		goto fail;
-	}
-
-	config.options.use_threads = true;
-
-	config.output.width = config.input.width;
-	config.output.height = config.input.height;
-	config.output.is_external_memory = true;
-	config.output.u.RGBA.rgba = cairo_image_surface_get_data(surface);
-	config.output.u.RGBA.stride = cairo_image_surface_get_stride(surface);
-	config.output.u.RGBA.size =
-		config.output.u.RGBA.stride * cairo_image_surface_get_height(surface);
-	if (G_BYTE_ORDER == G_LITTLE_ENDIAN)
-		config.output.colorspace = MODE_bgrA;
-	else
-		config.output.colorspace = MODE_Argb;
-
-	if ((err = WebPDecode((const uint8_t *) data, len, &config))) {
-		set_error(error, "WebP decoding error");
-		goto fail;
-	}
 
 	// Of course everything has to use a different abstraction.
-	WebPData wd = {.bytes = (const uint8_t *) data, .size = len};
 	WebPDemuxer *demux = WebPDemux(&wd);
 	if (!demux) {
 		g_warning("%s: %s", path, "demux failure");
-		goto fail_demux;
+		goto fail;
 	}
 
 	uint32_t flags = WebPDemuxGetI(demux, WEBP_FF_FORMAT_FLAGS);
 	WebPChunkIterator chunk_iter;
 	if ((flags & ICCP_FLAG) &&
 		WebPDemuxGetChunk(demux, "ICCP", 1, &chunk_iter)) {
-		cairo_surface_set_user_data(surface, &fastiv_io_key_icc,
+		cairo_surface_set_user_data(result, &fastiv_io_key_icc,
 			g_bytes_new(chunk_iter.chunk.bytes, chunk_iter.chunk.size),
 			(cairo_destroy_func_t) g_bytes_unref);
 	}
 	if ((flags & EXIF_FLAG) &&
 		WebPDemuxGetChunk(demux, "EXIF", 1, &chunk_iter)) {
-		cairo_surface_set_user_data(surface, &fastiv_io_key_exif,
+		cairo_surface_set_user_data(result, &fastiv_io_key_exif,
 			g_bytes_new(chunk_iter.chunk.bytes, chunk_iter.chunk.size),
 			(cairo_destroy_func_t) g_bytes_unref);
+	}
+	if (flags & ANIMATION_FLAG) {
+		cairo_surface_set_user_data(result, &fastiv_io_key_loops,
+			(void *) (uintptr_t) WebPDemuxGetI(demux, WEBP_FF_LOOP_COUNT),
+			NULL);
 	}
 
 	WebPDemuxReleaseChunkIterator(&chunk_iter);
 	WebPDemuxDelete(demux);
 
-fail_demux:
-	result = surface;
-
 fail:
-	if (!result)
-		cairo_surface_destroy(surface);
-
 	WebPFreeDecBuffer(&config.output);
 	return result;
 }

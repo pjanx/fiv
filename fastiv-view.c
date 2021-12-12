@@ -473,6 +473,8 @@ advance_animation(FastivView *self, GdkFrameClock *clock)
 			return FALSE;
 
 		// Do not busy loop. GIF timings are given in hundredths of a second.
+		// Note that browsers seem to do [< 10] => 100:
+		// https://bugs.webkit.org/show_bug.cgi?id=36082
 		if (duration == 0)
 			duration = gdk_frame_timings_get_refresh_interval(
 				gdk_frame_clock_get_current_timings(clock)) / 1000;
