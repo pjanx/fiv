@@ -741,10 +741,14 @@ open_libjpeg_turbo(const gchar *data, gsize len, GError **error)
 	if (tjDecompress2(dec, (const unsigned char *) data, len,
 			cairo_image_surface_get_data(surface), width, stride, height,
 			pixel_format, TJFLAG_ACCURATEDCT)) {
-		set_error(error, tjGetErrorStr2(dec));
-		cairo_surface_destroy(surface);
-		tjDestroy(dec);
-		return NULL;
+		if (tjGetErrorCode(dec) == TJERR_WARNING) {
+			g_warning("%s", tjGetErrorStr2(dec));
+		} else {
+			set_error(error, tjGetErrorStr2(dec));
+			cairo_surface_destroy(surface);
+			tjDestroy(dec);
+			return NULL;
+		}
 	}
 
 	if (pixel_format == TJPF_CMYK) {
