@@ -1212,8 +1212,13 @@ load_libwebp_animated(const WebPData *wd, GError **error)
 	WebPAnimDecoder *dec = WebPAnimDecoderNew(wd, &options);
 	WebPAnimDecoderGetInfo(dec, &info);
 
-	int last_timestamp = 0;
 	cairo_surface_t *frames = NULL, *frames_tail = NULL;
+	if (info.canvas_width > INT_MAX || info.canvas_height > INT_MAX) {
+		set_error(error, "image dimensions overflow");
+		goto fail;
+	}
+
+	int last_timestamp = 0;
 	while (WebPAnimDecoderHasMoreFrames(dec)) {
 		cairo_surface_t *surface =
 			load_libwebp_frame(dec, &info, &last_timestamp, error);
