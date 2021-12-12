@@ -35,6 +35,7 @@
 #endif  // HAVE_XCURSOR
 #ifdef HAVE_LIBWEBP
 #include <webp/decode.h>
+#include <webp/demux.h>
 #endif  // HAVE_LIBWEBP
 #ifdef HAVE_LIBHEIF
 #include <libheif/heif.h>
@@ -1116,7 +1117,7 @@ open_xcursor(const gchar *data, gsize len, GError **error)
 #ifdef HAVE_LIBWEBP  //---------------------------------------------------------
 
 static cairo_surface_t *
-open_libwebp(const gchar *data, gsize len, GError **error)
+open_libwebp(const gchar *data, gsize len, const gchar *path, GError **error)
 {
 	// It is wholly zero-initialized by libwebp.
 	WebPDecoderConfig config = {};
@@ -1132,6 +1133,7 @@ open_libwebp(const gchar *data, gsize len, GError **error)
 		return NULL;
 	}
 
+	// TODO(p): Support animations through WebPAnimDecoder (has_animation).
 	cairo_surface_t *result = NULL;
 
 	cairo_surface_t *surface = cairo_image_surface_create(
@@ -1162,7 +1164,33 @@ open_libwebp(const gchar *data, gsize len, GError **error)
 		goto fail;
 	}
 
-	// TODO(p): Extract metadata, support animations (has_animation).
+	// Of course everything has to use a different abstraction.
+	WebPData wd = {.bytes = (const uint8_t *) data, .size = len};
+	WebPDemuxer *demux = WebPDemux(&wd);
+	if (!demux) {
+		g_warning("%s: %s", path, "demux failure");
+		goto fail_demux;
+	}
+
+	uint32_t flags = WebPDemuxGetI(demux, WEBP_FF_FORMAT_FLAGS);
+	WebPChunkIterator chunk_iter;
+	if ((flags & ICCP_FLAG) &&
+		WebPDemuxGetChunk(demux, "ICCP", 1, &chunk_iter)) {
+		cairo_surface_set_user_data(surface, &fastiv_io_key_icc,
+			g_bytes_new(chunk_iter.chunk.bytes, chunk_iter.chunk.size),
+			(cairo_destroy_func_t) g_bytes_unref);
+	}
+	if ((flags & EXIF_FLAG) &&
+		WebPDemuxGetChunk(demux, "EXIF", 1, &chunk_iter)) {
+		cairo_surface_set_user_data(surface, &fastiv_io_key_exif,
+			g_bytes_new(chunk_iter.chunk.bytes, chunk_iter.chunk.size),
+			(cairo_destroy_func_t) g_bytes_unref);
+	}
+
+	WebPDemuxReleaseChunkIterator(&chunk_iter);
+	WebPDemuxDelete(demux);
+
+fail_demux:
 	result = surface;
 
 fail:
@@ -1748,7 +1776,7 @@ fastiv_io_open_from_data(const char *data, size_t len, const gchar *path,
 		}
 #endif  // HAVE_XCURSOR --------------------------------------------------------
 #ifdef HAVE_LIBWEBP  //---------------------------------------------------------
-		if ((surface = open_libwebp(data, len, error)))
+		if ((surface = open_libwebp(data, len, path, error)))
 			break;
 		if (error) {
 			g_debug("%s", (*error)->message);

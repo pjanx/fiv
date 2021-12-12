@@ -18,6 +18,7 @@ libraw = dependency('libraw', required : get_option('libraw'))
 librsvg = dependency('librsvg-2.0', required : get_option('librsvg'))
 xcursor = dependency('xcursor', required : get_option('xcursor'))
 libwebp = dependency('libwebp', required : get_option('libwebp'))
+libwebpdemux = dependency('libwebpdemux', required : get_option('libwebp'))
 libwebpdecoder = dependency('libwebpdecoder', required : get_option('libwebp'))
 libheif = dependency('libheif', required : get_option('libheif'))
 libtiff = dependency('libtiff-4', required : get_option('libtiff'))
@@ -32,6 +33,7 @@ dependencies = [
 	librsvg,
 	xcursor,
 	libwebp,
+	libwebpdemux,
 	libwebpdecoder,
 	libheif,
 	libtiff,
