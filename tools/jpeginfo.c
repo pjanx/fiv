@@ -20,9 +20,10 @@
 #include <jv.h>
 
 #include <errno.h>
+#include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdbool.h>
 
 // --- ICC profiles ------------------------------------------------------------
 // v2 https://www.color.org/ICC_Minor_Revision_for_Web.pdf

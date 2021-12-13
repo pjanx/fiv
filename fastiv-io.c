@@ -1283,19 +1283,22 @@ open_libwebp(const gchar *data, gsize len, const gchar *path, GError **error)
 		goto fail;
 	}
 
+	// Releasing the demux chunk iterator is actually a no-op.
+	WebPChunkIterator chunk_iter = {};
 	uint32_t flags = WebPDemuxGetI(demux, WEBP_FF_FORMAT_FLAGS);
-	WebPChunkIterator chunk_iter;
 	if ((flags & ICCP_FLAG) &&
 		WebPDemuxGetChunk(demux, "ICCP", 1, &chunk_iter)) {
 		cairo_surface_set_user_data(result, &fastiv_io_key_icc,
 			g_bytes_new(chunk_iter.chunk.bytes, chunk_iter.chunk.size),
 			(cairo_destroy_func_t) g_bytes_unref);
+		WebPDemuxReleaseChunkIterator(&chunk_iter);
 	}
 	if ((flags & EXIF_FLAG) &&
 		WebPDemuxGetChunk(demux, "EXIF", 1, &chunk_iter)) {
 		cairo_surface_set_user_data(result, &fastiv_io_key_exif,
 			g_bytes_new(chunk_iter.chunk.bytes, chunk_iter.chunk.size),
 			(cairo_destroy_func_t) g_bytes_unref);
+		WebPDemuxReleaseChunkIterator(&chunk_iter);
 	}
 	if (flags & ANIMATION_FLAG) {
 		cairo_surface_set_user_data(result, &fastiv_io_key_loops,
@@ -1303,7 +1306,6 @@ open_libwebp(const gchar *data, gsize len, const gchar *path, GError **error)
 			NULL);
 	}
 
-	WebPDemuxReleaseChunkIterator(&chunk_iter);
 	WebPDemuxDelete(demux);
 
 fail:
