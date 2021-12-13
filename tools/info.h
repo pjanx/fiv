@@ -1275,3 +1275,97 @@ parse_psir(jv o, const uint8_t *p, size_t len)
 	}
 	return o;
 }
+
+// --- ICC profiles ------------------------------------------------------------
+// v2 https://www.color.org/ICC_Minor_Revision_for_Web.pdf
+// v4 https://www.color.org/specification/ICC1v43_2010-12.pdf
+
+static jv
+parse_icc_mluc(jv o, const uint8_t *tag, uint32_t tag_length)
+{
+	// v4 10.13
+	if (tag_length < 16)
+		return add_warning(o, "invalid ICC 'mluc' structure length");
+
+	uint32_t count = u32be(tag + 8);
+	if (count == 0)
+		return add_warning(o, "unnamed ICC profile");
+
+	// There is no particularly good reason for us to iterate, take the first.
+	const uint8_t *record = tag + 16 /* + i * u32be(tag + 12) */;
+	uint32_t len = u32be(&record[4]);
+	uint32_t off = u32be(&record[8]);
+
+	if (off + len > tag_length)
+		return add_warning(o, "invalid ICC 'mluc' structure record");
+
+	// Blindly assume simple ASCII, ensure NUL-termination.
+	char name[len], *p = name;
+	for (uint32_t i = 0; i < len / 2; i++)
+		*p++ = tag[off + i * 2 + 1];
+	*p++ = 0;
+	return jv_set(o, jv_string("ICC"),
+		JV_OBJECT(jv_string("name"), jv_string(name),
+			jv_string("version"), jv_number(4)));
+}
+
+static jv
+parse_icc_desc(jv o, const uint8_t *profile, size_t profile_len,
+	uint32_t tag_offset, uint32_t tag_length)
+{
+	const uint8_t *tag = profile + tag_offset;
+	if (tag_offset + tag_length > profile_len)
+		return add_warning(o, "unexpected end of ICC profile");
+	if (tag_length < 4)
+		return add_warning(o, "invalid ICC tag structure length");
+
+	// v2 6.5.17
+	uint32_t sig = u32be(tag);
+	if (sig == 0x6D6C7563 /* mluc */)
+		return parse_icc_mluc(o, profile + tag_offset, tag_length);
+	if (sig != 0x64657363 /* desc */)
+		return add_warning(o, "invalid ICC 'desc' structure signature");
+	if (tag_length < 12)
+		return add_warning(o, "invalid ICC 'desc' structure length");
+
+	uint32_t count = u32be(tag + 8);
+	if (tag_length < 12 + count)
+		return add_warning(o, "invalid ICC 'desc' structure length");
+
+	// Double-ensure a trailing NUL byte.
+	char name[count + 1];
+	memcpy(name, tag + 12, count);
+	name[count] = 0;
+	return jv_set(o, jv_string("ICC"),
+		JV_OBJECT(jv_string("name"), jv_string(name),
+			jv_string("version"), jv_number(2)));
+}
+
+static jv
+parse_icc(jv o, const uint8_t *profile, size_t profile_len)
+{
+	// v2 6, v4 7
+	if (profile_len < 132)
+		return add_warning(o, "ICC profile too short");
+	if (u32be(profile) != profile_len)
+		return add_warning(o, "ICC profile size mismatch");
+
+	// TODO(p): May decode more of the header fields, and validate them.
+	// Need to check both v2 and v4, this is all fairly annoying.
+	uint32_t count = u32be(profile + 128);
+	if (132 + count * 12 > profile_len)
+		return add_warning(o, "unexpected end of ICC profile");
+
+	for (uint32_t i = 0; i < count; i++) {
+		const uint8_t *entry = profile + 132 + i * 12;
+		uint32_t sig = u32be(&entry[0]);
+		uint32_t off = u32be(&entry[4]);
+		uint32_t len = u32be(&entry[8]);
+
+		// v2 6.4.32, v4 9.2.41
+		if (sig == 0x64657363 /* desc */)
+			return parse_icc_desc(o, profile, profile_len, off, len);
+	}
+	// The description is required, so this should be unreachable.
+	return jv_set(o, jv_string("ICC"), jv_bool(true));
+}

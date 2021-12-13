@@ -348,6 +348,8 @@ error:
 int
 main(int argc, char *argv[])
 {
+	(void) parse_icc;
+
 	// XXX: Can't use `xargs -P0`, there's a risk of non-atomic writes.
 	// Usage: find . -iname *.png -print0 | xargs -0 ./pnginfo
 	for (int i = 1; i < argc; i++) {
