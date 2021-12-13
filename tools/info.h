@@ -87,6 +87,10 @@ u16le(const uint8_t *p)
 // Exif Version 2.32 (2019)
 // https://www.cipa.jp/e/std/std-sec.html
 //
+// Digital Negative (DNG) Specification 1.5.0.0 (2019)
+// https://www.adobe.com/content/dam/acom/en/products/photoshop/pdfs
+// /dng_spec_1.5.0.0.pdf
+//
 // libtiff is a mess, and the format is not particularly complicated.
 // Exiv2 is senselessly copylefted, and cannot do much.
 // libexif is only marginally better.
@@ -560,7 +564,13 @@ static struct tiff_entry tiff_entries[] = {
 	{"Photoshop", 34377, NULL},  // Adobe XMP Specification Part 3 Table 12/39
 	{"Exif IFD Pointer", 34665, NULL},  // Exif 2.3
 	{"GPS Info IFD Pointer", 34853, NULL},  // Exif 2.3
+	{"TIFF/EP StandardID", 37398, NULL},  // ISO 12234 TIFF/EP image data format
 	{"ImageSourceData", 37724, NULL},  // Adobe Photoshop TIFF Technical Notes
+	{"DNGVersion", 50706, NULL},  // DNG 1.5.0.0
+	{"DNGBackwardVersion", 50707, NULL},  // DNG 1.5.0.0
+	{"UniqueCameraModel", 50708, NULL},  // DNG 1.5.0.0
+	{"LocalizedCameraModel", 50709, NULL},  // DNG 1.5.0.0
+	// TODO(p): Add more DNG tags that can be only in IFD0.
 	{}
 };
 

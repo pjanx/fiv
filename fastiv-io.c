@@ -1709,6 +1709,10 @@ open_libtiff(const gchar *data, gsize len, const gchar *path, GError **error)
 	// This is not possible with libtiff directly, because TIFFSetSubDirectory()
 	// requires an ImageLength tag that's missing, and TIFFReadCustomDirectory()
 	// takes a privately defined struct that cannot be omitted.
+	//
+	// TODO(p): Samsung Android DNGs also claim to be TIFF/EP, but use a smaller
+	// uncompressed YCbCr image. Apple ProRAW uses the new JPEG Compression (7),
+	// with a weird Orientation. It also uses that value for its raw data.
 	uint32_t subtype = 0;
 	uint16_t subifd_count = 0;
 	const uint64_t *subifd_offsets = NULL;
