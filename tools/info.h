@@ -35,6 +35,14 @@ binhex(const uint8_t *data, size_t len)
 	return buf;
 }
 
+static uint64_t
+u64be(const uint8_t *p)
+{
+	return (uint64_t) p[0] << 56 | (uint64_t) p[1] << 48 |
+		(uint64_t) p[2] << 40 | (uint64_t) p[3] << 32 |
+		(uint64_t) p[4] << 24 | p[5] << 16 | p[6] << 8 | p[7];
+}
+
 static uint32_t
 u32be(const uint8_t *p)
 {
@@ -45,6 +53,14 @@ static uint16_t
 u16be(const uint8_t *p)
 {
 	return (uint16_t) p[0] << 8 | p[1];
+}
+
+static uint64_t
+u64le(const uint8_t *p)
+{
+	return (uint64_t) p[7] << 56 | (uint64_t) p[6] << 48 |
+		(uint64_t) p[5] << 40 | (uint64_t) p[4] << 32 |
+		(uint64_t) p[3] << 24 | p[2] << 16 | p[1] << 8 | p[0];
 }
 
 static uint32_t
@@ -97,9 +113,10 @@ u16le(const uint8_t *p)
 // ExifTool is too user-oriented.
 
 static struct un {
+	uint64_t (*u64) (const uint8_t *);
 	uint32_t (*u32) (const uint8_t *);
 	uint16_t (*u16) (const uint8_t *);
-} unbe = {u32be, u16be}, unle = {u32le, u16le};
+} unbe = {u64be, u32be, u16be}, unle = {u64le, u32le, u16le};
 
 struct tiffer {
 	struct un *un;
