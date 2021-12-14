@@ -1,5 +1,5 @@
 //
-// fastiv-io.c: image loaders
+// fastiv-io.c: image operations
 //
 // Copyright (c) 2021, Přemysl Eric Janouch <p@janouch.name>
 //
@@ -36,6 +36,8 @@
 #ifdef HAVE_LIBWEBP
 #include <webp/decode.h>
 #include <webp/demux.h>
+#include <webp/encode.h>
+#include <webp/mux.h>
 #endif  // HAVE_LIBWEBP
 #ifdef HAVE_LIBHEIF
 #include <libheif/heif.h>
@@ -129,7 +131,7 @@ fastiv_io_all_supported_media_types(void)
 G_DEFINE_QUARK(fastiv-io-error-quark, fastiv_io_error)
 
 enum FastivIoError {
-	FASTIV_IO_ERROR_OPEN,
+	FASTIV_IO_ERROR_OPEN
 };
 
 static void
@@ -1934,6 +1936,7 @@ fastiv_io_open_from_data(const char *data, size_t len, const gchar *path,
 
 	// gdk-pixbuf only gives out this single field--cater to its limitations,
 	// since we'd really like to have it.
+	// TODO(p): The Exif orientation should be ignored in JPEG-XL at minimum.
 	GBytes *exif = NULL;
 	gsize exif_len = 0;
 	gconstpointer exif_data = NULL;
@@ -1947,6 +1950,159 @@ fastiv_io_open_from_data(const char *data, size_t len, const gchar *path,
 	return surface;
 }
 
+// --- Export ------------------------------------------------------------------
+#ifdef HAVE_LIBWEBP
+
+static WebPData
+encode_lossless_webp(cairo_surface_t *surface)
+{
+	cairo_format_t format = cairo_image_surface_get_format(surface);
+	int w = cairo_image_surface_get_width(surface);
+	int h = cairo_image_surface_get_height(surface);
+	if (format != CAIRO_FORMAT_ARGB32 &&
+		format != CAIRO_FORMAT_RGB24) {
+		cairo_surface_t *converted =
+			cairo_image_surface_create((format = CAIRO_FORMAT_ARGB32), w, h);
+		cairo_t *cr = cairo_create(converted);
+		cairo_set_source_surface(cr, surface, 0, 0);
+		cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+		cairo_paint(cr);
+		cairo_destroy(cr);
+		surface = converted;
+	} else {
+		surface = cairo_surface_reference(surface);
+	}
+
+	WebPConfig config = {};
+	WebPPicture picture = {};
+	if (!WebPConfigInit(&config) ||
+		!WebPConfigLosslessPreset(&config, 6) ||
+		!WebPPictureInit(&picture))
+		goto fail;
+
+	config.thread_level = true;
+	if (!WebPValidateConfig(&config))
+		goto fail;
+
+	picture.use_argb = true;
+	picture.width = w;
+	picture.height = h;
+	if (!WebPPictureAlloc(&picture))
+		goto fail;
+
+	// Cairo uses a similar internal format, so we should be able to
+	// copy it over and fix up the minor differences.
+	// This is written to be easy to follow rather than fast.
+	int stride = cairo_image_surface_get_stride(surface);
+	if (picture.argb_stride != w ||
+		picture.argb_stride * (int) sizeof *picture.argb != stride ||
+		INT_MAX / picture.argb_stride < h)
+		goto fail_compatibility;
+
+	uint32_t *argb =
+		memcpy(picture.argb, cairo_image_surface_get_data(surface), stride * h);
+	if (format == CAIRO_FORMAT_ARGB32)
+		for (int i = h * picture.argb_stride; i-- > 0; argb++)
+			*argb = wuffs_base__color_u32_argb_premul__as__color_u32_argb_nonpremul(*argb);
+	else
+		for (int i = h * picture.argb_stride; i-- > 0; argb++)
+			*argb |= 0xFF000000;
+
+	WebPMemoryWriter writer = {};
+	WebPMemoryWriterInit(&writer);
+	picture.writer = WebPMemoryWrite;
+	picture.custom_ptr = &writer;
+	if (!WebPEncode(&config, &picture))
+		g_debug("WebPEncode: %d\n", picture.error_code);
+
+fail_compatibility:
+	WebPPictureFree(&picture);
+fail:
+	cairo_surface_destroy(surface);
+	return (WebPData) {.bytes = writer.mem, .size = writer.size};
+}
+
+static gboolean
+encode_webp_image(WebPMux *mux, cairo_surface_t *frame)
+{
+	WebPData bitstream = encode_lossless_webp(frame);
+	gboolean ok = WebPMuxSetImage(mux, &bitstream, true) == WEBP_MUX_OK;
+	WebPDataClear(&bitstream);
+	return ok;
+}
+
+static gboolean
+encode_webp_animation(WebPMux *mux, cairo_surface_t *page)
+{
+	gboolean ok = TRUE;
+	for (cairo_surface_t *frame = page; ok && frame; frame =
+			cairo_surface_get_user_data(frame, &fastiv_io_key_frame_next)) {
+		WebPMuxFrameInfo info = {
+			.bitstream = encode_lossless_webp(frame),
+			.duration = (intptr_t) cairo_surface_get_user_data(
+				frame, &fastiv_io_key_frame_duration),
+			.id = WEBP_CHUNK_ANMF,
+			.dispose_method = WEBP_MUX_DISPOSE_NONE,
+			.blend_method = WEBP_MUX_NO_BLEND,
+		};
+		ok = WebPMuxPushFrame(mux, &info, true) == WEBP_MUX_OK;
+		WebPDataClear(&info.bitstream);
+	}
+	WebPMuxAnimParams params = {
+		.bgcolor = 0x00000000,  // BGRA, curiously.
+		.loop_count = (uintptr_t)
+			cairo_surface_get_user_data(page, &fastiv_io_key_loops),
+	};
+	return ok && WebPMuxSetAnimationParams(mux, &params) == WEBP_MUX_OK;
+}
+
+static gboolean
+transfer_metadata(WebPMux *mux, const char *fourcc, cairo_surface_t *page,
+	const cairo_user_data_key_t *kind)
+{
+	GBytes *data = cairo_surface_get_user_data(page, kind);
+	if (!data)
+		return TRUE;
+
+	gsize len = 0;
+	gconstpointer p = g_bytes_get_data(data, &len);
+	return WebPMuxSetChunk(mux, fourcc, &(WebPData) {.bytes = p, .size = len},
+		false) == WEBP_MUX_OK;
+}
+
+gboolean
+fastiv_io_save(cairo_surface_t *page, cairo_surface_t *frame, const gchar *path,
+	GError **error)
+{
+	g_return_val_if_fail(page != NULL, FALSE);
+	g_return_val_if_fail(path != NULL, FALSE);
+
+	gboolean ok = TRUE;
+	WebPMux *mux = WebPMuxNew();
+	if (frame)
+		ok = encode_webp_image(mux, frame);
+	else if (!cairo_surface_get_user_data(page, &fastiv_io_key_frame_next))
+		ok = encode_webp_image(mux, page);
+	else
+		ok = encode_webp_animation(mux, page);
+
+	ok = ok && transfer_metadata(mux, "EXIF", page, &fastiv_io_key_exif);
+	ok = ok && transfer_metadata(mux, "ICCP", page, &fastiv_io_key_icc);
+
+	WebPData assembled = {};
+	WebPDataInit(&assembled);
+	if (!(ok = ok && WebPMuxAssemble(mux, &assembled) == WEBP_MUX_OK))
+		set_error(error, "encoding failed");
+	else
+		ok = g_file_set_contents(
+			path, (const gchar *) assembled.bytes, assembled.size, error);
+
+	WebPMuxDelete(mux);
+	WebPDataClear(&assembled);
+	return ok;
+}
+
+#endif  // HAVE_LIBWEBP
 // --- Metadata ----------------------------------------------------------------
 
 FastivIoOrientation
@@ -1991,6 +2147,81 @@ fastiv_io_exif_orientation(const guint8 *tiff, gsize len)
 			return value16;
 	}
 	return FastivIoOrientationUnknown;
+}
+
+gboolean
+fastiv_io_save_metadata(
+	cairo_surface_t *page, const gchar *path, GError **error)
+{
+	g_return_val_if_fail(page != NULL, FALSE);
+
+	FILE *fp = fopen(path, "wb");
+	if (!fp) {
+		g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
+			"%s: %s", path, g_strerror(errno));
+		return FALSE;
+	}
+
+	// This does not constitute a valid JPEG codestream--it's a TEM marker
+	// (standalone) with trailing nonsense.
+	fprintf(fp, "\xFF\001Exiv2");
+
+	GBytes *data = NULL;
+	gsize len = 0;
+	gconstpointer p = NULL;
+
+	// Adobe XMP Specification Part 3: Storage in Files, 2020/1, 1.1.3
+	// I don't care if Exiv2 supports it this way.
+	if ((data = cairo_surface_get_user_data(page, &fastiv_io_key_exif)) &&
+		(p = g_bytes_get_data(data, &len))) {
+		while (len) {
+			gsize chunk = MIN(len, 0xFFFF - 2 - 6);
+			uint8_t header[10] = "\xFF\xE1\000\000Exif\000\000";
+			header[2] = (chunk + 2 + 6) >> 8;
+			header[3] = (chunk + 2 + 6);
+
+			fwrite(header, 1, sizeof header, fp);
+			fwrite(p, 1, chunk, fp);
+
+			len -= chunk;
+			p += chunk;
+		}
+	}
+
+	// https://www.color.org/specification/ICC1v43_2010-12.pdf B.4
+	if ((data = cairo_surface_get_user_data(page, &fastiv_io_key_icc)) &&
+		(p = g_bytes_get_data(data, &len))) {
+		gsize limit = 0xFFFF - 2 - 12;
+		uint8_t current = 0, total = (len + limit - 1) / limit;
+		while (len) {
+			gsize chunk = MIN(len, limit);
+			uint8_t header[18] = "\xFF\xE2\000\000ICC_PROFILE\000\000\000";
+			header[2] = (chunk + 2 + 12 + 2) >> 8;
+			header[3] = (chunk + 2 + 12 + 2);
+			header[16] = ++current;
+			header[17] = total;
+
+			fwrite(header, 1, sizeof header, fp);
+			fwrite(p, 1, chunk, fp);
+
+			len -= chunk;
+			p += chunk;
+		}
+	}
+
+	fprintf(fp, "\xFF\xD9");
+	if (ferror(fp)) {
+		g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
+			"%s: %s", path, g_strerror(errno));
+		fclose(fp);
+		return FALSE;
+	}
+	if (fclose(fp)) {
+		g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
+			"%s: %s", path, g_strerror(errno));
+		return FALSE;
+	}
+	return TRUE;
 }
 
 // --- Thumbnails --------------------------------------------------------------

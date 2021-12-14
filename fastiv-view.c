@@ -15,6 +15,8 @@
 // CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 //
 
+#include "config.h"
+
 #include <math.h>
 #include <stdbool.h>
 
@@ -549,6 +551,86 @@ fastiv_view_unmap(GtkWidget *widget)
 	GTK_WIDGET_CLASS(fastiv_view_parent_class)->unmap(widget);
 }
 
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+static void
+show_error_dialog(GtkWindow *parent, GError *error)
+{
+	GtkWidget *dialog = gtk_message_dialog_new(parent, GTK_DIALOG_MODAL,
+		GTK_MESSAGE_ERROR, GTK_BUTTONS_CLOSE, "%s", error->message);
+	gtk_dialog_run(GTK_DIALOG(dialog));
+	gtk_widget_destroy(dialog);
+	g_error_free(error);
+}
+
+static gboolean
+save_as(FastivView *self, gboolean frame)
+{
+	GtkWindow *window = NULL;
+	GtkWidget *widget = NULL;
+	if (GTK_IS_WINDOW((widget = gtk_widget_get_toplevel(GTK_WIDGET(self)))))
+		window = GTK_WINDOW(widget);
+
+	GtkWidget *dialog =
+		gtk_file_chooser_dialog_new(frame ? "Save frame as" : "Save page as",
+			window, GTK_FILE_CHOOSER_ACTION_SAVE,
+			"_Cancel", GTK_RESPONSE_CANCEL, "_Save", GTK_RESPONSE_ACCEPT, NULL);
+	GtkFileChooser *chooser = GTK_FILE_CHOOSER(dialog);
+
+	// TODO(p): Consider a hard dependency on libwebp, or clean this up.
+#ifdef HAVE_LIBWEBP
+	// This is the best general format: supports lossless encoding, animations,
+	// alpha channel, and Exif and ICC profile metadata.
+	// PNG is another viable option, but sPNG can't do APNG, Wuffs can't save,
+	// and libpng is a pain in the arse.
+	GtkFileFilter *webp_filter = gtk_file_filter_new();
+	gtk_file_filter_add_mime_type(webp_filter, "image/webp");
+	gtk_file_filter_add_pattern(webp_filter, "*.webp");
+	gtk_file_filter_set_name(webp_filter, "Lossless WebP");
+	gtk_file_chooser_add_filter(chooser, webp_filter);
+
+	// TODO(p): Derive it from the currently displayed filename,
+	// and set the directory to the same place.
+	gtk_file_chooser_set_current_name(
+		chooser, frame ? "frame.webp" : "page.webp");
+#endif  // HAVE_LIBWEBP
+
+	// The format is supported by Exiv2 and ExifTool.
+	// This is mostly a developer tool.
+	GtkFileFilter *exv_filter = gtk_file_filter_new();
+	gtk_file_filter_add_mime_type(exv_filter, "image/x-exv");
+	gtk_file_filter_add_pattern(exv_filter, "*.exv");
+	gtk_file_filter_set_name(exv_filter, "Exiv2 metadata");
+	gtk_file_chooser_add_filter(chooser, exv_filter);
+
+	switch (gtk_dialog_run(GTK_DIALOG(dialog))) {
+		gchar *path;
+	case GTK_RESPONSE_ACCEPT:
+		path = gtk_file_chooser_get_filename(chooser);
+
+		GError *error = NULL;
+#ifdef HAVE_LIBWEBP
+		if (gtk_file_chooser_get_filter(chooser) == webp_filter)
+			fastiv_io_save(self->page,
+				frame ? self->frame : NULL, path, &error);
+		else
+#endif  // HAVE_LIBWEBP
+			fastiv_io_save_metadata(self->page, path, &error);
+		if (error)
+			show_error_dialog(window, error);
+		g_free(path);
+
+		// Fall-through.
+	default:
+		gtk_widget_destroy(dialog);
+		// Fall-through.
+	case GTK_RESPONSE_NONE:
+		return TRUE;
+	}
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
 static gboolean
 fastiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 {
@@ -569,6 +651,10 @@ fastiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 			return set_scale(self, self->scale * SCALE_STEP);
 		case GDK_KEY_minus:
 			return set_scale(self, self->scale / SCALE_STEP);
+		case GDK_KEY_s:
+			return save_as(self, FALSE);
+		case GDK_KEY_S:
+			return save_as(self, TRUE);
 		}
 	}
 	if (state != 0)

@@ -1,5 +1,5 @@
 //
-// fastiv-io.h: image loaders
+// fastiv-io.h: image operations
 //
 // Copyright (c) 2021, Přemysl Eric Janouch <p@janouch.name>
 //
@@ -59,6 +59,13 @@ cairo_surface_t *fastiv_io_open_from_data(
 
 int fastiv_io_filecmp(GFile *f1, GFile *f2);
 
+// --- Export ------------------------------------------------------------------
+
+/// Requires libwebp.
+/// If no exact frame is specified, this potentially creates an animation.
+gboolean fastiv_io_save(cairo_surface_t *page, cairo_surface_t *frame,
+	const gchar *path, GError **error);
+
 // --- Metadata ----------------------------------------------------------------
 
 // https://www.cipa.jp/std/documents/e/DC-008-2012_E.pdf Table 6
@@ -75,6 +82,10 @@ typedef enum _FastivIoOrientation {
 } FastivIoOrientation;
 
 FastivIoOrientation fastiv_io_exif_orientation(const guint8 *exif, gsize len);
+
+/// Save metadata attached by this module in Exiv2 format.
+gboolean fastiv_io_save_metadata(
+	cairo_surface_t *page, const gchar *path, GError **error);
 
 // --- Thumbnails --------------------------------------------------------------
 
