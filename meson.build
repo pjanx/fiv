@@ -21,7 +21,6 @@ libwebp = dependency('libwebp', required : get_option('libwebp'))
 libwebpdemux = dependency('libwebpdemux', required : get_option('libwebp'))
 libwebpdecoder = dependency('libwebpdecoder', required : get_option('libwebp'))
 libwebpmux = dependency('libwebpmux', required : get_option('libwebp'))
-libwebpencoder = dependency('libwebpencoder', required : get_option('libwebp'))
 libheif = dependency('libheif', required : get_option('libheif'))
 libtiff = dependency('libtiff-4', required : get_option('libtiff'))
 gdkpixbuf = dependency('gdk-pixbuf-2.0', required : get_option('gdk-pixbuf'))
@@ -38,7 +37,6 @@ dependencies = [
 	libwebpdemux,
 	libwebpdecoder,
 	libwebpmux,
-	libwebpencoder,
 	libheif,
 	libtiff,
 	gdkpixbuf,
