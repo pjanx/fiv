@@ -162,6 +162,9 @@ try_append_page(cairo_surface_t *surface, cairo_surface_t **result,
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+// From libwebp, verified to exactly match [x * a / 255].
+#define PREMULTIPLY8(a, x) (((uint32_t) (x) * (uint32_t) (a) * 32897U) >> 23)
+
 static bool
 pull_passthrough(const wuffs_base__more_information *minfo,
 	wuffs_base__io_buffer *src, wuffs_base__io_buffer *dst, GError **error)
@@ -1375,12 +1378,11 @@ load_libheif_image(struct heif_image_handle *handle, GError **error)
 		for (int y = 0; y < h; y++) {
 			uint32_t *dstp = (uint32_t *) (dst + dst_stride * y);
 			for (int x = 0; x < w; x++) {
-				uint32_t pixel = dstp[x], a = pixel >> 24;
-				uint8_t r = pixel >> 16;
-				uint8_t g = pixel >> 8;
-				uint8_t b = pixel;
+				uint32_t argb = dstp[x], a = argb >> 24;
 				dstp[x] = a << 24 |
-					(r * a / 255) << 16 | (g * a / 255) << 8 | (b * a / 255);
+					PREMULTIPLY8(a, 0xFF & (argb >> 16)) << 16 |
+					PREMULTIPLY8(a, 0xFF & (argb >>  8)) <<  8 |
+					PREMULTIPLY8(a, 0xFF &  argb);
 			}
 		}
 	}
@@ -2361,9 +2363,9 @@ read_spng_thumbnail(
 		for (size_t i = size / sizeof *data; i--; ) {
 			const uint8_t *unit = (const uint8_t *) &data[i];
 			uint32_t a = unit[3],
-				b = unit[2] * a / 255,
-				g = unit[1] * a / 255,
-				r = unit[0] * a / 255;
+				b = PREMULTIPLY8(a, unit[2]),
+				g = PREMULTIPLY8(a, unit[1]),
+				r = PREMULTIPLY8(a, unit[0]);
 			data[i] = a << 24 | r << 16 | g << 8 | b;
 		}
 	} else {
