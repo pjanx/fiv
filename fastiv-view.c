@@ -165,6 +165,46 @@ get_display_dimensions(FastivView *self, int *width, int *height)
 	*height = ceil(h * self->scale);
 }
 
+static cairo_matrix_t
+get_orientation_matrix(FastivIoOrientation o, double width, double height)
+{
+	cairo_matrix_t matrix = {};
+	cairo_matrix_init_identity(&matrix);
+	switch (o) {
+	case FastivIoOrientation90:
+		cairo_matrix_rotate(&matrix, -M_PI_2);
+		cairo_matrix_translate(&matrix, -width, 0);
+		break;
+	case FastivIoOrientation180:
+		cairo_matrix_scale(&matrix, -1, -1);
+		cairo_matrix_translate(&matrix, -width, -height);
+		break;
+	case FastivIoOrientation270:
+		cairo_matrix_rotate(&matrix, +M_PI_2);
+		cairo_matrix_translate(&matrix, 0, -height);
+		break;
+	case FastivIoOrientationMirror0:
+		cairo_matrix_scale(&matrix, -1, +1);
+		cairo_matrix_translate(&matrix, -width, 0);
+		break;
+	case FastivIoOrientationMirror90:
+		cairo_matrix_rotate(&matrix, +M_PI_2);
+		cairo_matrix_scale(&matrix, -1, +1);
+		cairo_matrix_translate(&matrix, -width, -height);
+		break;
+	case FastivIoOrientationMirror180:
+		cairo_matrix_scale(&matrix, +1, -1);
+		cairo_matrix_translate(&matrix, 0, -height);
+		break;
+	case FastivIoOrientationMirror270:
+		cairo_matrix_rotate(&matrix, -M_PI_2);
+		cairo_matrix_scale(&matrix, -1, +1);
+	default:
+		break;
+	}
+	return matrix;
+}
+
 static void
 fastiv_view_get_preferred_height(
 	GtkWidget *widget, gint *minimum, gint *natural)
@@ -320,41 +360,7 @@ fastiv_view_draw(GtkWidget *widget, cairo_t *cr)
 	cairo_scale(cr, self->scale, self->scale);
 	cairo_set_source_surface(cr, self->frame, 0, 0);
 
-	cairo_matrix_t matrix = {};
-	cairo_matrix_init_identity(&matrix);
-	switch (self->orientation) {
-	case FastivIoOrientation90:
-		cairo_matrix_rotate(&matrix, -M_PI_2);
-		cairo_matrix_translate(&matrix, -sw, 0);
-		break;
-	case FastivIoOrientation180:
-		cairo_matrix_scale(&matrix, -1, -1);
-		cairo_matrix_translate(&matrix, -sw, -sh);
-		break;
-	case FastivIoOrientation270:
-		cairo_matrix_rotate(&matrix, +M_PI_2);
-		cairo_matrix_translate(&matrix, 0, -sh);
-		break;
-	case FastivIoOrientationMirror0:
-		cairo_matrix_scale(&matrix, -1, +1);
-		cairo_matrix_translate(&matrix, -sw, 0);
-		break;
-	case FastivIoOrientationMirror90:
-		cairo_matrix_rotate(&matrix, +M_PI_2);
-		cairo_matrix_scale(&matrix, -1, +1);
-		cairo_matrix_translate(&matrix, -sw, -sh);
-		break;
-	case FastivIoOrientationMirror180:
-		cairo_matrix_scale(&matrix, +1, -1);
-		cairo_matrix_translate(&matrix, 0, -sh);
-		break;
-	case FastivIoOrientationMirror270:
-		cairo_matrix_rotate(&matrix, -M_PI_2);
-		cairo_matrix_scale(&matrix, -1, +1);
-	default:
-		break;
-	}
-
+	cairo_matrix_t matrix = get_orientation_matrix(self->orientation, sw, sh);
 	cairo_pattern_t *pattern = cairo_get_source(cr);
 	cairo_pattern_set_matrix(pattern, &matrix);
 	cairo_pattern_set_extend(pattern, CAIRO_EXTEND_PAD);
