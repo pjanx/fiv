@@ -255,6 +255,7 @@ struct load_wuffs_frame_context {
 	bool expand_16_float;               ///< Custom copying swizzle for RGBA128F
 	GBytes *meta_exif;                  ///< Reference-counted Exif
 	GBytes *meta_iccp;                  ///< Reference-counted ICC profile
+	GBytes *meta_xmp;                   ///< Reference-counted XMP
 
 	cairo_surface_t *result;            ///< The resulting surface (referenced)
 	cairo_surface_t *result_tail;       ///< The final animation frame
@@ -414,6 +415,9 @@ load_wuffs_frame(struct load_wuffs_frame_context *ctx, GError **error)
 	if (ctx->meta_iccp)
 		cairo_surface_set_user_data(surface, &fastiv_io_key_icc,
 			g_bytes_ref(ctx->meta_iccp), (cairo_destroy_func_t) g_bytes_unref);
+	if (ctx->meta_xmp)
+		cairo_surface_set_user_data(surface, &fastiv_io_key_xmp,
+			g_bytes_ref(ctx->meta_xmp), (cairo_destroy_func_t) g_bytes_unref);
 
 	cairo_surface_set_user_data(surface, &fastiv_io_key_loops,
 		(void *) (uintptr_t) wuffs_base__image_decoder__num_animation_loops(
@@ -492,6 +496,13 @@ open_wuffs(
 				break;
 			}
 			ctx.meta_iccp = bytes;
+			continue;
+		case WUFFS_BASE__FOURCC__XMP:
+			if (ctx.meta_xmp) {
+				g_warning("ignoring repeated XMP");
+				break;
+			}
+			ctx.meta_xmp = bytes;
 			continue;
 		}
 
@@ -585,6 +596,7 @@ fail:
 	free(ctx.workbuf.ptr);
 	g_clear_pointer(&ctx.meta_exif, g_bytes_unref);
 	g_clear_pointer(&ctx.meta_iccp, g_bytes_unref);
+	g_clear_pointer(&ctx.meta_xmp, g_bytes_unref);
 	return ctx.result;
 }
 
@@ -683,7 +695,8 @@ parse_jpeg_metadata(cairo_surface_t *surface, const gchar *data, gsize len)
 			break;
 
 		// https://www.cipa.jp/std/documents/e/DC-008-2012_E.pdf 4.7.2
-		// Do not check the padding byte.
+		// Adobe XMP Specification Part 3: Storage in Files, 2020/1, 1.1.3
+		// Not checking the padding byte is intentional.
 		if (marker == APP1 && p - payload >= 6 &&
 			!memcmp(payload, "Exif\0", 5) && !exif->len) {
 			payload += 6;
@@ -698,6 +711,8 @@ parse_jpeg_metadata(cairo_surface_t *surface, const gchar *data, gsize len)
 			g_byte_array_append(icc, payload, p - payload);
 			icc_done = payload[-1] == icc_sequence;
 		}
+
+		// TODO(p): Extract the main XMP segment.
 	}
 
 	if (exif->len)
@@ -1291,6 +1306,13 @@ open_libwebp(const gchar *data, gsize len, const gchar *path, GError **error)
 	// Releasing the demux chunk iterator is actually a no-op.
 	WebPChunkIterator chunk_iter = {};
 	uint32_t flags = WebPDemuxGetI(demux, WEBP_FF_FORMAT_FLAGS);
+	if ((flags & EXIF_FLAG) &&
+		WebPDemuxGetChunk(demux, "EXIF", 1, &chunk_iter)) {
+		cairo_surface_set_user_data(result, &fastiv_io_key_exif,
+			g_bytes_new(chunk_iter.chunk.bytes, chunk_iter.chunk.size),
+			(cairo_destroy_func_t) g_bytes_unref);
+		WebPDemuxReleaseChunkIterator(&chunk_iter);
+	}
 	if ((flags & ICCP_FLAG) &&
 		WebPDemuxGetChunk(demux, "ICCP", 1, &chunk_iter)) {
 		cairo_surface_set_user_data(result, &fastiv_io_key_icc,
@@ -1298,9 +1320,9 @@ open_libwebp(const gchar *data, gsize len, const gchar *path, GError **error)
 			(cairo_destroy_func_t) g_bytes_unref);
 		WebPDemuxReleaseChunkIterator(&chunk_iter);
 	}
-	if ((flags & EXIF_FLAG) &&
-		WebPDemuxGetChunk(demux, "EXIF", 1, &chunk_iter)) {
-		cairo_surface_set_user_data(result, &fastiv_io_key_exif,
+	if ((flags & XMP_FLAG) &&
+		WebPDemuxGetChunk(demux, "XMP ", 1, &chunk_iter)) {
+		cairo_surface_set_user_data(result, &fastiv_io_key_xmp,
 			g_bytes_new(chunk_iter.chunk.bytes, chunk_iter.chunk.size),
 			(cairo_destroy_func_t) g_bytes_unref);
 		WebPDemuxReleaseChunkIterator(&chunk_iter);
@@ -1658,11 +1680,16 @@ load_libtiff_directory(TIFF *tiff, GError **error)
 	cairo_surface_mark_dirty(surface);
 	// XXX: The whole file is essentially an Exif, any ideas?
 
-	const uint32_t icc_length = 0;
-	const void *icc_profile = NULL;
-	if (TIFFGetField(tiff, TIFFTAG_ICCPROFILE, &icc_length, &icc_profile)) {
+	const uint32_t meta_len = 0;
+	const void *meta = NULL;
+	if (TIFFGetField(tiff, TIFFTAG_ICCPROFILE, &meta_len, &meta)) {
 		cairo_surface_set_user_data(surface, &fastiv_io_key_icc,
-			g_bytes_new(icc_profile, icc_length),
+			g_bytes_new(meta, meta_len),
+			(cairo_destroy_func_t) g_bytes_unref);
+	}
+	if (TIFFGetField(tiff, TIFFTAG_XMLPACKET, &meta_len, &meta)) {
+		cairo_surface_set_user_data(surface, &fastiv_io_key_xmp,
+			g_bytes_new(meta, meta_len),
 			(cairo_destroy_func_t) g_bytes_unref);
 	}
 
@@ -1800,6 +1827,7 @@ open_gdkpixbuf(const gchar *data, gsize len, GError **error)
 cairo_user_data_key_t fastiv_io_key_exif;
 cairo_user_data_key_t fastiv_io_key_orientation;
 cairo_user_data_key_t fastiv_io_key_icc;
+cairo_user_data_key_t fastiv_io_key_xmp;
 
 cairo_user_data_key_t fastiv_io_key_frame_next;
 cairo_user_data_key_t fastiv_io_key_frame_previous;
@@ -2091,6 +2119,7 @@ fastiv_io_save(cairo_surface_t *page, cairo_surface_t *frame, const gchar *path,
 
 	ok = ok && transfer_metadata(mux, "EXIF", page, &fastiv_io_key_exif);
 	ok = ok && transfer_metadata(mux, "ICCP", page, &fastiv_io_key_icc);
+	ok = ok && transfer_metadata(mux, "XMP ", page, &fastiv_io_key_xmp);
 
 	WebPData assembled = {};
 	WebPDataInit(&assembled);
@@ -2209,6 +2238,24 @@ fastiv_io_save_metadata(
 
 			len -= chunk;
 			p += chunk;
+		}
+	}
+
+	// Adobe XMP Specification Part 3: Storage in Files, 2020/1, 1.1.3
+	// If the main segment overflows, then it's a sign of bad luck,
+	// because 1.1.3.1 is way too complex.
+	if ((data = cairo_surface_get_user_data(page, &fastiv_io_key_xmp)) &&
+		(p = g_bytes_get_data(data, &len))) {
+		while (len) {
+			gsize chunk = MIN(len, 0xFFFF - 2 - 29);
+			uint8_t header[33] =
+				"\xFF\xE1\000\000http://ns.adobe.com/xap/1.0/\000";
+			header[2] = (chunk + 2 + 29) >> 8;
+			header[3] = (chunk + 2 + 29);
+
+			fwrite(header, 1, sizeof header, fp);
+			fwrite(p, 1, chunk, fp);
+			break;
 		}
 	}
 

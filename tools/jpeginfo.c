@@ -496,6 +496,8 @@ parse_marker(uint8_t marker, const uint8_t *p, const uint8_t *end,
 		payload += 14;
 		parse_append(&data->psir, &data->psir_len, payload, p - payload);
 	}
+
+	// TODO(p): Extract all XMP segments.
 	return p;
 }
 
