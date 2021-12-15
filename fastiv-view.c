@@ -569,18 +569,78 @@ show_error_dialog(GtkWindow *parent, GError *error)
 	g_error_free(error);
 }
 
+static GtkWindow *
+get_toplevel(GtkWidget *widget)
+{
+	if (GTK_IS_WINDOW((widget = gtk_widget_get_toplevel(widget))))
+		return GTK_WINDOW(widget);
+	return NULL;
+}
+
+static void
+on_draw_page(G_GNUC_UNUSED GtkPrintOperation *operation,
+	GtkPrintContext *context, G_GNUC_UNUSED int page_nr, FastivView *self)
+{
+	double surface_width_px = 0, surface_height_px = 0;
+	get_surface_dimensions(self, &surface_width_px, &surface_height_px);
+
+	// Any DPI will be wrong, unless we import that information from the image.
+	double scale = 1 / 96.;
+	double w = surface_width_px * scale, h = surface_height_px * scale;
+
+	// Scale down to fit the print area, taking care to not divide by zero.
+	double areaw = gtk_print_context_get_width(context);
+	double areah = gtk_print_context_get_height(context);
+	scale *= fmin((areaw < w) ? areaw / w : 1, (areah < h) ? areah / h : 1);
+
+	cairo_t *cr = gtk_print_context_get_cairo_context(context);
+	cairo_scale(cr, scale, scale);
+	cairo_set_source_surface(cr, self->frame, 0, 0);
+	cairo_matrix_t matrix = get_orientation_matrix(
+		self->orientation, surface_width_px, surface_height_px);
+	cairo_pattern_set_matrix(cairo_get_source(cr), &matrix);
+	cairo_paint(cr);
+}
+
+static gboolean
+print(FastivView *self)
+{
+	GtkPrintOperation *print = gtk_print_operation_new();
+	gtk_print_operation_set_n_pages(print, 1);
+	gtk_print_operation_set_embed_page_setup(print, TRUE);
+	gtk_print_operation_set_unit(print, GTK_UNIT_INCH);
+	gtk_print_operation_set_job_name(print, "Image");
+	g_signal_connect(print, "draw-page", G_CALLBACK(on_draw_page), self);
+
+	static GtkPrintSettings *settings = NULL;
+	if (settings != NULL)
+		gtk_print_operation_set_print_settings(print, settings);
+
+	GError *error = NULL;
+	GtkWindow *window = get_toplevel(GTK_WIDGET(self));
+	GtkPrintOperationResult res = gtk_print_operation_run(
+		print, GTK_PRINT_OPERATION_ACTION_PRINT_DIALOG, window, &error);
+	if (res == GTK_PRINT_OPERATION_RESULT_APPLY) {
+		if (settings != NULL)
+			g_object_unref(settings);
+		settings = g_object_ref(gtk_print_operation_get_print_settings(print));
+	}
+	if (error)
+		show_error_dialog(window, error);
+
+	g_object_unref(print);
+	return TRUE;
+}
+
 static gboolean
 save_as(FastivView *self, gboolean frame)
 {
-	GtkWindow *window = NULL;
-	GtkWidget *widget = NULL;
-	if (GTK_IS_WINDOW((widget = gtk_widget_get_toplevel(GTK_WIDGET(self)))))
-		window = GTK_WINDOW(widget);
+	GtkWindow *window = get_toplevel(GTK_WIDGET(self));
+	GtkWidget *dialog = gtk_file_chooser_dialog_new(
+		frame ? "Save frame as" : "Save page as",
+		window, GTK_FILE_CHOOSER_ACTION_SAVE,
+		"_Cancel", GTK_RESPONSE_CANCEL, "_Save", GTK_RESPONSE_ACCEPT, NULL);
 
-	GtkWidget *dialog =
-		gtk_file_chooser_dialog_new(frame ? "Save frame as" : "Save page as",
-			window, GTK_FILE_CHOOSER_ACTION_SAVE,
-			"_Cancel", GTK_RESPONSE_CANCEL, "_Save", GTK_RESPONSE_ACCEPT, NULL);
 	GtkFileChooser *chooser = GTK_FILE_CHOOSER(dialog);
 
 	// TODO(p): Consider a hard dependency on libwebp, or clean this up.
@@ -657,6 +717,8 @@ fastiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 			return set_scale(self, self->scale * SCALE_STEP);
 		case GDK_KEY_minus:
 			return set_scale(self, self->scale / SCALE_STEP);
+		case GDK_KEY_p:
+			return print(self);
 		case GDK_KEY_s:
 			return save_as(self, FALSE);
 		case GDK_KEY_S:
