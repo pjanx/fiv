@@ -28,6 +28,10 @@
 // https://github.com/webmproject/libwebp/blob/master/doc/webp-container-spec.txt
 // https://github.com/webmproject/libwebp/blob/master/doc/webp-lossless-bitstream-spec.txt
 // https://datatracker.ietf.org/doc/html/rfc6386
+//
+// Pretty versions, hopefully not outdated:
+// https://developers.google.com/speed/webp/docs/riff_container
+// https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification
 
 static jv
 parse_webp(jv o, const uint8_t *p, size_t len)

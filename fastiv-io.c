@@ -1896,6 +1896,7 @@ fastiv_io_open_from_data(const char *data, size_t len, const gchar *path,
 		}
 #endif  // HAVE_XCURSOR --------------------------------------------------------
 #ifdef HAVE_LIBWEBP  //---------------------------------------------------------
+		// TODO(p): https://github.com/google/wuffs/commit/4c04ac1
 		if ((surface = open_libwebp(data, len, path, error)))
 			break;
 		if (error) {
