@@ -96,6 +96,13 @@ resources = gnome.compile_resources('resources',
 	c_name : 'resources',
 )
 
+tiff_tables = custom_target('tiff-tables.h',
+	output : 'tiff-tables.h',
+	input : 'tiff-tables.db',
+	command : ['tiff-tables.awk', '@INPUT@'],
+	capture : true,
+)
+
 exe = executable('fiv', 'fiv.c', 'fiv-view.c', 'fiv-io.c',
 	'fiv-browser.c', 'fiv-sidebar.c', 'fiv-thumbnail.c', 'xdg.c', resources,
 	install : true,
@@ -122,7 +129,7 @@ if get_option('tools').enabled()
 	tools_c_args = cc.get_supported_arguments(
 		'-Wno-unused-function', '-Wno-unused-parameter')
 	foreach tool : ['pnginfo', 'jpeginfo', 'tiffinfo', 'webpinfo', 'bmffinfo']
-		executable(tool, 'tools/' + tool + '.c',
+		executable(tool, 'tools/' + tool + '.c', tiff_tables,
 			dependencies : tools_dependencies,
 			c_args: tools_c_args)
 	endforeach
