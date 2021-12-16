@@ -579,7 +579,7 @@ main(int argc, char *argv[])
 	// This is incredibly broken https://stackoverflow.com/a/51054396/76313
 	// thus resolving the problem using overlaps.
 	const char *style = "@define-color fastiv-tile #3c3c3c; \
-		fastiv-view, fastiv-browser { background: #222; } \
+		fastiv-view, fastiv-browser { background: @content_view_bg; } \
 		placessidebar.fastiv .toolbar { padding: 2px 6px; } \
 		placessidebar.fastiv box > separator { margin: 4px 0; } \
 		fastiv-browser { padding: 5px; } \
@@ -596,8 +596,8 @@ main(int argc, char *argv[])
 			background-position: 0 0, 0 20px, 20px -20px, -20px 0px; \
 		} \
 		fastiv-browser.item.symbolic { \
-			border-color: transparent; color: #222; \
-			background: #2c2c2c; background-image: none; \
+			border-color: transparent; color: @content_view_bg; \
+			background: @theme_bg_color; background-image: none; \
 		}";
 
 	GtkCssProvider *provider = gtk_css_provider_new();
