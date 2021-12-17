@@ -40,12 +40,14 @@ typedef enum _FivViewCommand {
 	FIV_VIEW_COMMAND_FRAME_NEXT,
 	// Going to the end frame makes no sense, wrap around if needed.
 
+	FIV_VIEW_COMMAND_TOGGLE_FILTER,
 	FIV_VIEW_COMMAND_PRINT,
 	FIV_VIEW_COMMAND_SAVE_PAGE,
 
 	FIV_VIEW_COMMAND_ZOOM_IN,
 	FIV_VIEW_COMMAND_ZOOM_OUT,
-	FIV_VIEW_COMMAND_ZOOM_1
+	FIV_VIEW_COMMAND_ZOOM_1,
+	FIV_VIEW_COMMAND_TOGGLE_SCALE_TO_FIT,
 } FivViewCommand;
 
 /// Execute a user action.

@@ -57,6 +57,7 @@ exit_fatal(const gchar *format, ...)
 // TODO(p): Add a toggle for a checkerboard background.
 // TODO(p): Implement commented-out actions.
 #define B make_toolbar_button
+#define T make_toolbar_toggle
 #define TOOLBAR(XX) \
 	XX(BROWSE,        B("view-grid-symbolic", "Browse")) \
 	XX(FILE_PREVIOUS, B("go-previous-symbolic", "Previous file")) \
@@ -77,11 +78,11 @@ exit_fatal(const gchar *format, ...)
 	XX(SCALE,         gtk_label_new("100%")) \
 	XX(MINUS,         B("zoom-out-symbolic", "Zoom out")) \
 	XX(ONE,           B("zoom-original-symbolic", "Original size")) \
-	/* XX(FIT,        B("zoom-fit-best-symbolic", "Scale to fit")) */ \
+	XX(FIT,           T("zoom-fit-best-symbolic", "Scale to fit")) \
 	XX(S4,            make_separator()) \
 	/* XX(PIN,        B("view-pin-symbolic", "Keep view configuration")) */ \
 	/* Or perhaps "blur-symbolic", also in the extended set. */ \
-	/* XX(SMOOTH,     B("blend-tool-symbolic", "Smooth scaling")) */ \
+	XX(SMOOTH,        T("blend-tool-symbolic", "Smooth scaling")) \
 	/* XX(COLOR,      B("preferences-color-symbolic", "Color management")) */ \
 	XX(SAVE,          B("document-save-as-symbolic", "Save as...")) \
 	XX(PRINT,         B("document-print-symbolic", "Print...")) \
@@ -609,6 +610,21 @@ make_toolbar_button(const gchar *symbolic, const gchar *tooltip)
 }
 
 static GtkWidget *
+make_toolbar_toggle(const gchar *symbolic, const gchar *tooltip)
+{
+	GtkWidget *button = gtk_toggle_button_new();
+	gtk_button_set_image(GTK_BUTTON(button),
+		gtk_image_new_from_icon_name(symbolic, GTK_ICON_SIZE_BUTTON));
+	gtk_widget_set_tooltip_text(button, tooltip);
+//	gtk_widget_set_sensitive(button, FALSE);
+	gtk_widget_set_focus_on_click(button, FALSE);
+
+	gtk_style_context_add_class(
+		gtk_widget_get_style_context(button), GTK_STYLE_CLASS_FLAT);
+	return button;
+}
+
+static GtkWidget *
 make_separator(void)
 {
 	// TODO(p): See if it's possible to give the separator room to shrink
@@ -620,7 +636,7 @@ make_separator(void)
 }
 
 static void
-on_notify_scale(
+on_notify_view_scale(
 	GObject *object, GParamSpec *param_spec, G_GNUC_UNUSED gpointer user_data)
 {
 	double scale = 0;
@@ -629,16 +645,38 @@ on_notify_scale(
 	gchar *scale_str = g_strdup_printf("%.0f%%", round(scale * 100));
 	gtk_label_set_text(GTK_LABEL(g.toolbar[TOOLBAR_SCALE]), scale_str);
 	g_free(scale_str);
+
+	// FIXME: The label doesn't immediately assume its new width.
 }
 
 static void
-toolbar_connect(int index, GCallback callback)
+on_notify_view_boolean(
+	GObject *object, GParamSpec *param_spec, gpointer user_data)
 {
-	g_signal_connect_swapped(g.toolbar[index], "clicked", callback, NULL);
+	gboolean b = FALSE;
+	g_object_get(object, g_param_spec_get_name(param_spec), &b, NULL);
+	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(user_data), b);
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+static void
+on_toolbar_view_toggle(GtkToggleButton *button, const char *property)
+{
+	g_object_set(g.view, property, gtk_toggle_button_get_active(button), NULL);
 }
 
 static void
-on_command(intptr_t command)
+toolbar_toggler(int index, const char *property)
+{
+	g_signal_connect(g.toolbar[index], "toggled",
+		G_CALLBACK(on_toolbar_view_toggle), (gpointer) property);
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+static void
+on_toolbar_view_command(intptr_t command)
 {
 	fiv_view_command(FIV_VIEW(g.view), command);
 }
@@ -647,7 +685,15 @@ static void
 toolbar_command(int index, FivViewCommand command)
 {
 	g_signal_connect_swapped(g.toolbar[index], "clicked",
-		G_CALLBACK(on_command), (void *) (intptr_t) command);
+		G_CALLBACK(on_toolbar_view_command), (void *) (intptr_t) command);
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+static void
+toolbar_connect(int index, GCallback callback)
+{
+	g_signal_connect_swapped(g.toolbar[index], "clicked", callback, NULL);
 }
 
 // TODO(p): The toolbar should not be visible in fullscreen,
@@ -686,12 +732,21 @@ make_view_toolbar(void)
 	toolbar_command(TOOLBAR_PLUS,          FIV_VIEW_COMMAND_ZOOM_IN);
 	toolbar_command(TOOLBAR_MINUS,         FIV_VIEW_COMMAND_ZOOM_OUT);
 	toolbar_command(TOOLBAR_ONE,           FIV_VIEW_COMMAND_ZOOM_1);
+	toolbar_toggler(TOOLBAR_FIT,           "scale-to-fit");
+	toolbar_toggler(TOOLBAR_SMOOTH,        "filter");
 	toolbar_command(TOOLBAR_PRINT,         FIV_VIEW_COMMAND_PRINT);
 	toolbar_command(TOOLBAR_SAVE,          FIV_VIEW_COMMAND_SAVE_PAGE);
 	toolbar_command(TOOLBAR_LEFT,          FIV_VIEW_COMMAND_ROTATE_LEFT);
 	toolbar_command(TOOLBAR_MIRROR,        FIV_VIEW_COMMAND_MIRROR);
 	toolbar_command(TOOLBAR_RIGHT,         FIV_VIEW_COMMAND_ROTATE_RIGHT);
 	toolbar_connect(TOOLBAR_FULLSCREEN,    G_CALLBACK(toggle_fullscreen));
+
+	g_signal_connect(g.view, "notify::scale-to-fit",
+		G_CALLBACK(on_notify_view_boolean), g.toolbar[TOOLBAR_FIT]);
+	g_signal_connect(g.view, "notify::filter",
+		G_CALLBACK(on_notify_view_boolean), g.toolbar[TOOLBAR_SMOOTH]);
+	g_object_notify(G_OBJECT(g.view), "scale-to-fit");
+	g_object_notify(G_OBJECT(g.view), "filter");
 	return view_toolbar;
 }
 
@@ -786,7 +841,7 @@ main(int argc, char *argv[])
 	g_signal_connect(g.view, "button-press-event",
 		G_CALLBACK(on_button_press_view), NULL);
 	g_signal_connect(g.view, "notify::scale",
-		G_CALLBACK(on_notify_scale), NULL);
+		G_CALLBACK(on_notify_view_scale), NULL);
 	gtk_container_add(GTK_CONTAINER(view_scroller), g.view);
 
 	// Maybe our custom widgets should derive colours from the theme instead.

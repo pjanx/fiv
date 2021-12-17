@@ -123,6 +123,25 @@ fiv_view_get_property(
 }
 
 static void
+fiv_view_set_property(
+	GObject *object, guint property_id, const GValue *value, GParamSpec *pspec)
+{
+	FivView *self = FIV_VIEW(object);
+	switch (property_id) {
+	case PROP_SCALE_TO_FIT:
+		if (self->scale_to_fit != g_value_get_boolean(value))
+			fiv_view_command(self, FIV_VIEW_COMMAND_TOGGLE_SCALE_TO_FIT);
+		break;
+	case PROP_FILTER:
+		if (self->filter != g_value_get_boolean(value))
+			fiv_view_command(self, FIV_VIEW_COMMAND_TOGGLE_FILTER);
+		break;
+	default:
+		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
+	}
+}
+
+static void
 get_surface_dimensions(FivView *self, double *width, double *height)
 {
 	*width = *height = 0;
@@ -396,16 +415,17 @@ fiv_view_button_press_event(GtkWidget *widget, GdkEventButton *event)
 	return FALSE;
 }
 
-#define SCALE_STEP 1.4
+#define SCALE_STEP 1.25
 
 static gboolean
 set_scale_to_fit(FivView *self, bool scale_to_fit)
 {
-	self->scale_to_fit = scale_to_fit;
-
-	gtk_widget_queue_resize(GTK_WIDGET(self));
-	g_object_notify_by_pspec(
-		G_OBJECT(self), view_properties[PROP_SCALE_TO_FIT]);
+	if (self->scale_to_fit != scale_to_fit) {
+		self->scale_to_fit = scale_to_fit;
+		g_object_notify_by_pspec(
+			G_OBJECT(self), view_properties[PROP_SCALE_TO_FIT]);
+		gtk_widget_queue_resize(GTK_WIDGET(self));
+	}
 	return TRUE;
 }
 
@@ -413,8 +433,8 @@ static gboolean
 set_scale(FivView *self, double scale)
 {
 	self->scale = scale;
-	g_object_notify_by_pspec(
-		G_OBJECT(self), view_properties[PROP_SCALE]);
+	g_object_notify_by_pspec(G_OBJECT(self), view_properties[PROP_SCALE]);
+	gtk_widget_queue_resize(GTK_WIDGET(self));
 	return set_scale_to_fit(self, false);
 }
 
@@ -750,14 +770,9 @@ fiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 		return command(self, FIV_VIEW_COMMAND_ZOOM_OUT);
 
 	case GDK_KEY_x:  // Inspired by gThumb.
-		return set_scale_to_fit(self, !self->scale_to_fit);
-
+		return command(self, FIV_VIEW_COMMAND_TOGGLE_SCALE_TO_FIT);
 	case GDK_KEY_i:
-		self->filter = !self->filter;
-		g_object_notify_by_pspec(
-			G_OBJECT(self), view_properties[PROP_FILTER]);
-		gtk_widget_queue_draw(widget);
-		return TRUE;
+		return command(self, FIV_VIEW_COMMAND_TOGGLE_FILTER);
 
 	case GDK_KEY_less:
 		return command(self, FIV_VIEW_COMMAND_ROTATE_LEFT);
@@ -785,16 +800,17 @@ fiv_view_class_init(FivViewClass *klass)
 	GObjectClass *object_class = G_OBJECT_CLASS(klass);
 	object_class->finalize = fiv_view_finalize;
 	object_class->get_property = fiv_view_get_property;
+	object_class->set_property = fiv_view_set_property;
 
 	view_properties[PROP_SCALE] = g_param_spec_double(
 		"scale", "Scale", "Zoom level",
 		0, G_MAXDOUBLE, 1.0, G_PARAM_READABLE);
 	view_properties[PROP_SCALE_TO_FIT] = g_param_spec_boolean(
 		"scale-to-fit", "Scale to fit", "Scale images down to fit the window",
-		TRUE, G_PARAM_READABLE);
+		TRUE, G_PARAM_READWRITE);
 	view_properties[PROP_FILTER] = g_param_spec_boolean(
 		"filter", "Use filtering", "Scale images smoothly",
-		TRUE, G_PARAM_READABLE);
+		TRUE, G_PARAM_READWRITE);
 	g_object_class_install_properties(
 		object_class, N_PROPERTIES, view_properties);
 
@@ -903,6 +919,10 @@ fiv_view_command(FivView *self, FivViewCommand command)
 	break; case FIV_VIEW_COMMAND_FRAME_NEXT:
 		frame_step(self, +1);
 
+	break; case FIV_VIEW_COMMAND_TOGGLE_FILTER:
+		self->filter = !self->filter;
+		g_object_notify_by_pspec(G_OBJECT(self), view_properties[PROP_FILTER]);
+		gtk_widget_queue_draw(widget);
 	break; case FIV_VIEW_COMMAND_PRINT:
 		print(self);
 	break; case FIV_VIEW_COMMAND_SAVE_PAGE:
@@ -914,5 +934,7 @@ fiv_view_command(FivView *self, FivViewCommand command)
 		set_scale(self, self->scale / SCALE_STEP);
 	break; case FIV_VIEW_COMMAND_ZOOM_1:
 		set_scale(self, 1.0);
+	break; case FIV_VIEW_COMMAND_TOGGLE_SCALE_TO_FIT:
+		set_scale_to_fit(self, !self->scale_to_fit);
 	}
 }
