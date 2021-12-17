@@ -87,6 +87,7 @@ static FastivIoOrientation view_right[9] = {
 enum {
 	PROP_SCALE = 1,
 	PROP_SCALE_TO_FIT,
+	PROP_FILTER,
 	N_PROPERTIES
 };
 
@@ -112,6 +113,9 @@ fastiv_view_get_property(
 		break;
 	case PROP_SCALE_TO_FIT:
 		g_value_set_boolean(value, self->scale_to_fit);
+		break;
+	case PROP_FILTER:
+		g_value_set_boolean(value, self->filter);
 		break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
@@ -755,6 +759,8 @@ fastiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 
 	case GDK_KEY_i:
 		self->filter = !self->filter;
+		g_object_notify_by_pspec(
+			G_OBJECT(self), view_properties[PROP_FILTER]);
 		gtk_widget_queue_draw(widget);
 		return TRUE;
 
@@ -790,6 +796,9 @@ fastiv_view_class_init(FastivViewClass *klass)
 		0, G_MAXDOUBLE, 1.0, G_PARAM_READABLE);
 	view_properties[PROP_SCALE_TO_FIT] = g_param_spec_boolean(
 		"scale-to-fit", "Scale to fit", "Scale images down to fit the window",
+		TRUE, G_PARAM_READABLE);
+	view_properties[PROP_FILTER] = g_param_spec_boolean(
+		"filter", "Use filtering", "Scale images smoothly",
 		TRUE, G_PARAM_READABLE);
 	g_object_class_install_properties(
 		object_class, N_PROPERTIES, view_properties);
