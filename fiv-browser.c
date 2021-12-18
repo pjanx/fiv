@@ -1,5 +1,5 @@
 //
-// fastiv-browser.c: fast image viewer - filesystem browser widget
+// fiv-browser.c: fast image viewer - filesystem browser widget
 //
 // Copyright (c) 2021, Přemysl Eric Janouch <p@janouch.name>
 //
@@ -18,9 +18,9 @@
 #include <math.h>
 #include <pixman.h>
 
-#include "fastiv-browser.h"
-#include "fastiv-io.h"
-#include "fastiv-view.h"
+#include "fiv-browser.h"
+#include "fiv-io.h"
+#include "fiv-view.h"
 
 // --- Widget ------------------------------------------------------------------
 //                     _________________________________
@@ -38,10 +38,10 @@
 // The glow is actually a glowing margin, the border is rendered in two parts.
 //
 
-struct _FastivBrowser {
+struct _FivBrowser {
 	GtkWidget parent_instance;
 
-	FastivIoThumbnailSize item_size;    ///< Thumbnail size
+	FivIoThumbnailSize item_size;       ///< Thumbnail size
 	int item_height;                    ///< Thumbnail height in pixels
 	int item_spacing;                   ///< Space between items in pixels
 
@@ -99,7 +99,7 @@ row_free(Row *self)
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 static void
-append_row(FastivBrowser *self, int *y, int x, GArray *items_array)
+append_row(FivBrowser *self, int *y, int x, GArray *items_array)
 {
 	if (self->layouted_rows->len)
 		*y += self->item_spacing;
@@ -117,7 +117,7 @@ append_row(FastivBrowser *self, int *y, int x, GArray *items_array)
 }
 
 static int
-relayout(FastivBrowser *self, int width)
+relayout(FivBrowser *self, int width)
 {
 	GtkWidget *widget = GTK_WIDGET(self);
 	GtkStyleContext *style = gtk_widget_get_style_context(widget);
@@ -161,7 +161,7 @@ relayout(FastivBrowser *self, int width)
 }
 
 static void
-draw_outer_border(FastivBrowser *self, cairo_t *cr, int width, int height)
+draw_outer_border(FivBrowser *self, cairo_t *cr, int width, int height)
 {
 	int offset_x = cairo_image_surface_get_width(self->glow);
 	int offset_y = cairo_image_surface_get_height(self->glow);
@@ -197,7 +197,7 @@ draw_outer_border(FastivBrowser *self, cairo_t *cr, int width, int height)
 }
 
 static GdkRectangle
-item_extents(FastivBrowser *self, const Item *item, const Row *row)
+item_extents(FivBrowser *self, const Item *item, const Row *row)
 {
 	int width = cairo_image_surface_get_width(item->entry->thumbnail);
 	int height = cairo_image_surface_get_height(item->entry->thumbnail);
@@ -210,7 +210,7 @@ item_extents(FastivBrowser *self, const Item *item, const Row *row)
 }
 
 static const Entry *
-entry_at(FastivBrowser *self, int x, int y)
+entry_at(FivBrowser *self, int x, int y)
 {
 	for (guint i = 0; i < self->layouted_rows->len; i++) {
 		const Row *row = &g_array_index(self->layouted_rows, Row, i);
@@ -227,7 +227,7 @@ entry_at(FastivBrowser *self, int x, int y)
 }
 
 static void
-draw_row(FastivBrowser *self, cairo_t *cr, const Row *row)
+draw_row(FivBrowser *self, cairo_t *cr, const Row *row)
 {
 	GtkStyleContext *style = gtk_widget_get_style_context(GTK_WIDGET(self));
 	gtk_style_context_save(style);
@@ -350,10 +350,10 @@ entry_add_thumbnail(gpointer data, gpointer user_data)
 	g_clear_object(&self->icon);
 	g_clear_pointer(&self->thumbnail, cairo_surface_destroy);
 
-	FastivBrowser *browser = FASTIV_BROWSER(user_data);
+	FivBrowser *browser = FIV_BROWSER(user_data);
 	GFile *file = g_file_new_for_uri(self->uri);
 	self->thumbnail = rescale_thumbnail(
-		fastiv_io_lookup_thumbnail(file, browser->item_size),
+		fiv_io_lookup_thumbnail(file, browser->item_size),
 		browser->item_height);
 	if (self->thumbnail)
 		goto out;
@@ -375,7 +375,7 @@ out:
 }
 
 static void
-materialize_icon(FastivBrowser *self, Entry *entry)
+materialize_icon(FivBrowser *self, Entry *entry)
 {
 	if (!entry->icon)
 		return;
@@ -419,7 +419,7 @@ materialize_icon(FastivBrowser *self, Entry *entry)
 }
 
 static void
-reload_thumbnails(FastivBrowser *self)
+reload_thumbnails(FivBrowser *self)
 {
 	GThreadPool *pool = g_thread_pool_new(
 		entry_add_thumbnail, self, g_get_num_processors(), FALSE, NULL);
@@ -597,9 +597,9 @@ show_context_menu(GtkWidget *widget, const char *uri)
 // --- Boilerplate -------------------------------------------------------------
 
 // TODO(p): For proper navigation, we need to implement GtkScrollable.
-G_DEFINE_TYPE_EXTENDED(FastivBrowser, fastiv_browser, GTK_TYPE_WIDGET, 0,
+G_DEFINE_TYPE_EXTENDED(FivBrowser, fiv_browser, GTK_TYPE_WIDGET, 0,
 	/* G_IMPLEMENT_INTERFACE(GTK_TYPE_SCROLLABLE,
-		fastiv_browser_scrollable_init) */)
+		fiv_browser_scrollable_init) */)
 
 enum {
 	PROP_THUMBNAIL_SIZE = 1,
@@ -617,22 +617,22 @@ enum {
 static guint browser_signals[LAST_SIGNAL];
 
 static void
-fastiv_browser_finalize(GObject *gobject)
+fiv_browser_finalize(GObject *gobject)
 {
-	FastivBrowser *self = FASTIV_BROWSER(gobject);
+	FivBrowser *self = FIV_BROWSER(gobject);
 	g_array_free(self->entries, TRUE);
 	g_array_free(self->layouted_rows, TRUE);
 	cairo_surface_destroy(self->glow);
 	g_clear_object(&self->pointer);
 
-	G_OBJECT_CLASS(fastiv_browser_parent_class)->finalize(gobject);
+	G_OBJECT_CLASS(fiv_browser_parent_class)->finalize(gobject);
 }
 
 static void
-fastiv_browser_get_property(
+fiv_browser_get_property(
 	GObject *object, guint property_id, GValue *value, GParamSpec *pspec)
 {
-	FastivBrowser *self = FASTIV_BROWSER(object);
+	FivBrowser *self = FIV_BROWSER(object);
 	switch (property_id) {
 	case PROP_THUMBNAIL_SIZE:
 		g_value_set_enum(value, self->item_size);
@@ -643,15 +643,14 @@ fastiv_browser_get_property(
 }
 
 static void
-set_item_size(FastivBrowser *self, FastivIoThumbnailSize size)
+set_item_size(FivBrowser *self, FivIoThumbnailSize size)
 {
-	if (size < FASTIV_IO_THUMBNAIL_SIZE_MIN ||
-		size > FASTIV_IO_THUMBNAIL_SIZE_MAX)
+	if (size < FIV_IO_THUMBNAIL_SIZE_MIN || size > FIV_IO_THUMBNAIL_SIZE_MAX)
 		return;
 
 	if (size != self->item_size) {
 		self->item_size = size;
-		self->item_height = fastiv_io_thumbnail_sizes[self->item_size].size;
+		self->item_height = fiv_io_thumbnail_sizes[self->item_size].size;
 		reload_thumbnails(self);
 
 		g_object_notify_by_pspec(
@@ -660,10 +659,10 @@ set_item_size(FastivBrowser *self, FastivIoThumbnailSize size)
 }
 
 static void
-fastiv_browser_set_property(
+fiv_browser_set_property(
 	GObject *object, guint property_id, const GValue *value, GParamSpec *pspec)
 {
-	FastivBrowser *self = FASTIV_BROWSER(object);
+	FivBrowser *self = FIV_BROWSER(object);
 	switch (property_id) {
 	case PROP_THUMBNAIL_SIZE:
 		set_item_size(self, g_value_get_enum(value));
@@ -674,35 +673,33 @@ fastiv_browser_set_property(
 }
 
 static GtkSizeRequestMode
-fastiv_browser_get_request_mode(G_GNUC_UNUSED GtkWidget *widget)
+fiv_browser_get_request_mode(G_GNUC_UNUSED GtkWidget *widget)
 {
 	return GTK_SIZE_REQUEST_HEIGHT_FOR_WIDTH;
 }
 
 static void
-fastiv_browser_get_preferred_width(
-	GtkWidget *widget, gint *minimum, gint *natural)
+fiv_browser_get_preferred_width(GtkWidget *widget, gint *minimum, gint *natural)
 {
-	FastivBrowser *self = FASTIV_BROWSER(widget);
+	FivBrowser *self = FIV_BROWSER(widget);
 	GtkStyleContext *style = gtk_widget_get_style_context(widget);
 
 	GtkBorder padding = {};
 	gtk_style_context_get_padding(style, GTK_STATE_FLAG_NORMAL, &padding);
-	*minimum = *natural =
-		g_permitted_width_multiplier * self->item_height +
+	*minimum = *natural = g_permitted_width_multiplier * self->item_height +
 		padding.left + 2 * self->item_border_x + padding.right;
 }
 
 static void
-fastiv_browser_get_preferred_height_for_width(
+fiv_browser_get_preferred_height_for_width(
 	GtkWidget *widget, gint width, gint *minimum, gint *natural)
 {
 	// XXX: This is rather ugly, the caller is only asking.
-	*minimum = *natural = relayout(FASTIV_BROWSER(widget), width);
+	*minimum = *natural = relayout(FIV_BROWSER(widget), width);
 }
 
 static void
-fastiv_browser_realize(GtkWidget *widget)
+fiv_browser_realize(GtkWidget *widget)
 {
 	GtkAllocation allocation;
 	gtk_widget_get_allocation(widget, &allocation);
@@ -720,8 +717,7 @@ fastiv_browser_realize(GtkWidget *widget)
 
 		.visual = gtk_widget_get_visual(widget),
 		.event_mask = gtk_widget_get_events(widget) | GDK_KEY_PRESS_MASK |
-			GDK_POINTER_MOTION_MASK | GDK_BUTTON_PRESS_MASK |
-			GDK_SCROLL_MASK,
+			GDK_POINTER_MOTION_MASK | GDK_BUTTON_PRESS_MASK | GDK_SCROLL_MASK,
 	};
 
 	// We need this window to receive input events at all.
@@ -732,25 +728,25 @@ fastiv_browser_realize(GtkWidget *widget)
 	gtk_widget_set_window(widget, window);
 	gtk_widget_set_realized(widget, TRUE);
 
-	FastivBrowser *self = FASTIV_BROWSER(widget);
+	FivBrowser *self = FIV_BROWSER(widget);
 	g_clear_object(&self->pointer);
 	self->pointer =
 		gdk_cursor_new_from_name(gdk_window_get_display(window), "pointer");
 }
 
 static void
-fastiv_browser_size_allocate(GtkWidget *widget, GtkAllocation *allocation)
+fiv_browser_size_allocate(GtkWidget *widget, GtkAllocation *allocation)
 {
-	GTK_WIDGET_CLASS(fastiv_browser_parent_class)
+	GTK_WIDGET_CLASS(fiv_browser_parent_class)
 		->size_allocate(widget, allocation);
 
-	relayout(FASTIV_BROWSER(widget), allocation->width);
+	relayout(FIV_BROWSER(widget), allocation->width);
 }
 
 static gboolean
-fastiv_browser_draw(GtkWidget *widget, cairo_t *cr)
+fiv_browser_draw(GtkWidget *widget, cairo_t *cr)
 {
-	FastivBrowser *self = FASTIV_BROWSER(widget);
+	FivBrowser *self = FIV_BROWSER(widget);
 	if (!gtk_cairo_should_draw_window(cr, gtk_widget_get_window(widget)))
 		return TRUE;
 
@@ -787,12 +783,12 @@ open_entry(GtkWidget *self, const Entry *entry, gboolean new_window)
 }
 
 static gboolean
-fastiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
+fiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 {
-	GTK_WIDGET_CLASS(fastiv_browser_parent_class)
+	GTK_WIDGET_CLASS(fiv_browser_parent_class)
 		->button_press_event(widget, event);
 
-	FastivBrowser *self = FASTIV_BROWSER(widget);
+	FivBrowser *self = FIV_BROWSER(widget);
 	if (event->type != GDK_BUTTON_PRESS)
 		return FALSE;
 
@@ -828,12 +824,12 @@ fastiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 }
 
 gboolean
-fastiv_browser_motion_notify_event(GtkWidget *widget, GdkEventMotion *event)
+fiv_browser_motion_notify_event(GtkWidget *widget, GdkEventMotion *event)
 {
-	GTK_WIDGET_CLASS(fastiv_browser_parent_class)
+	GTK_WIDGET_CLASS(fiv_browser_parent_class)
 		->motion_notify_event(widget, event);
 
-	FastivBrowser *self = FASTIV_BROWSER(widget);
+	FivBrowser *self = FIV_BROWSER(widget);
 	if (event->state != 0)
 		return FALSE;
 
@@ -844,9 +840,9 @@ fastiv_browser_motion_notify_event(GtkWidget *widget, GdkEventMotion *event)
 }
 
 static gboolean
-fastiv_browser_scroll_event(GtkWidget *widget, GdkEventScroll *event)
+fiv_browser_scroll_event(GtkWidget *widget, GdkEventScroll *event)
 {
-	FastivBrowser *self = FASTIV_BROWSER(widget);
+	FivBrowser *self = FIV_BROWSER(widget);
 	if ((event->state & gtk_accelerator_get_default_mod_mask()) !=
 		GDK_CONTROL_MASK)
 		return FALSE;
@@ -866,10 +862,10 @@ fastiv_browser_scroll_event(GtkWidget *widget, GdkEventScroll *event)
 }
 
 static gboolean
-fastiv_browser_query_tooltip(GtkWidget *widget, gint x, gint y,
+fiv_browser_query_tooltip(GtkWidget *widget, gint x, gint y,
 	G_GNUC_UNUSED gboolean keyboard_tooltip, GtkTooltip *tooltip)
 {
-	FastivBrowser *self = FASTIV_BROWSER(widget);
+	FivBrowser *self = FIV_BROWSER(widget);
 	const Entry *entry = entry_at(self, x, y);
 	if (!entry)
 		return FALSE;
@@ -889,11 +885,11 @@ fastiv_browser_query_tooltip(GtkWidget *widget, gint x, gint y,
 }
 
 static void
-fastiv_browser_style_updated(GtkWidget *widget)
+fiv_browser_style_updated(GtkWidget *widget)
 {
-	GTK_WIDGET_CLASS(fastiv_browser_parent_class)->style_updated(widget);
+	GTK_WIDGET_CLASS(fiv_browser_parent_class)->style_updated(widget);
 
-	FastivBrowser *self = FASTIV_BROWSER(widget);
+	FivBrowser *self = FIV_BROWSER(widget);
 	GtkStyleContext *style = gtk_widget_get_style_context(widget);
 	GtkBorder border = {}, margin = {};
 
@@ -931,8 +927,7 @@ fastiv_browser_style_updated(GtkWidget *widget)
 		return;
 	}
 
-	self->glow =
-		cairo_image_surface_create(CAIRO_FORMAT_A8, glow_w, glow_h);
+	self->glow = cairo_image_surface_create(CAIRO_FORMAT_A8, glow_w, glow_h);
 	unsigned char *data = cairo_image_surface_get_data(self->glow);
 	int stride = cairo_image_surface_get_stride(self->glow);
 
@@ -954,16 +949,16 @@ fastiv_browser_style_updated(GtkWidget *widget)
 }
 
 static void
-fastiv_browser_class_init(FastivBrowserClass *klass)
+fiv_browser_class_init(FivBrowserClass *klass)
 {
 	GObjectClass *object_class = G_OBJECT_CLASS(klass);
-	object_class->finalize = fastiv_browser_finalize;
-	object_class->get_property = fastiv_browser_get_property;
-	object_class->set_property = fastiv_browser_set_property;
+	object_class->finalize = fiv_browser_finalize;
+	object_class->get_property = fiv_browser_get_property;
+	object_class->set_property = fiv_browser_set_property;
 
 	browser_properties[PROP_THUMBNAIL_SIZE] = g_param_spec_enum(
 		"thumbnail-size", "Thumbnail size", "The thumbnail height to use",
-		FASTIV_TYPE_IO_THUMBNAIL_SIZE, FASTIV_IO_THUMBNAIL_SIZE_NORMAL,
+		FIV_TYPE_IO_THUMBNAIL_SIZE, FIV_IO_THUMBNAIL_SIZE_NORMAL,
 		G_PARAM_READWRITE);
 	g_object_class_install_properties(
 		object_class, N_PROPERTIES, browser_properties);
@@ -973,18 +968,18 @@ fastiv_browser_class_init(FastivBrowserClass *klass)
 		G_TYPE_NONE, 2, G_TYPE_FILE, GTK_TYPE_PLACES_OPEN_FLAGS);
 
 	GtkWidgetClass *widget_class = GTK_WIDGET_CLASS(klass);
-	widget_class->get_request_mode = fastiv_browser_get_request_mode;
-	widget_class->get_preferred_width = fastiv_browser_get_preferred_width;
+	widget_class->get_request_mode = fiv_browser_get_request_mode;
+	widget_class->get_preferred_width = fiv_browser_get_preferred_width;
 	widget_class->get_preferred_height_for_width =
-		fastiv_browser_get_preferred_height_for_width;
-	widget_class->realize = fastiv_browser_realize;
-	widget_class->draw = fastiv_browser_draw;
-	widget_class->size_allocate = fastiv_browser_size_allocate;
-	widget_class->button_press_event = fastiv_browser_button_press_event;
-	widget_class->motion_notify_event = fastiv_browser_motion_notify_event;
-	widget_class->scroll_event = fastiv_browser_scroll_event;
-	widget_class->query_tooltip = fastiv_browser_query_tooltip;
-	widget_class->style_updated = fastiv_browser_style_updated;
+		fiv_browser_get_preferred_height_for_width;
+	widget_class->realize = fiv_browser_realize;
+	widget_class->draw = fiv_browser_draw;
+	widget_class->size_allocate = fiv_browser_size_allocate;
+	widget_class->button_press_event = fiv_browser_button_press_event;
+	widget_class->motion_notify_event = fiv_browser_motion_notify_event;
+	widget_class->scroll_event = fiv_browser_scroll_event;
+	widget_class->query_tooltip = fiv_browser_query_tooltip;
+	widget_class->style_updated = fiv_browser_style_updated;
 
 	// Could be split to also-idiomatic row-spacing/column-spacing properties.
 	// The GParamSpec is sinked by this call.
@@ -994,11 +989,11 @@ fastiv_browser_class_init(FastivBrowserClass *klass)
 
 	// TODO(p): Later override "screen_changed", recreate Pango layouts there,
 	// if we get to have any, or otherwise reflect DPI changes.
-	gtk_widget_class_set_css_name(widget_class, "fastiv-browser");
+	gtk_widget_class_set_css_name(widget_class, "fiv-browser");
 }
 
 static void
-fastiv_browser_init(FastivBrowser *self)
+fiv_browser_init(FivBrowser *self)
 {
 	gtk_widget_set_can_focus(GTK_WIDGET(self), TRUE);
 	gtk_widget_set_has_tooltip(GTK_WIDGET(self), TRUE);
@@ -1008,7 +1003,7 @@ fastiv_browser_init(FastivBrowser *self)
 	self->layouted_rows = g_array_new(FALSE, TRUE, sizeof(Row));
 	g_array_set_clear_func(self->layouted_rows, (GDestroyNotify) row_free);
 
-	set_item_size(self, FASTIV_IO_THUMBNAIL_SIZE_NORMAL);
+	set_item_size(self, FIV_IO_THUMBNAIL_SIZE_NORMAL);
 	self->selected = -1;
 	self->glow = cairo_image_surface_create(CAIRO_FORMAT_A1, 0, 0);
 
@@ -1025,15 +1020,15 @@ entry_compare(gconstpointer a, gconstpointer b)
 	const Entry *entry2 = b;
 	GFile *location1 = g_file_new_for_uri(entry1->uri);
 	GFile *location2 = g_file_new_for_uri(entry2->uri);
-	gint result = fastiv_io_filecmp(location1, location2);
+	gint result = fiv_io_filecmp(location1, location2);
 	g_object_unref(location1);
 	g_object_unref(location2);
 	return result;
 }
 
 void
-fastiv_browser_load(
-	FastivBrowser *self, FastivBrowserFilterCallback cb, const char *path)
+fiv_browser_load(
+	FivBrowser *self, FivBrowserFilterCallback cb, const char *path)
 {
 	g_array_set_size(self->entries, 0);
 	g_array_set_size(self->layouted_rows, 0);

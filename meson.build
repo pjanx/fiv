@@ -1,3 +1,4 @@
+# vim: noet ts=4 sts=4 sw=4:
 project('fastiv', 'c',
 	default_options : ['c_std=gnu99', 'warning_level=2'],
 	version : '0.1.0')
@@ -65,13 +66,13 @@ resources = gnome.compile_resources('resources',
 	c_name : 'resources',
 )
 
-exe = executable('fastiv', 'fastiv.c', 'fastiv-view.c', 'fastiv-io.c',
-	'fastiv-browser.c', 'fastiv-sidebar.c', 'xdg.c', resources,
+exe = executable('fastiv', 'fastiv.c', 'fiv-view.c', 'fiv-io.c',
+	'fiv-browser.c', 'fiv-sidebar.c', 'xdg.c', resources,
 	install : true,
 	dependencies : [dependencies])
 
 if gdkpixbuf.found()
-	executable('io-benchmark', 'fastiv-io-benchmark.c', 'fastiv-io.c', 'xdg.c',
+	executable('io-benchmark', 'fiv-io-benchmark.c', 'fiv-io.c', 'xdg.c',
 		build_by_default : false,
 		dependencies : [dependencies, gdkpixbuf])
 endif

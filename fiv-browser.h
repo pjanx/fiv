@@ -1,5 +1,5 @@
 //
-// fastiv-sidebar.h: molesting GtkPlacesSidebar
+// fiv-browser.h: fast image viewer - filesystem browser widget
 //
 // Copyright (c) 2021, Přemysl Eric Janouch <p@janouch.name>
 //
@@ -19,10 +19,10 @@
 
 #include <gtk/gtk.h>
 
-#define FASTIV_TYPE_SIDEBAR (fastiv_sidebar_get_type())
-G_DECLARE_FINAL_TYPE(
-	FastivSidebar, fastiv_sidebar, FASTIV, SIDEBAR, GtkScrolledWindow)
+#define FIV_TYPE_BROWSER (fiv_browser_get_type())
+G_DECLARE_FINAL_TYPE(FivBrowser, fiv_browser, FIV, BROWSER, GtkWidget)
 
-void fastiv_sidebar_set_location(FastivSidebar *self, GFile *location);
-void fastiv_sidebar_show_enter_location(FastivSidebar *self);
-GtkBox *fastiv_sidebar_get_toolbar(FastivSidebar *self);
+typedef gboolean (*FivBrowserFilterCallback) (const char *);
+
+void fiv_browser_load(
+	FivBrowser *self, FivBrowserFilterCallback cb, const char *path);

@@ -28,10 +28,10 @@
 #include <fnmatch.h>
 
 #include "config.h"
-#include "fastiv-browser.h"
-#include "fastiv-io.h"
-#include "fastiv-sidebar.h"
-#include "fastiv-view.h"
+#include "fiv-browser.h"
+#include "fiv-io.h"
+#include "fiv-sidebar.h"
+#include "fiv-view.h"
 #include "xdg.h"
 
 // --- Utilities ---------------------------------------------------------------
@@ -191,10 +191,10 @@ load_directory(const gchar *dirname)
 	g.files_index = -1;
 
 	GFile *file = g_file_new_for_path(g.directory);
-	fastiv_sidebar_set_location(FASTIV_SIDEBAR(g.browser_sidebar), file);
+	fiv_sidebar_set_location(FIV_SIDEBAR(g.browser_sidebar), file);
 	g_object_unref(file);
-	fastiv_browser_load(FASTIV_BROWSER(g.browser),
-		g.filtering ? is_supported : NULL, g.directory);
+	fiv_browser_load(
+		FIV_BROWSER(g.browser), g.filtering ? is_supported : NULL, g.directory);
 
 	GError *error = NULL;
 	GDir *dir = g_dir_open(g.directory, 0, &error);
@@ -240,7 +240,7 @@ open(const gchar *path)
 	g_return_if_fail(g_path_is_absolute(path));
 
 	GError *error = NULL;
-	if (!fastiv_view_open(FASTIV_VIEW(g.view), path, &error)) {
+	if (!fiv_view_open(FIV_VIEW(g.view), path, &error)) {
 		char *base = g_filename_display_basename(path);
 		g_prefix_error(&error, "%s: ", base);
 		show_error_dialog(error);
@@ -284,7 +284,7 @@ create_open_dialog(void)
 		"_Open", GTK_RESPONSE_ACCEPT, NULL);
 
 	GtkFileFilter *filter = gtk_file_filter_new();
-	for (const char **p = fastiv_io_supported_media_types; *p; p++)
+	for (const char **p = fiv_io_supported_media_types; *p; p++)
 		gtk_file_filter_add_mime_type(filter, *p);
 #ifdef HAVE_GDKPIXBUF
 	gtk_file_filter_add_pixbuf_formats(filter);
@@ -356,13 +356,13 @@ spawn_path(const char *path)
 {
 	char *argv[] = {PROJECT_NAME, (char *) path, NULL};
 	GError *error = NULL;
-	g_spawn_async(NULL, argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL,
-		NULL, &error);
+	g_spawn_async(
+		NULL, argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, &error);
 	g_clear_error(&error);
 }
 
 static void
-on_item_activated(G_GNUC_UNUSED FastivBrowser *browser, GFile *location,
+on_item_activated(G_GNUC_UNUSED FivBrowser *browser, GFile *location,
 	GtkPlacesOpenFlags flags, G_GNUC_UNUSED gpointer data)
 {
 	gchar *path = g_file_get_path(location);
@@ -416,12 +416,12 @@ on_open_location(G_GNUC_UNUSED GtkPlacesSidebar *sidebar, GFile *location,
 static void
 on_toolbar_zoom(G_GNUC_UNUSED GtkButton *button, gpointer user_data)
 {
-	FastivIoThumbnailSize size = FASTIV_IO_THUMBNAIL_SIZE_COUNT;
+	FivIoThumbnailSize size = FIV_IO_THUMBNAIL_SIZE_COUNT;
 	g_object_get(g.browser, "thumbnail-size", &size, NULL);
 
 	size += (gintptr) user_data;
-	g_return_if_fail(size >= FASTIV_IO_THUMBNAIL_SIZE_MIN &&
-		size <= FASTIV_IO_THUMBNAIL_SIZE_MAX);
+	g_return_if_fail(size >= FIV_IO_THUMBNAIL_SIZE_MIN &&
+		size <= FIV_IO_THUMBNAIL_SIZE_MAX);
 
 	g_object_set(g.browser, "thumbnail-size", size, NULL);
 }
@@ -430,10 +430,10 @@ static void
 on_notify_thumbnail_size(
 	GObject *object, GParamSpec *param_spec, G_GNUC_UNUSED gpointer user_data)
 {
-	FastivIoThumbnailSize size = 0;
+	FivIoThumbnailSize size = 0;
 	g_object_get(object, g_param_spec_get_name(param_spec), &size, NULL);
-	gtk_widget_set_sensitive(g.plus, size < FASTIV_IO_THUMBNAIL_SIZE_MAX);
-	gtk_widget_set_sensitive(g.minus, size > FASTIV_IO_THUMBNAIL_SIZE_MIN);
+	gtk_widget_set_sensitive(g.plus, size < FIV_IO_THUMBNAIL_SIZE_MAX);
+	gtk_widget_set_sensitive(g.minus, size > FIV_IO_THUMBNAIL_SIZE_MIN);
 }
 
 static void
@@ -482,8 +482,7 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 			on_open();
 			return TRUE;
 		case GDK_KEY_l:
-			fastiv_sidebar_show_enter_location(
-				FASTIV_SIDEBAR(g.browser_sidebar));
+			fiv_sidebar_show_enter_location(FIV_SIDEBAR(g.browser_sidebar));
 			return TRUE;
 		case GDK_KEY_n:
 			spawn_path(g.directory);
@@ -641,11 +640,11 @@ toolbar_connect(int index, GCallback callback)
 static void
 on_command(intptr_t command)
 {
-	fastiv_view_command(FASTIV_VIEW(g.view), command);
+	fiv_view_command(FIV_VIEW(g.view), command);
 }
 
 static void
-toolbar_command(int index, FastivViewCommand command)
+toolbar_command(int index, FivViewCommand command)
 {
 	g_signal_connect_swapped(g.toolbar[index], "clicked",
 		G_CALLBACK(on_command), (void *) (intptr_t) command);
@@ -677,21 +676,21 @@ make_view_toolbar(void)
 	toolbar_connect(TOOLBAR_BROWSE,        G_CALLBACK(switch_to_browser));
 	toolbar_connect(TOOLBAR_FILE_PREVIOUS, G_CALLBACK(on_previous));
 	toolbar_connect(TOOLBAR_FILE_NEXT,     G_CALLBACK(on_next));
-	toolbar_command(TOOLBAR_PAGE_FIRST,    FASTIV_VIEW_COMMAND_PAGE_FIRST);
-	toolbar_command(TOOLBAR_PAGE_PREVIOUS, FASTIV_VIEW_COMMAND_PAGE_PREVIOUS);
-	toolbar_command(TOOLBAR_PAGE_NEXT,     FASTIV_VIEW_COMMAND_PAGE_NEXT);
-	toolbar_command(TOOLBAR_PAGE_LAST,     FASTIV_VIEW_COMMAND_PAGE_LAST);
-	toolbar_command(TOOLBAR_SKIP_BACK,     FASTIV_VIEW_COMMAND_FRAME_FIRST);
-	toolbar_command(TOOLBAR_SEEK_BACK,     FASTIV_VIEW_COMMAND_FRAME_PREVIOUS);
-	toolbar_command(TOOLBAR_SEEK_FORWARD,  FASTIV_VIEW_COMMAND_FRAME_NEXT);
-	toolbar_command(TOOLBAR_PLUS,          FASTIV_VIEW_COMMAND_ZOOM_IN);
-	toolbar_command(TOOLBAR_MINUS,         FASTIV_VIEW_COMMAND_ZOOM_OUT);
-	toolbar_command(TOOLBAR_ONE,           FASTIV_VIEW_COMMAND_ZOOM_1);
-	toolbar_command(TOOLBAR_PRINT,         FASTIV_VIEW_COMMAND_PRINT);
-	toolbar_command(TOOLBAR_SAVE,          FASTIV_VIEW_COMMAND_SAVE_PAGE);
-	toolbar_command(TOOLBAR_LEFT,          FASTIV_VIEW_COMMAND_ROTATE_LEFT);
-	toolbar_command(TOOLBAR_MIRROR,        FASTIV_VIEW_COMMAND_MIRROR);
-	toolbar_command(TOOLBAR_RIGHT,         FASTIV_VIEW_COMMAND_ROTATE_RIGHT);
+	toolbar_command(TOOLBAR_PAGE_FIRST,    FIV_VIEW_COMMAND_PAGE_FIRST);
+	toolbar_command(TOOLBAR_PAGE_PREVIOUS, FIV_VIEW_COMMAND_PAGE_PREVIOUS);
+	toolbar_command(TOOLBAR_PAGE_NEXT,     FIV_VIEW_COMMAND_PAGE_NEXT);
+	toolbar_command(TOOLBAR_PAGE_LAST,     FIV_VIEW_COMMAND_PAGE_LAST);
+	toolbar_command(TOOLBAR_SKIP_BACK,     FIV_VIEW_COMMAND_FRAME_FIRST);
+	toolbar_command(TOOLBAR_SEEK_BACK,     FIV_VIEW_COMMAND_FRAME_PREVIOUS);
+	toolbar_command(TOOLBAR_SEEK_FORWARD,  FIV_VIEW_COMMAND_FRAME_NEXT);
+	toolbar_command(TOOLBAR_PLUS,          FIV_VIEW_COMMAND_ZOOM_IN);
+	toolbar_command(TOOLBAR_MINUS,         FIV_VIEW_COMMAND_ZOOM_OUT);
+	toolbar_command(TOOLBAR_ONE,           FIV_VIEW_COMMAND_ZOOM_1);
+	toolbar_command(TOOLBAR_PRINT,         FIV_VIEW_COMMAND_PRINT);
+	toolbar_command(TOOLBAR_SAVE,          FIV_VIEW_COMMAND_SAVE_PAGE);
+	toolbar_command(TOOLBAR_LEFT,          FIV_VIEW_COMMAND_ROTATE_LEFT);
+	toolbar_command(TOOLBAR_MIRROR,        FIV_VIEW_COMMAND_MIRROR);
+	toolbar_command(TOOLBAR_RIGHT,         FIV_VIEW_COMMAND_ROTATE_RIGHT);
 	toolbar_connect(TOOLBAR_FULLSCREEN,    G_CALLBACK(toggle_fullscreen));
 	return view_toolbar;
 }
@@ -724,7 +723,7 @@ main(int argc, char *argv[])
 		return 0;
 	}
 	if (show_supported_media_types) {
-		for (char **types = fastiv_io_all_supported_media_types(); *types; )
+		for (char **types = fiv_io_all_supported_media_types(); *types; )
 			g_print("%s\n", *types++);
 		return 0;
 	}
@@ -747,29 +746,29 @@ main(int argc, char *argv[])
 	// XXX: button.flat is too generic, it's only for the view toolbar.
 	// XXX: Similarly, box > separator.horizontal is a temporary hack.
 	// Consider using a #name or a .class here, possibly for a parent widget.
-	const char *style = "@define-color fastiv-tile #3c3c3c; \
-		fastiv-view, fastiv-browser { background: @content_view_bg; } \
-		placessidebar.fastiv .toolbar { padding: 2px 6px; } \
-		placessidebar.fastiv box > separator { margin: 4px 0; } \
+	const char *style = "@define-color fiv-tile #3c3c3c; \
+		fiv-view, fiv-browser { background: @content_view_bg; } \
+		placessidebar.fiv .toolbar { padding: 2px 6px; } \
+		placessidebar.fiv box > separator { margin: 4px 0; } \
 		button.flat { padding-left: 0; padding-right: 0 } \
 		box > separator.horizontal { \
 			background: mix(@insensitive_fg_color, \
 				@insensitive_bg_color, 0.4); margin: 6px 0; \
 		} \
-		fastiv-browser { padding: 5px; } \
-		fastiv-browser.item { \
+		fiv-browser { padding: 5px; } \
+		fiv-browser.item { \
 			border: 1px solid rgba(255, 255, 255, 0.375); \
 			margin: 10px; color: #000; \
 			background: #333; \
 			background-image: \
-				linear-gradient(45deg, @fastiv-tile 26%, transparent 26%), \
-				linear-gradient(-45deg, @fastiv-tile 26%, transparent 26%), \
-				linear-gradient(45deg, transparent 74%, @fastiv-tile 74%), \
-				linear-gradient(-45deg, transparent 74%, @fastiv-tile 74%); \
+				linear-gradient(45deg, @fiv-tile 26%, transparent 26%), \
+				linear-gradient(-45deg, @fiv-tile 26%, transparent 26%), \
+				linear-gradient(45deg, transparent 74%, @fiv-tile 74%), \
+				linear-gradient(-45deg, transparent 74%, @fiv-tile 74%); \
 			background-size: 40px 40px; \
 			background-position: 0 0, 0 20px, 20px -20px, -20px 0px; \
 		} \
-		fastiv-browser.item.symbolic { \
+		fiv-browser.item.symbolic { \
 			border-color: transparent; color: @content_view_bg; \
 			background: @theme_bg_color; background-image: none; \
 		}";
@@ -781,7 +780,7 @@ main(int argc, char *argv[])
 	g_object_unref(provider);
 
 	GtkWidget *view_scroller = gtk_scrolled_window_new(NULL, NULL);
-	g.view = g_object_new(FASTIV_TYPE_VIEW, NULL);
+	g.view = g_object_new(FIV_TYPE_VIEW, NULL);
 	g_signal_connect(g.view, "key-press-event",
 		G_CALLBACK(on_key_press_view), NULL);
 	g_signal_connect(g.view, "button-press-event",
@@ -806,7 +805,7 @@ main(int argc, char *argv[])
 	gtk_widget_show_all(g.view_box);
 
 	g.browser_scroller = gtk_scrolled_window_new(NULL, NULL);
-	g.browser = g_object_new(FASTIV_TYPE_BROWSER, NULL);
+	g.browser = g_object_new(FIV_TYPE_BROWSER, NULL);
 	gtk_widget_set_vexpand(g.browser, TRUE);
 	gtk_widget_set_hexpand(g.browser, TRUE);
 	g_signal_connect(g.browser, "item-activated",
@@ -824,7 +823,7 @@ main(int argc, char *argv[])
 	//  - C-h to filtering,
 	//  - M-Up to going a level above,
 	//  - mayhaps forward the rest to the sidebar, somehow.
-	g.browser_sidebar = g_object_new(FASTIV_TYPE_SIDEBAR, NULL);
+	g.browser_sidebar = g_object_new(FIV_TYPE_SIDEBAR, NULL);
 	g_signal_connect(g.browser_sidebar, "open-location",
 		G_CALLBACK(on_open_location), NULL);
 
@@ -862,8 +861,7 @@ main(int argc, char *argv[])
 	g_signal_connect(funnel, "toggled",
 		G_CALLBACK(on_filtering_toggled), NULL);
 
-	GtkBox *toolbar =
-		fastiv_sidebar_get_toolbar(FASTIV_SIDEBAR(g.browser_sidebar));
+	GtkBox *toolbar = fiv_sidebar_get_toolbar(FIV_SIDEBAR(g.browser_sidebar));
 	gtk_box_pack_start(toolbar, zoom_group, FALSE, FALSE, 0);
 	gtk_box_pack_start(toolbar, funnel, FALSE, FALSE, 0);
 	gtk_widget_set_halign(GTK_WIDGET(toolbar), GTK_ALIGN_CENTER);
@@ -890,7 +888,7 @@ main(int argc, char *argv[])
 		G_CALLBACK(on_window_state_event), NULL);
 	gtk_container_add(GTK_CONTAINER(g.window), g.stack);
 
-	char **types = fastiv_io_all_supported_media_types();
+	char **types = fiv_io_all_supported_media_types();
 	g.supported_globs = extract_mime_globs((const char **) types);
 	g_strfreev(types);
 

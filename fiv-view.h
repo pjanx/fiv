@@ -1,5 +1,5 @@
 //
-// fastiv-view.h: fast image viewer - view widget
+// fiv-view.h: fast image viewer - view widget
 //
 // Copyright (c) 2021, Přemysl Eric Janouch <p@janouch.name>
 //
@@ -19,34 +19,34 @@
 
 #include <gtk/gtk.h>
 
-#define FASTIV_TYPE_VIEW (fastiv_view_get_type())
-G_DECLARE_FINAL_TYPE(FastivView, fastiv_view, FASTIV, VIEW, GtkWidget)
+#define FIV_TYPE_VIEW (fiv_view_get_type())
+G_DECLARE_FINAL_TYPE(FivView, fiv_view, FIV, VIEW, GtkWidget)
 
 /// Try to open the given file, synchronously, to be displayed by the widget.
-gboolean fastiv_view_open(FastivView *self, const gchar *path, GError **error);
+gboolean fiv_view_open(FivView *self, const gchar *path, GError **error);
 
-typedef enum _FastivViewCommand {
-	FASTIV_VIEW_COMMAND_ROTATE_LEFT = 1,
-	FASTIV_VIEW_COMMAND_MIRROR,
-	FASTIV_VIEW_COMMAND_ROTATE_RIGHT,
+typedef enum _FivViewCommand {
+	FIV_VIEW_COMMAND_ROTATE_LEFT = 1,
+	FIV_VIEW_COMMAND_MIRROR,
+	FIV_VIEW_COMMAND_ROTATE_RIGHT,
 
-	FASTIV_VIEW_COMMAND_PAGE_FIRST,
-	FASTIV_VIEW_COMMAND_PAGE_PREVIOUS,
-	FASTIV_VIEW_COMMAND_PAGE_NEXT,
-	FASTIV_VIEW_COMMAND_PAGE_LAST,
+	FIV_VIEW_COMMAND_PAGE_FIRST,
+	FIV_VIEW_COMMAND_PAGE_PREVIOUS,
+	FIV_VIEW_COMMAND_PAGE_NEXT,
+	FIV_VIEW_COMMAND_PAGE_LAST,
 
-	FASTIV_VIEW_COMMAND_FRAME_FIRST,
-	FASTIV_VIEW_COMMAND_FRAME_PREVIOUS,
-	FASTIV_VIEW_COMMAND_FRAME_NEXT,
+	FIV_VIEW_COMMAND_FRAME_FIRST,
+	FIV_VIEW_COMMAND_FRAME_PREVIOUS,
+	FIV_VIEW_COMMAND_FRAME_NEXT,
 	// Going to the end frame makes no sense, wrap around if needed.
 
-	FASTIV_VIEW_COMMAND_PRINT,
-	FASTIV_VIEW_COMMAND_SAVE_PAGE,
+	FIV_VIEW_COMMAND_PRINT,
+	FIV_VIEW_COMMAND_SAVE_PAGE,
 
-	FASTIV_VIEW_COMMAND_ZOOM_IN,
-	FASTIV_VIEW_COMMAND_ZOOM_OUT,
-	FASTIV_VIEW_COMMAND_ZOOM_1
-} FastivViewCommand;
+	FIV_VIEW_COMMAND_ZOOM_IN,
+	FIV_VIEW_COMMAND_ZOOM_OUT,
+	FIV_VIEW_COMMAND_ZOOM_1
+} FivViewCommand;
 
 /// Execute a user action.
-void fastiv_view_command(FastivView *self, FastivViewCommand command);
+void fiv_view_command(FivView *self, FivViewCommand command);

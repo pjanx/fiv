@@ -44,7 +44,7 @@ The standard means to adjust the looks of the program is through GTK+ 3 CSS.
 As an example, to tightly pack browser items, put the following in your
 _~/.config/gtk-3.0/gtk.css_:
 
- fastiv-browser { -FastivBrowser-spacing: 0; padding: 0; border: 0; margin: 0; }
+ fiv-browser { -FivBrowser-spacing: 0; padding: 0; border: 0; margin: 0; }
 
 The GTK+ inspector will be very helpful, should you want to experiment.
 

@@ -1,5 +1,5 @@
 //
-// fastiv-sidebar.c: molesting GtkPlacesSidebar
+// fiv-sidebar.c: molesting GtkPlacesSidebar
 //
 // Copyright (c) 2021, Přemysl Eric Janouch <p@janouch.name>
 //
@@ -17,10 +17,10 @@
 
 #include <gtk/gtk.h>
 
-#include "fastiv-io.h"  // fastiv_io_filecmp
-#include "fastiv-sidebar.h"
+#include "fiv-io.h"  // fiv_io_filecmp
+#include "fiv-sidebar.h"
 
-struct _FastivSidebar {
+struct _FivSidebar {
 	GtkScrolledWindow parent_instance;
 	GtkPlacesSidebar *places;
 	GtkWidget *toolbar;
@@ -28,9 +28,9 @@ struct _FastivSidebar {
 	GFile *location;
 };
 
-G_DEFINE_TYPE(FastivSidebar, fastiv_sidebar, GTK_TYPE_SCROLLED_WINDOW)
+G_DEFINE_TYPE(FivSidebar, fiv_sidebar, GTK_TYPE_SCROLLED_WINDOW)
 
-G_DEFINE_QUARK(fastiv-sidebar-location-quark, fastiv_sidebar_location)
+G_DEFINE_QUARK(fiv-sidebar-location-quark, fiv_sidebar_location)
 
 enum {
 	OPEN_LOCATION,
@@ -41,19 +41,19 @@ enum {
 static guint sidebar_signals[LAST_SIGNAL];
 
 static void
-fastiv_sidebar_dispose(GObject *gobject)
+fiv_sidebar_dispose(GObject *gobject)
 {
-	FastivSidebar *self = FASTIV_SIDEBAR(gobject);
+	FivSidebar *self = FIV_SIDEBAR(gobject);
 	g_clear_object(&self->location);
 
-	G_OBJECT_CLASS(fastiv_sidebar_parent_class)->dispose(gobject);
+	G_OBJECT_CLASS(fiv_sidebar_parent_class)->dispose(gobject);
 }
 
 static void
-fastiv_sidebar_class_init(FastivSidebarClass *klass)
+fiv_sidebar_class_init(FivSidebarClass *klass)
 {
 	GObjectClass *object_class = G_OBJECT_CLASS(klass);
-	object_class->dispose = fastiv_sidebar_dispose;
+	object_class->dispose = fiv_sidebar_dispose;
 
 	// You're giving me no choice, Adwaita.
 	// Your style is hardcoded to match against the class' CSS name.
@@ -117,7 +117,7 @@ create_row(GFile *file, const char *icon_name)
 	gtk_container_add(GTK_CONTAINER(revealer), rowbox);
 
 	GtkWidget *row = gtk_list_box_row_new();
-	g_object_set_qdata_full(G_OBJECT(row), fastiv_sidebar_location_quark(),
+	g_object_set_qdata_full(G_OBJECT(row), fiv_sidebar_location_quark(),
 		g_object_ref(file), (GDestroyNotify) g_object_unref);
 	gtk_container_add(GTK_CONTAINER(row), revealer);
 	gtk_widget_show_all(row);
@@ -128,13 +128,13 @@ static gint
 listbox_compare(
 	GtkListBoxRow *row1, GtkListBoxRow *row2, G_GNUC_UNUSED gpointer user_data)
 {
-	return fastiv_io_filecmp(
-		g_object_get_qdata(G_OBJECT(row1), fastiv_sidebar_location_quark()),
-		g_object_get_qdata(G_OBJECT(row2), fastiv_sidebar_location_quark()));
+	return fiv_io_filecmp(
+		g_object_get_qdata(G_OBJECT(row1), fiv_sidebar_location_quark()),
+		g_object_get_qdata(G_OBJECT(row2), fiv_sidebar_location_quark()));
 }
 
 static void
-update_location(FastivSidebar *self, GFile *location)
+update_location(FivSidebar *self, GFile *location)
 {
 	if (location) {
 		g_clear_object(&self->location);
@@ -172,7 +172,7 @@ update_location(FastivSidebar *self, GFile *location)
 		return;
 
 	// TODO(p): gtk_list_box_set_filter_func(), or even use a model,
-	// which could be shared with FastivBrowser.
+	// which could be shared with FivBrowser.
 	while (TRUE) {
 		GFileInfo *info = NULL;
 		GFile *child = NULL;
@@ -192,9 +192,9 @@ static void
 on_open_breadcrumb(
 	G_GNUC_UNUSED GtkListBox *listbox, GtkListBoxRow *row, gpointer user_data)
 {
-	FastivSidebar *self = FASTIV_SIDEBAR(user_data);
+	FivSidebar *self = FIV_SIDEBAR(user_data);
 	GFile *location =
-		g_object_get_qdata(G_OBJECT(row), fastiv_sidebar_location_quark());
+		g_object_get_qdata(G_OBJECT(row), fiv_sidebar_location_quark());
 	g_signal_emit(self, sidebar_signals[OPEN_LOCATION], 0,
 		location, GTK_PLACES_OPEN_NORMAL);
 }
@@ -203,7 +203,7 @@ static void
 on_open_location(G_GNUC_UNUSED GtkPlacesSidebar *sidebar, GFile *location,
 	GtkPlacesOpenFlags flags, gpointer user_data)
 {
-	FastivSidebar *self = FASTIV_SIDEBAR(user_data);
+	FivSidebar *self = FIV_SIDEBAR(user_data);
 	g_signal_emit(self, sidebar_signals[OPEN_LOCATION], 0, location, flags);
 
 	// Deselect the item in GtkPlacesSidebar, if unsuccessful.
@@ -216,7 +216,7 @@ complete_path(GFile *location, GtkListStore *model)
 	// TODO(p): Do not enter directories unless followed by '/'.
 	// This information has already been stripped from `location`.
 	GFile *parent = G_FILE_TYPE_DIRECTORY ==
-		g_file_query_file_type(location, G_FILE_QUERY_INFO_NONE, NULL)
+			g_file_query_file_type(location, G_FILE_QUERY_INFO_NONE, NULL)
 		? g_object_ref(location)
 		: g_file_get_parent(location);
 	if (!parent)
@@ -257,7 +257,7 @@ fail_enumerator:
 }
 
 static GFile *
-resolve_location(FastivSidebar *self, const char *text)
+resolve_location(FivSidebar *self, const char *text)
 {
 	// Relative paths produce invalid GFile objects with this function.
 	// And even if they didn't, we have our own root for them.
@@ -278,7 +278,7 @@ resolve_location(FastivSidebar *self, const char *text)
 static void
 on_enter_location_changed(GtkEntry *entry, gpointer user_data)
 {
-	FastivSidebar *self = FASTIV_SIDEBAR(user_data);
+	FivSidebar *self = FIV_SIDEBAR(user_data);
 	const char *text = gtk_entry_get_text(entry);
 	GFile *location = resolve_location(self, text);
 
@@ -299,10 +299,10 @@ on_enter_location_changed(GtkEntry *entry, gpointer user_data)
 }
 
 static void
-on_show_enter_location(G_GNUC_UNUSED GtkPlacesSidebar *sidebar,
-	G_GNUC_UNUSED gpointer user_data)
+on_show_enter_location(
+	G_GNUC_UNUSED GtkPlacesSidebar *sidebar, G_GNUC_UNUSED gpointer user_data)
 {
-	FastivSidebar *self = FASTIV_SIDEBAR(user_data);
+	FivSidebar *self = FIV_SIDEBAR(user_data);
 	GtkWidget *dialog = gtk_dialog_new_with_buttons("Enter location",
 		GTK_WINDOW(gtk_widget_get_toplevel(GTK_WIDGET(self))),
 		GTK_DIALOG_DESTROY_WITH_PARENT | GTK_DIALOG_MODAL |
@@ -353,7 +353,7 @@ on_show_enter_location(G_GNUC_UNUSED GtkPlacesSidebar *sidebar,
 }
 
 static void
-fastiv_sidebar_init(FastivSidebar *self)
+fiv_sidebar_init(FivSidebar *self)
 {
 	// TODO(p): Transplant functionality from the shitty GtkPlacesSidebar.
 	// We cannot reasonably place any new items within its own GtkListBox,
@@ -406,28 +406,28 @@ fastiv_sidebar_init(FastivSidebar *self)
 	gtk_style_context_add_class(gtk_widget_get_style_context(GTK_WIDGET(self)),
 		GTK_STYLE_CLASS_SIDEBAR);
 	gtk_style_context_add_class(gtk_widget_get_style_context(GTK_WIDGET(self)),
-		"fastiv");
+		"fiv");
 }
 
 // --- Public interface --------------------------------------------------------
 
 void
-fastiv_sidebar_set_location(FastivSidebar *self, GFile *location)
+fiv_sidebar_set_location(FivSidebar *self, GFile *location)
 {
-	g_return_if_fail(FASTIV_IS_SIDEBAR(self));
+	g_return_if_fail(FIV_IS_SIDEBAR(self));
 	update_location(self, location);
 }
 
 void
-fastiv_sidebar_show_enter_location(FastivSidebar *self)
+fiv_sidebar_show_enter_location(FivSidebar *self)
 {
-	g_return_if_fail(FASTIV_IS_SIDEBAR(self));
+	g_return_if_fail(FIV_IS_SIDEBAR(self));
 	g_signal_emit_by_name(self->places, "show-enter-location");
 }
 
 GtkBox *
-fastiv_sidebar_get_toolbar(FastivSidebar *self)
+fiv_sidebar_get_toolbar(FivSidebar *self)
 {
-	g_return_val_if_fail(FASTIV_IS_SIDEBAR(self), NULL);
+	g_return_val_if_fail(FIV_IS_SIDEBAR(self), NULL);
 	return GTK_BOX(self->toolbar);
 }

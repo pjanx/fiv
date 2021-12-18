@@ -1,5 +1,5 @@
 //
-// fastiv-io-benchmark.c: see if we're worth the name
+// fiv-io-benchmark.c: see if we're worth the name
 //
 // Copyright (c) 2021, Přemysl Eric Janouch <p@janouch.name>
 //
@@ -15,11 +15,11 @@
 // CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 //
 
-#include <gdk/gdk.h>
 #include <gdk-pixbuf/gdk-pixbuf.h>
+#include <gdk/gdk.h>
 #include <time.h>
 
-#include "fastiv-io.h"
+#include "fiv-io.h"
 
 static double
 timestamp(void)
@@ -33,7 +33,7 @@ static void
 one_file(const char *filename)
 {
 	double since_us = timestamp();
-	cairo_surface_t *loaded_by_us = fastiv_io_open(filename, NULL);
+	cairo_surface_t *loaded_by_us = fiv_io_open(filename, NULL);
 	if (!loaded_by_us)
 		return;
 

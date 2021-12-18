@@ -1,5 +1,5 @@
 //
-// fastiv-view.c: fast image viewer - view widget
+// fiv-view.c: fast image viewer - view widget
 //
 // Copyright (c) 2021, Přemysl Eric Janouch <p@janouch.name>
 //
@@ -28,15 +28,15 @@
 #include <gdk/gdkquartz.h>
 #endif  // GDK_WINDOWING_QUARTZ
 
-#include "fastiv-io.h"
-#include "fastiv-view.h"
+#include "fiv-io.h"
+#include "fiv-view.h"
 
-struct _FastivView {
+struct _FivView {
 	GtkWidget parent_instance;
 	cairo_surface_t *image;             ///< The loaded image (sequence)
 	cairo_surface_t *page;              ///< Current page within image, weak
 	cairo_surface_t *frame;             ///< Current frame within page, weak
-	FastivIoOrientation orientation;    ///< Current page orientation
+	FivIoOrientation orientation;       ///< Current page orientation
 	bool filter;                        ///< Smooth scaling toggle
 	bool scale_to_fit;                  ///< Image no larger than the allocation
 	double scale;                       ///< Scaling factor
@@ -46,42 +46,42 @@ struct _FastivView {
 	gulong frame_update_connection;     ///< GdkFrameClock::update
 };
 
-G_DEFINE_TYPE(FastivView, fastiv_view, GTK_TYPE_WIDGET)
+G_DEFINE_TYPE(FivView, fiv_view, GTK_TYPE_WIDGET)
 
-static FastivIoOrientation view_left[9] = {
-	[FastivIoOrientationUnknown] = FastivIoOrientationUnknown,
-	[FastivIoOrientation0] = FastivIoOrientation270,
-	[FastivIoOrientationMirror0] = FastivIoOrientationMirror270,
-	[FastivIoOrientation180] = FastivIoOrientation90,
-	[FastivIoOrientationMirror180] = FastivIoOrientationMirror90,
-	[FastivIoOrientationMirror270] = FastivIoOrientationMirror180,
-	[FastivIoOrientation90] = FastivIoOrientation0,
-	[FastivIoOrientationMirror90] = FastivIoOrientationMirror0,
-	[FastivIoOrientation270] = FastivIoOrientation180
+static FivIoOrientation view_left[9] = {
+	[FivIoOrientationUnknown] = FivIoOrientationUnknown,
+	[FivIoOrientation0] = FivIoOrientation270,
+	[FivIoOrientationMirror0] = FivIoOrientationMirror270,
+	[FivIoOrientation180] = FivIoOrientation90,
+	[FivIoOrientationMirror180] = FivIoOrientationMirror90,
+	[FivIoOrientationMirror270] = FivIoOrientationMirror180,
+	[FivIoOrientation90] = FivIoOrientation0,
+	[FivIoOrientationMirror90] = FivIoOrientationMirror0,
+	[FivIoOrientation270] = FivIoOrientation180
 };
 
-static FastivIoOrientation view_mirror[9] = {
-	[FastivIoOrientationUnknown] = FastivIoOrientationUnknown,
-	[FastivIoOrientation0] = FastivIoOrientationMirror0,
-	[FastivIoOrientationMirror0] = FastivIoOrientation0,
-	[FastivIoOrientation180] = FastivIoOrientationMirror180,
-	[FastivIoOrientationMirror180] = FastivIoOrientation180,
-	[FastivIoOrientationMirror270] = FastivIoOrientation270,
-	[FastivIoOrientation90] = FastivIoOrientationMirror270,
-	[FastivIoOrientationMirror90] = FastivIoOrientation90,
-	[FastivIoOrientation270] = FastivIoOrientationMirror270
+static FivIoOrientation view_mirror[9] = {
+	[FivIoOrientationUnknown] = FivIoOrientationUnknown,
+	[FivIoOrientation0] = FivIoOrientationMirror0,
+	[FivIoOrientationMirror0] = FivIoOrientation0,
+	[FivIoOrientation180] = FivIoOrientationMirror180,
+	[FivIoOrientationMirror180] = FivIoOrientation180,
+	[FivIoOrientationMirror270] = FivIoOrientation270,
+	[FivIoOrientation90] = FivIoOrientationMirror270,
+	[FivIoOrientationMirror90] = FivIoOrientation90,
+	[FivIoOrientation270] = FivIoOrientationMirror270
 };
 
-static FastivIoOrientation view_right[9] = {
-	[FastivIoOrientationUnknown] = FastivIoOrientationUnknown,
-	[FastivIoOrientation0] = FastivIoOrientation90,
-	[FastivIoOrientationMirror0] = FastivIoOrientationMirror90,
-	[FastivIoOrientation180] = FastivIoOrientation270,
-	[FastivIoOrientationMirror180] = FastivIoOrientationMirror270,
-	[FastivIoOrientationMirror270] = FastivIoOrientationMirror0,
-	[FastivIoOrientation90] = FastivIoOrientation180,
-	[FastivIoOrientationMirror90] = FastivIoOrientationMirror180,
-	[FastivIoOrientation270] = FastivIoOrientation0
+static FivIoOrientation view_right[9] = {
+	[FivIoOrientationUnknown] = FivIoOrientationUnknown,
+	[FivIoOrientation0] = FivIoOrientation90,
+	[FivIoOrientationMirror0] = FivIoOrientationMirror90,
+	[FivIoOrientation180] = FivIoOrientation270,
+	[FivIoOrientationMirror180] = FivIoOrientationMirror270,
+	[FivIoOrientationMirror270] = FivIoOrientationMirror0,
+	[FivIoOrientation90] = FivIoOrientation180,
+	[FivIoOrientationMirror90] = FivIoOrientationMirror180,
+	[FivIoOrientation270] = FivIoOrientation0
 };
 
 enum {
@@ -94,19 +94,19 @@ enum {
 static GParamSpec *view_properties[N_PROPERTIES];
 
 static void
-fastiv_view_finalize(GObject *gobject)
+fiv_view_finalize(GObject *gobject)
 {
-	FastivView *self = FASTIV_VIEW(gobject);
+	FivView *self = FIV_VIEW(gobject);
 	cairo_surface_destroy(self->image);
 
-	G_OBJECT_CLASS(fastiv_view_parent_class)->finalize(gobject);
+	G_OBJECT_CLASS(fiv_view_parent_class)->finalize(gobject);
 }
 
 static void
-fastiv_view_get_property(
+fiv_view_get_property(
 	GObject *object, guint property_id, GValue *value, GParamSpec *pspec)
 {
-	FastivView *self = FASTIV_VIEW(object);
+	FivView *self = FIV_VIEW(object);
 	switch (property_id) {
 	case PROP_SCALE:
 		g_value_set_double(value, self->scale);
@@ -123,7 +123,7 @@ fastiv_view_get_property(
 }
 
 static void
-get_surface_dimensions(FastivView *self, double *width, double *height)
+get_surface_dimensions(FivView *self, double *width, double *height)
 {
 	*width = *height = 0;
 	if (!self->image)
@@ -133,10 +133,10 @@ get_surface_dimensions(FastivView *self, double *width, double *height)
 	switch (cairo_surface_get_type(self->page)) {
 	case CAIRO_SURFACE_TYPE_IMAGE:
 		switch (self->orientation) {
-		case FastivIoOrientation90:
-		case FastivIoOrientationMirror90:
-		case FastivIoOrientation270:
-		case FastivIoOrientationMirror270:
+		case FivIoOrientation90:
+		case FivIoOrientationMirror90:
+		case FivIoOrientation270:
+		case FivIoOrientationMirror270:
 			*width = cairo_image_surface_get_height(self->page);
 			*height = cairo_image_surface_get_width(self->page);
 			break;
@@ -160,7 +160,7 @@ get_surface_dimensions(FastivView *self, double *width, double *height)
 }
 
 static void
-get_display_dimensions(FastivView *self, int *width, int *height)
+get_display_dimensions(FivView *self, int *width, int *height)
 {
 	double w, h;
 	get_surface_dimensions(self, &w, &h);
@@ -170,37 +170,37 @@ get_display_dimensions(FastivView *self, int *width, int *height)
 }
 
 static cairo_matrix_t
-get_orientation_matrix(FastivIoOrientation o, double width, double height)
+get_orientation_matrix(FivIoOrientation o, double width, double height)
 {
 	cairo_matrix_t matrix = {};
 	cairo_matrix_init_identity(&matrix);
 	switch (o) {
-	case FastivIoOrientation90:
+	case FivIoOrientation90:
 		cairo_matrix_rotate(&matrix, -M_PI_2);
 		cairo_matrix_translate(&matrix, -width, 0);
 		break;
-	case FastivIoOrientation180:
+	case FivIoOrientation180:
 		cairo_matrix_scale(&matrix, -1, -1);
 		cairo_matrix_translate(&matrix, -width, -height);
 		break;
-	case FastivIoOrientation270:
+	case FivIoOrientation270:
 		cairo_matrix_rotate(&matrix, +M_PI_2);
 		cairo_matrix_translate(&matrix, 0, -height);
 		break;
-	case FastivIoOrientationMirror0:
+	case FivIoOrientationMirror0:
 		cairo_matrix_scale(&matrix, -1, +1);
 		cairo_matrix_translate(&matrix, -width, 0);
 		break;
-	case FastivIoOrientationMirror90:
+	case FivIoOrientationMirror90:
 		cairo_matrix_rotate(&matrix, +M_PI_2);
 		cairo_matrix_scale(&matrix, -1, +1);
 		cairo_matrix_translate(&matrix, -width, -height);
 		break;
-	case FastivIoOrientationMirror180:
+	case FivIoOrientationMirror180:
 		cairo_matrix_scale(&matrix, +1, -1);
 		cairo_matrix_translate(&matrix, 0, -height);
 		break;
-	case FastivIoOrientationMirror270:
+	case FivIoOrientationMirror270:
 		cairo_matrix_rotate(&matrix, -M_PI_2);
 		cairo_matrix_scale(&matrix, -1, +1);
 	default:
@@ -210,10 +210,9 @@ get_orientation_matrix(FastivIoOrientation o, double width, double height)
 }
 
 static void
-fastiv_view_get_preferred_height(
-	GtkWidget *widget, gint *minimum, gint *natural)
+fiv_view_get_preferred_height(GtkWidget *widget, gint *minimum, gint *natural)
 {
-	FastivView *self = FASTIV_VIEW(widget);
+	FivView *self = FIV_VIEW(widget);
 	if (self->scale_to_fit) {
 		double sw, sh;
 		get_surface_dimensions(self, &sw, &sh);
@@ -227,9 +226,9 @@ fastiv_view_get_preferred_height(
 }
 
 static void
-fastiv_view_get_preferred_width(GtkWidget *widget, gint *minimum, gint *natural)
+fiv_view_get_preferred_width(GtkWidget *widget, gint *minimum, gint *natural)
 {
-	FastivView *self = FASTIV_VIEW(widget);
+	FivView *self = FIV_VIEW(widget);
 	if (self->scale_to_fit) {
 		double sw, sh;
 		get_surface_dimensions(self, &sw, &sh);
@@ -243,12 +242,11 @@ fastiv_view_get_preferred_width(GtkWidget *widget, gint *minimum, gint *natural)
 }
 
 static void
-fastiv_view_size_allocate(GtkWidget *widget, GtkAllocation *allocation)
+fiv_view_size_allocate(GtkWidget *widget, GtkAllocation *allocation)
 {
-	GTK_WIDGET_CLASS(fastiv_view_parent_class)
-		->size_allocate(widget, allocation);
+	GTK_WIDGET_CLASS(fiv_view_parent_class)->size_allocate(widget, allocation);
 
-	FastivView *self = FASTIV_VIEW(widget);
+	FivView *self = FIV_VIEW(widget);
 	if (!self->image || !self->scale_to_fit)
 		return;
 
@@ -264,7 +262,7 @@ fastiv_view_size_allocate(GtkWidget *widget, GtkAllocation *allocation)
 }
 
 static void
-fastiv_view_realize(GtkWidget *widget)
+fiv_view_realize(GtkWidget *widget)
 {
 	GtkAllocation allocation;
 	gtk_widget_get_allocation(widget, &allocation);
@@ -312,7 +310,7 @@ fastiv_view_realize(GtkWidget *widget)
 }
 
 static gboolean
-fastiv_view_draw(GtkWidget *widget, cairo_t *cr)
+fiv_view_draw(GtkWidget *widget, cairo_t *cr)
 {
 	// Placed here due to our using a native GdkWindow on X11,
 	// which makes the widget have no double buffering or default background.
@@ -321,7 +319,7 @@ fastiv_view_draw(GtkWidget *widget, cairo_t *cr)
 	gtk_render_background(gtk_widget_get_style_context(widget), cr, 0, 0,
 		allocation.width, allocation.height);
 
-	FastivView *self = FASTIV_VIEW(widget);
+	FivView *self = FIV_VIEW(widget);
 	if (!self->image ||
 		!gtk_cairo_should_draw_window(cr, gtk_widget_get_window(widget)))
 		return TRUE;
@@ -386,10 +384,9 @@ fastiv_view_draw(GtkWidget *widget, cairo_t *cr)
 }
 
 static gboolean
-fastiv_view_button_press_event(GtkWidget *widget, GdkEventButton *event)
+fiv_view_button_press_event(GtkWidget *widget, GdkEventButton *event)
 {
-	GTK_WIDGET_CLASS(fastiv_view_parent_class)
-		->button_press_event(widget, event);
+	GTK_WIDGET_CLASS(fiv_view_parent_class)->button_press_event(widget, event);
 
 	if (event->button == GDK_BUTTON_PRIMARY &&
 		gtk_widget_get_focus_on_click(widget))
@@ -402,7 +399,7 @@ fastiv_view_button_press_event(GtkWidget *widget, GdkEventButton *event)
 #define SCALE_STEP 1.4
 
 static gboolean
-set_scale_to_fit(FastivView *self, bool scale_to_fit)
+set_scale_to_fit(FivView *self, bool scale_to_fit)
 {
 	self->scale_to_fit = scale_to_fit;
 
@@ -413,7 +410,7 @@ set_scale_to_fit(FastivView *self, bool scale_to_fit)
 }
 
 static gboolean
-set_scale(FastivView *self, double scale)
+set_scale(FivView *self, double scale)
 {
 	self->scale = scale;
 	g_object_notify_by_pspec(
@@ -422,9 +419,9 @@ set_scale(FastivView *self, double scale)
 }
 
 static gboolean
-fastiv_view_scroll_event(GtkWidget *widget, GdkEventScroll *event)
+fiv_view_scroll_event(GtkWidget *widget, GdkEventScroll *event)
 {
-	FastivView *self = FASTIV_VIEW(widget);
+	FivView *self = FIV_VIEW(widget);
 	if (!self->image)
 		return FALSE;
 	if (event->state & gtk_accelerator_get_default_mod_mask())
@@ -443,7 +440,7 @@ fastiv_view_scroll_event(GtkWidget *widget, GdkEventScroll *event)
 }
 
 static void
-stop_animating(FastivView *self)
+stop_animating(FivView *self)
 {
 	GdkFrameClock *clock = gtk_widget_get_frame_clock(GTK_WIDGET(self));
 	if (!clock || !self->frame_update_connection)
@@ -458,10 +455,10 @@ stop_animating(FastivView *self)
 }
 
 static gboolean
-advance_frame(FastivView *self)
+advance_frame(FivView *self)
 {
 	cairo_surface_t *next =
-		cairo_surface_get_user_data(self->frame, &fastiv_io_key_frame_next);
+		cairo_surface_get_user_data(self->frame, &fiv_io_key_frame_next);
 	if (next) {
 		self->frame = next;
 	} else {
@@ -474,13 +471,13 @@ advance_frame(FastivView *self)
 }
 
 static gboolean
-advance_animation(FastivView *self, GdkFrameClock *clock)
+advance_animation(FivView *self, GdkFrameClock *clock)
 {
 	gint64 now = gdk_frame_clock_get_frame_time(clock);
 	while (true) {
 		// TODO(p): See if infinite frames can actually happen, and how.
 		intptr_t duration = (intptr_t) cairo_surface_get_user_data(
-			self->frame, &fastiv_io_key_frame_duration);
+			self->frame, &fiv_io_key_frame_duration);
 		if (duration < 0)
 			return FALSE;
 
@@ -507,57 +504,56 @@ advance_animation(FastivView *self, GdkFrameClock *clock)
 static void
 on_frame_clock_update(GdkFrameClock *clock, gpointer user_data)
 {
-	FastivView *self = FASTIV_VIEW(user_data);
+	FivView *self = FIV_VIEW(user_data);
 	if (!advance_animation(self, clock))
 		stop_animating(self);
 }
 
 static void
-start_animating(FastivView *self)
+start_animating(FivView *self)
 {
 	stop_animating(self);
 
 	GdkFrameClock *clock = gtk_widget_get_frame_clock(GTK_WIDGET(self));
 	if (!clock || !self->image ||
-		!cairo_surface_get_user_data(self->page, &fastiv_io_key_frame_next))
+		!cairo_surface_get_user_data(self->page, &fiv_io_key_frame_next))
 		return;
 
 	self->frame_time = gdk_frame_clock_get_frame_time(clock);
 	self->frame_update_connection = g_signal_connect(
 		clock, "update", G_CALLBACK(on_frame_clock_update), self);
-	self->remaining_loops = (uintptr_t) cairo_surface_get_user_data(
-		self->page, &fastiv_io_key_loops);
+	self->remaining_loops =
+		(uintptr_t) cairo_surface_get_user_data(self->page, &fiv_io_key_loops);
 
 	gdk_frame_clock_begin_updating(clock);
 }
 
 static void
-switch_page(FastivView *self, cairo_surface_t *page)
+switch_page(FivView *self, cairo_surface_t *page)
 {
 	self->frame = self->page = page;
 	if ((self->orientation = (uintptr_t) cairo_surface_get_user_data(
-			 self->page, &fastiv_io_key_orientation)) ==
-		FastivIoOrientationUnknown)
-		self->orientation = FastivIoOrientation0;
+			self->page, &fiv_io_key_orientation)) == FivIoOrientationUnknown)
+		self->orientation = FivIoOrientation0;
 
 	start_animating(self);
 	gtk_widget_queue_resize(GTK_WIDGET(self));
 }
 
 static void
-fastiv_view_map(GtkWidget *widget)
+fiv_view_map(GtkWidget *widget)
 {
-	GTK_WIDGET_CLASS(fastiv_view_parent_class)->map(widget);
+	GTK_WIDGET_CLASS(fiv_view_parent_class)->map(widget);
 
 	// Loading before mapping will fail to obtain a GdkFrameClock.
-	start_animating(FASTIV_VIEW(widget));
+	start_animating(FIV_VIEW(widget));
 }
 
 void
-fastiv_view_unmap(GtkWidget *widget)
+fiv_view_unmap(GtkWidget *widget)
 {
-	stop_animating(FASTIV_VIEW(widget));
-	GTK_WIDGET_CLASS(fastiv_view_parent_class)->unmap(widget);
+	stop_animating(FIV_VIEW(widget));
+	GTK_WIDGET_CLASS(fiv_view_parent_class)->unmap(widget);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -582,7 +578,7 @@ get_toplevel(GtkWidget *widget)
 
 static void
 on_draw_page(G_GNUC_UNUSED GtkPrintOperation *operation,
-	GtkPrintContext *context, G_GNUC_UNUSED int page_nr, FastivView *self)
+	GtkPrintContext *context, G_GNUC_UNUSED int page_nr, FivView *self)
 {
 	double surface_width_px = 0, surface_height_px = 0;
 	get_surface_dimensions(self, &surface_width_px, &surface_height_px);
@@ -606,7 +602,7 @@ on_draw_page(G_GNUC_UNUSED GtkPrintOperation *operation,
 }
 
 static gboolean
-print(FastivView *self)
+print(FivView *self)
 {
 	GtkPrintOperation *print = gtk_print_operation_new();
 	gtk_print_operation_set_n_pages(print, 1);
@@ -636,7 +632,7 @@ print(FastivView *self)
 }
 
 static gboolean
-save_as(FastivView *self, gboolean frame)
+save_as(FivView *self, gboolean frame)
 {
 	GtkWindow *window = get_toplevel(GTK_WIDGET(self));
 	GtkWidget *dialog = gtk_file_chooser_dialog_new(
@@ -680,11 +676,10 @@ save_as(FastivView *self, gboolean frame)
 		GError *error = NULL;
 #ifdef HAVE_LIBWEBP
 		if (gtk_file_chooser_get_filter(chooser) == webp_filter)
-			fastiv_io_save(self->page,
-				frame ? self->frame : NULL, path, &error);
+			fiv_io_save(self->page, frame ? self->frame : NULL, path, &error);
 		else
 #endif  // HAVE_LIBWEBP
-			fastiv_io_save_metadata(self->page, path, &error);
+			fiv_io_save_metadata(self->page, path, &error);
 		if (error)
 			show_error_dialog(window, error);
 		g_free(path);
@@ -701,16 +696,16 @@ save_as(FastivView *self, gboolean frame)
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 static inline gboolean
-command(FastivView *self, FastivViewCommand command)
+command(FivView *self, FivViewCommand command)
 {
-	fastiv_view_command(self, command);
+	fiv_view_command(self, command);
 	return TRUE;
 }
 
 static gboolean
-fastiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
+fiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 {
-	FastivView *self = FASTIV_VIEW(widget);
+	FivView *self = FIV_VIEW(widget);
 	if (!self->image)
 		return FALSE;
 
@@ -722,15 +717,15 @@ fastiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 	if (state == GDK_CONTROL_MASK) {
 		switch (event->keyval) {
 		case GDK_KEY_0:
-			return command(self, FASTIV_VIEW_COMMAND_ZOOM_1);
+			return command(self, FIV_VIEW_COMMAND_ZOOM_1);
 		case GDK_KEY_plus:
-			return command(self, FASTIV_VIEW_COMMAND_ZOOM_IN);
+			return command(self, FIV_VIEW_COMMAND_ZOOM_IN);
 		case GDK_KEY_minus:
-			return command(self, FASTIV_VIEW_COMMAND_ZOOM_OUT);
+			return command(self, FIV_VIEW_COMMAND_ZOOM_OUT);
 		case GDK_KEY_p:
-			return command(self, FASTIV_VIEW_COMMAND_PRINT);
+			return command(self, FIV_VIEW_COMMAND_PRINT);
 		case GDK_KEY_s:
-			return command(self, FASTIV_VIEW_COMMAND_SAVE_PAGE);
+			return command(self, FIV_VIEW_COMMAND_SAVE_PAGE);
 		case GDK_KEY_S:
 			return save_as(self, TRUE);
 		}
@@ -750,9 +745,9 @@ fastiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 	case GDK_KEY_9:
 		return set_scale(self, event->keyval - GDK_KEY_0);
 	case GDK_KEY_plus:
-		return command(self, FASTIV_VIEW_COMMAND_ZOOM_IN);
+		return command(self, FIV_VIEW_COMMAND_ZOOM_IN);
 	case GDK_KEY_minus:
-		return command(self, FASTIV_VIEW_COMMAND_ZOOM_OUT);
+		return command(self, FIV_VIEW_COMMAND_ZOOM_OUT);
 
 	case GDK_KEY_x:  // Inspired by gThumb.
 		return set_scale_to_fit(self, !self->scale_to_fit);
@@ -765,31 +760,31 @@ fastiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 		return TRUE;
 
 	case GDK_KEY_less:
-		return command(self, FASTIV_VIEW_COMMAND_ROTATE_LEFT);
+		return command(self, FIV_VIEW_COMMAND_ROTATE_LEFT);
 	case GDK_KEY_equal:
-		return command(self, FASTIV_VIEW_COMMAND_MIRROR);
+		return command(self, FIV_VIEW_COMMAND_MIRROR);
 	case GDK_KEY_greater:
-		return command(self, FASTIV_VIEW_COMMAND_ROTATE_RIGHT);
+		return command(self, FIV_VIEW_COMMAND_ROTATE_RIGHT);
 
 	case GDK_KEY_bracketleft:
-		return command(self, FASTIV_VIEW_COMMAND_PAGE_PREVIOUS);
+		return command(self, FIV_VIEW_COMMAND_PAGE_PREVIOUS);
 	case GDK_KEY_bracketright:
-		return command(self, FASTIV_VIEW_COMMAND_PAGE_NEXT);
+		return command(self, FIV_VIEW_COMMAND_PAGE_NEXT);
 
 	case GDK_KEY_braceleft:
-		return command(self, FASTIV_VIEW_COMMAND_FRAME_PREVIOUS);
+		return command(self, FIV_VIEW_COMMAND_FRAME_PREVIOUS);
 	case GDK_KEY_braceright:
-		return command(self, FASTIV_VIEW_COMMAND_FRAME_NEXT);
+		return command(self, FIV_VIEW_COMMAND_FRAME_NEXT);
 	}
 	return FALSE;
 }
 
 static void
-fastiv_view_class_init(FastivViewClass *klass)
+fiv_view_class_init(FivViewClass *klass)
 {
 	GObjectClass *object_class = G_OBJECT_CLASS(klass);
-	object_class->finalize = fastiv_view_finalize;
-	object_class->get_property = fastiv_view_get_property;
+	object_class->finalize = fiv_view_finalize;
+	object_class->get_property = fiv_view_get_property;
 
 	view_properties[PROP_SCALE] = g_param_spec_double(
 		"scale", "Scale", "Zoom level",
@@ -804,24 +799,24 @@ fastiv_view_class_init(FastivViewClass *klass)
 		object_class, N_PROPERTIES, view_properties);
 
 	GtkWidgetClass *widget_class = GTK_WIDGET_CLASS(klass);
-	widget_class->get_preferred_height = fastiv_view_get_preferred_height;
-	widget_class->get_preferred_width = fastiv_view_get_preferred_width;
-	widget_class->size_allocate = fastiv_view_size_allocate;
-	widget_class->map = fastiv_view_map;
-	widget_class->unmap = fastiv_view_unmap;
-	widget_class->realize = fastiv_view_realize;
-	widget_class->draw = fastiv_view_draw;
-	widget_class->button_press_event = fastiv_view_button_press_event;
-	widget_class->scroll_event = fastiv_view_scroll_event;
-	widget_class->key_press_event = fastiv_view_key_press_event;
+	widget_class->get_preferred_height = fiv_view_get_preferred_height;
+	widget_class->get_preferred_width = fiv_view_get_preferred_width;
+	widget_class->size_allocate = fiv_view_size_allocate;
+	widget_class->map = fiv_view_map;
+	widget_class->unmap = fiv_view_unmap;
+	widget_class->realize = fiv_view_realize;
+	widget_class->draw = fiv_view_draw;
+	widget_class->button_press_event = fiv_view_button_press_event;
+	widget_class->scroll_event = fiv_view_scroll_event;
+	widget_class->key_press_event = fiv_view_key_press_event;
 
 	// TODO(p): Later override "screen_changed", recreate Pango layouts there,
 	// if we get to have any, or otherwise reflect DPI changes.
-	gtk_widget_class_set_css_name(widget_class, "fastiv-view");
+	gtk_widget_class_set_css_name(widget_class, "fiv-view");
 }
 
 static void
-fastiv_view_init(FastivView *self)
+fiv_view_init(FivView *self)
 {
 	gtk_widget_set_can_focus(GTK_WIDGET(self), TRUE);
 
@@ -833,9 +828,9 @@ fastiv_view_init(FastivView *self)
 
 // TODO(p): Progressive picture loading, or at least async/cancellable.
 gboolean
-fastiv_view_open(FastivView *self, const gchar *path, GError **error)
+fiv_view_open(FivView *self, const gchar *path, GError **error)
 {
-	cairo_surface_t *surface = fastiv_io_open(path, error);
+	cairo_surface_t *surface = fiv_io_open(path, error);
 	if (!surface)
 		return FALSE;
 	if (self->image)
@@ -849,75 +844,75 @@ fastiv_view_open(FastivView *self, const gchar *path, GError **error)
 }
 
 static void
-page_step(FastivView *self, int step)
+page_step(FivView *self, int step)
 {
 	cairo_user_data_key_t *key =
-		step < 0 ? &fastiv_io_key_page_previous : &fastiv_io_key_page_next;
+		step < 0 ? &fiv_io_key_page_previous : &fiv_io_key_page_next;
 	cairo_surface_t *page = cairo_surface_get_user_data(self->page, key);
 	if (page)
 		switch_page(self, page);
 }
 
 static void
-frame_step(FastivView *self, int step)
+frame_step(FivView *self, int step)
 {
 	stop_animating(self);
 	cairo_user_data_key_t *key =
-		step < 0 ? &fastiv_io_key_frame_previous : &fastiv_io_key_frame_next;
+		step < 0 ? &fiv_io_key_frame_previous : &fiv_io_key_frame_next;
 	if (!step || !(self->frame = cairo_surface_get_user_data(self->frame, key)))
 		self->frame = self->page;
 	gtk_widget_queue_draw(GTK_WIDGET(self));
 }
 
 void
-fastiv_view_command(FastivView *self, FastivViewCommand command)
+fiv_view_command(FivView *self, FivViewCommand command)
 {
-	g_return_if_fail(FASTIV_IS_VIEW(self));
+	g_return_if_fail(FIV_IS_VIEW(self));
 
 	GtkWidget *widget = GTK_WIDGET(self);
 	if (!self->image)
 		return;
 
 	switch (command) {
-	break; case FASTIV_VIEW_COMMAND_ROTATE_LEFT:
+	break; case FIV_VIEW_COMMAND_ROTATE_LEFT:
 		self->orientation = view_left[self->orientation];
 		gtk_widget_queue_resize(widget);
-	break; case FASTIV_VIEW_COMMAND_MIRROR:
+	break; case FIV_VIEW_COMMAND_MIRROR:
 		self->orientation = view_mirror[self->orientation];
 		gtk_widget_queue_resize(widget);
-	break; case FASTIV_VIEW_COMMAND_ROTATE_RIGHT:
+	break; case FIV_VIEW_COMMAND_ROTATE_RIGHT:
 		self->orientation = view_right[self->orientation];
 		gtk_widget_queue_resize(widget);
 
-	break; case FASTIV_VIEW_COMMAND_PAGE_FIRST:
+	break; case FIV_VIEW_COMMAND_PAGE_FIRST:
 		switch_page(self, self->image);
-	break; case FASTIV_VIEW_COMMAND_PAGE_PREVIOUS:
+	break; case FIV_VIEW_COMMAND_PAGE_PREVIOUS:
 		page_step(self, -1);
-	break; case FASTIV_VIEW_COMMAND_PAGE_NEXT:
+	break; case FIV_VIEW_COMMAND_PAGE_NEXT:
 		page_step(self, +1);
-	break; case FASTIV_VIEW_COMMAND_PAGE_LAST:
+	break; case FIV_VIEW_COMMAND_PAGE_LAST:
 		for (cairo_surface_t *s = self->page;
-			 (s = cairo_surface_get_user_data(s, &fastiv_io_key_page_next)); )
+			 (s = cairo_surface_get_user_data(s, &fiv_io_key_page_next)); )
 			self->page = s;
 		switch_page(self, self->page);
 
-	break; case FASTIV_VIEW_COMMAND_FRAME_FIRST:
+	break; case FIV_VIEW_COMMAND_FRAME_FIRST:
 		frame_step(self, 0);
-	break; case FASTIV_VIEW_COMMAND_FRAME_PREVIOUS:
+	break; case FIV_VIEW_COMMAND_FRAME_PREVIOUS:
 		frame_step(self, -1);
-	break; case FASTIV_VIEW_COMMAND_FRAME_NEXT:
+	break; case FIV_VIEW_COMMAND_FRAME_NEXT:
 		frame_step(self, +1);
 
-	break; case FASTIV_VIEW_COMMAND_PRINT:
+	break; case FIV_VIEW_COMMAND_PRINT:
 		print(self);
-	break; case FASTIV_VIEW_COMMAND_SAVE_PAGE:
+	break; case FIV_VIEW_COMMAND_SAVE_PAGE:
 		save_as(self, FALSE);
 
-	break; case FASTIV_VIEW_COMMAND_ZOOM_IN:
+	break; case FIV_VIEW_COMMAND_ZOOM_IN:
 		set_scale(self, self->scale * SCALE_STEP);
-	break; case FASTIV_VIEW_COMMAND_ZOOM_OUT:
+	break; case FIV_VIEW_COMMAND_ZOOM_OUT:
 		set_scale(self, self->scale / SCALE_STEP);
-	break; case FASTIV_VIEW_COMMAND_ZOOM_1:
+	break; case FIV_VIEW_COMMAND_ZOOM_1:
 		set_scale(self, 1.0);
 	}
 }

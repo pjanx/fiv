@@ -1,5 +1,5 @@
 //
-// fastiv-io.c: image operations
+// fiv-io.c: image operations
 //
 // Copyright (c) 2021, Přemysl Eric Janouch <p@janouch.name>
 //
@@ -47,8 +47,8 @@
 #include <tiffio.h>
 #endif  // HAVE_LIBTIFF
 #ifdef HAVE_GDKPIXBUF
-#include <gdk/gdk.h>
 #include <gdk-pixbuf/gdk-pixbuf.h>
+#include <gdk/gdk.h>
 #endif  // HAVE_GDKPIXBUF
 
 #define WUFFS_IMPLEMENTATION
@@ -64,17 +64,17 @@
 #define WUFFS_CONFIG__MODULE__ZLIB
 #include "wuffs-mirror-release-c/release/c/wuffs-v0.3.c"
 
+#include "fiv-io.h"
 #include "xdg.h"
-#include "fastiv-io.h"
 
 #if CAIRO_VERSION >= 11702 && X11_ACTUALLY_SUPPORTS_RGBA128F_OR_WE_USE_OPENGL
-#define FASTIV_CAIRO_RGBA128F
+#define FIV_CAIRO_RGBA128F
 #endif
 
 // A subset of shared-mime-info that produces an appropriate list of
 // file extensions. Chiefly motivated by the suckiness of raw photo formats:
 // someone else will maintain the list of file extensions for us.
-const char *fastiv_io_supported_media_types[] = {
+const char *fiv_io_supported_media_types[] = {
 	"image/bmp",
 	"image/gif",
 	"image/png",
@@ -103,10 +103,10 @@ const char *fastiv_io_supported_media_types[] = {
 };
 
 char **
-fastiv_io_all_supported_media_types(void)
+fiv_io_all_supported_media_types(void)
 {
 	GPtrArray *types = g_ptr_array_new();
-	for (const char **p = fastiv_io_supported_media_types; *p; p++)
+	for (const char **p = fiv_io_supported_media_types; *p; p++)
 		g_ptr_array_add(types, g_strdup(*p));
 
 #ifdef HAVE_GDKPIXBUF
@@ -126,18 +126,18 @@ fastiv_io_all_supported_media_types(void)
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-#define FASTIV_IO_ERROR fastiv_io_error_quark()
+#define FIV_IO_ERROR fiv_io_error_quark()
 
-G_DEFINE_QUARK(fastiv-io-error-quark, fastiv_io_error)
+G_DEFINE_QUARK(fiv-io-error-quark, fiv_io_error)
 
-enum FastivIoError {
-	FASTIV_IO_ERROR_OPEN
+enum FivIoError {
+	FIV_IO_ERROR_OPEN
 };
 
 static void
 set_error(GError **error, const char *message)
 {
-	g_set_error_literal(error, FASTIV_IO_ERROR, FASTIV_IO_ERROR_OPEN, message);
+	g_set_error_literal(error, FIV_IO_ERROR, FIV_IO_ERROR_OPEN, message);
 }
 
 static bool
@@ -148,11 +148,10 @@ try_append_page(cairo_surface_t *surface, cairo_surface_t **result,
 		return false;
 
 	if (*result) {
-		cairo_surface_set_user_data(*result_tail,
-			&fastiv_io_key_page_next, surface,
-			(cairo_destroy_func_t) cairo_surface_destroy);
-		cairo_surface_set_user_data(surface,
-			&fastiv_io_key_page_previous, *result_tail, NULL);
+		cairo_surface_set_user_data(*result_tail, &fiv_io_key_page_next,
+			surface, (cairo_destroy_func_t) cairo_surface_destroy);
+		cairo_surface_set_user_data(
+			surface, &fiv_io_key_page_previous, *result_tail, NULL);
 		*result_tail = surface;
 	} else {
 		*result = *result_tail = surface;
@@ -224,8 +223,7 @@ pull_metadata(wuffs_base__image_decoder *dec, wuffs_base__io_buffer *src,
 				goto fail;
 		}
 
-		g_byte_array_append(array,
-			wuffs_base__io_buffer__reader_pointer(&dst),
+		g_byte_array_append(array, wuffs_base__io_buffer__reader_pointer(&dst),
 			wuffs_base__io_buffer__reader_length(&dst));
 		if (wuffs_base__status__is_ok(&status))
 			return g_byte_array_free_to_bytes(array);
@@ -410,26 +408,26 @@ load_wuffs_frame(struct load_wuffs_frame_context *ctx, GError **error)
 	}
 
 	if (ctx->meta_exif)
-		cairo_surface_set_user_data(surface, &fastiv_io_key_exif,
+		cairo_surface_set_user_data(surface, &fiv_io_key_exif,
 			g_bytes_ref(ctx->meta_exif), (cairo_destroy_func_t) g_bytes_unref);
 	if (ctx->meta_iccp)
-		cairo_surface_set_user_data(surface, &fastiv_io_key_icc,
+		cairo_surface_set_user_data(surface, &fiv_io_key_icc,
 			g_bytes_ref(ctx->meta_iccp), (cairo_destroy_func_t) g_bytes_unref);
 	if (ctx->meta_xmp)
-		cairo_surface_set_user_data(surface, &fastiv_io_key_xmp,
+		cairo_surface_set_user_data(surface, &fiv_io_key_xmp,
 			g_bytes_ref(ctx->meta_xmp), (cairo_destroy_func_t) g_bytes_unref);
 
-	cairo_surface_set_user_data(surface, &fastiv_io_key_loops,
+	cairo_surface_set_user_data(surface, &fiv_io_key_loops,
 		(void *) (uintptr_t) wuffs_base__image_decoder__num_animation_loops(
 			ctx->dec), NULL);
-	cairo_surface_set_user_data(surface, &fastiv_io_key_frame_duration,
+	cairo_surface_set_user_data(surface, &fiv_io_key_frame_duration,
 		(void *) (intptr_t) (wuffs_base__frame_config__duration(&fc) /
 			WUFFS_BASE__FLICKS_PER_MILLISECOND), NULL);
 
-	cairo_surface_set_user_data(surface, &fastiv_io_key_frame_previous,
-		ctx->result_tail, NULL);
+	cairo_surface_set_user_data(
+		surface, &fiv_io_key_frame_previous, ctx->result_tail, NULL);
 	if (ctx->result_tail)
-		cairo_surface_set_user_data(ctx->result_tail, &fastiv_io_key_frame_next,
+		cairo_surface_set_user_data(ctx->result_tail, &fiv_io_key_frame_next,
 			surface, (cairo_destroy_func_t) cairo_surface_destroy);
 	else
 		ctx->result = surface;
@@ -536,9 +534,9 @@ open_wuffs(
 
 	// Cairo doesn't support transparency with RGB30, so no premultiplication.
 	ctx.pack_16_10 = opaque && (bpp > 24 || (bpp < 24 && bpp > 8));
-#ifdef FASTIV_CAIRO_RGBA128F
+#ifdef FIV_CAIRO_RGBA128F
 	ctx.expand_16_float = !opaque && (bpp > 24 || (bpp < 24 && bpp > 8));
-#endif  // FASTIV_CAIRO_RGBA128F
+#endif  // FIV_CAIRO_RGBA128F
 
 	// In Wuffs, /doc/note/pixel-formats.md declares "memory order", which,
 	// for our purposes, means big endian, and BGRA results in 32-bit ARGB
@@ -553,12 +551,12 @@ open_wuffs(
 	// Pre-multiplied alpha is used." CAIRO_FORMAT_RGB{24,30} are analogous.
 	ctx.cairo_format = CAIRO_FORMAT_ARGB32;
 
-#ifdef FASTIV_CAIRO_RGBA128F
+#ifdef FIV_CAIRO_RGBA128F
 	if (ctx.expand_16_float) {
 		wuffs_format = WUFFS_BASE__PIXEL_FORMAT__BGRA_NONPREMUL_4X16LE;
 		ctx.cairo_format = CAIRO_FORMAT_RGBA128F;
 	} else
-#endif  // FASTIV_CAIRO_RGBA128F
+#endif  // FIV_CAIRO_RGBA128F
 	if (ctx.pack_16_10) {
 		// TODO(p): Make Wuffs support A2RGB30 as a destination format;
 		// in general, 16-bit depth swizzlers are stubbed.
@@ -589,8 +587,8 @@ open_wuffs(
 
 	// Wrap the chain around, since our caller receives only one pointer.
 	if (ctx.result)
-		cairo_surface_set_user_data(ctx.result, &fastiv_io_key_frame_previous,
-			ctx.result_tail, NULL);
+		cairo_surface_set_user_data(
+			ctx.result, &fiv_io_key_frame_previous, ctx.result_tail, NULL);
 
 fail:
 	free(ctx.workbuf.ptr);
@@ -716,14 +714,14 @@ parse_jpeg_metadata(cairo_surface_t *surface, const gchar *data, gsize len)
 	}
 
 	if (exif->len)
-		cairo_surface_set_user_data(surface, &fastiv_io_key_exif,
+		cairo_surface_set_user_data(surface, &fiv_io_key_exif,
 			g_byte_array_free_to_bytes(exif),
 			(cairo_destroy_func_t) g_bytes_unref);
 	else
 		g_byte_array_free(exif, TRUE);
 
 	if (icc_done)
-		cairo_surface_set_user_data(surface, &fastiv_io_key_icc,
+		cairo_surface_set_user_data(surface, &fiv_io_key_icc,
 			g_byte_array_free_to_bytes(icc),
 			(cairo_destroy_func_t) g_bytes_unref);
 	else
@@ -900,7 +898,7 @@ open_libraw(const gchar *data, gsize len, GError **error)
 #endif  // HAVE_LIBRAW ---------------------------------------------------------
 #ifdef HAVE_LIBRSVG  // --------------------------------------------------------
 
-#ifdef FASTIV_RSVG_DEBUG
+#ifdef FIV_RSVG_DEBUG
 #include <cairo/cairo-script.h>
 #include <cairo/cairo-svg.h>
 #endif
@@ -911,8 +909,8 @@ open_librsvg(const gchar *data, gsize len, const gchar *path, GError **error)
 {
 	GFile *base_file = g_file_new_for_path(path);
 	GInputStream *is = g_memory_input_stream_new_from_data(data, len, NULL);
-	RsvgHandle *handle = rsvg_handle_new_from_stream_sync(is, base_file,
-		RSVG_HANDLE_FLAG_KEEP_IMAGE_DATA, NULL, error);
+	RsvgHandle *handle = rsvg_handle_new_from_stream_sync(
+		is, base_file, RSVG_HANDLE_FLAG_KEEP_IMAGE_DATA, NULL, error);
 	g_object_unref(base_file);
 	g_object_unref(is);
 	if (!handle)
@@ -931,8 +929,8 @@ open_librsvg(const gchar *data, gsize len, const gchar *path, GError **error)
 #endif
 		RsvgRectangle viewbox = {};
 		gboolean has_viewport = FALSE;
-		rsvg_handle_get_intrinsic_dimensions(handle, NULL, NULL, NULL, NULL,
-			&has_viewport, &viewbox);
+		rsvg_handle_get_intrinsic_dimensions(
+			handle, NULL, NULL, NULL, NULL, &has_viewport, &viewbox);
 		if (!has_viewport) {
 			set_error(error, "cannot compute pixel dimensions");
 			g_object_unref(handle);
@@ -948,7 +946,7 @@ open_librsvg(const gchar *data, gsize len, const gchar *path, GError **error)
 	cairo_surface_t *surface =
 		cairo_recording_surface_create(CAIRO_CONTENT_COLOR_ALPHA, &extents);
 
-#ifdef FASTIV_RSVG_DEBUG
+#ifdef FIV_RSVG_DEBUG
 	cairo_device_t *script = cairo_script_create("cairo.script");
 	cairo_surface_t *tee =
 		cairo_script_surface_create_for_target(script, surface);
@@ -970,7 +968,7 @@ open_librsvg(const gchar *data, gsize len, const gchar *path, GError **error)
 	cairo_destroy(cr);
 	g_object_unref(handle);
 
-#ifdef FASTIV_RSVG_DEBUG
+#ifdef FIV_RSVG_DEBUG
 	cairo_surface_t *svg = cairo_svg_surface_create("cairo.svg", w, h);
 	cr = cairo_create(svg);
 	cairo_set_source_surface(cr, surface, 0, 0);
@@ -996,16 +994,16 @@ open_librsvg(const gchar *data, gsize len, const gchar *path, GError **error)
 
 // fmemopen is part of POSIX-1.2008, this exercise is technically unnecessary.
 // libXcursor checks for EOF rather than -1, it may eat your hamster.
-struct fastiv_io_xcursor {
+struct fiv_io_xcursor {
 	XcursorFile parent;
 	unsigned char *data;
 	long position, len;
 };
 
 static int
-fastiv_io_xcursor_read(XcursorFile *file, unsigned char *buf, int len)
+fiv_io_xcursor_read(XcursorFile *file, unsigned char *buf, int len)
 {
-	struct fastiv_io_xcursor *fix = (struct fastiv_io_xcursor *) file;
+	struct fiv_io_xcursor *fix = (struct fiv_io_xcursor *) file;
 	if (fix->position < 0 || fix->position > fix->len) {
 		errno = EOVERFLOW;
 		return -1;
@@ -1021,7 +1019,7 @@ fastiv_io_xcursor_read(XcursorFile *file, unsigned char *buf, int len)
 }
 
 static int
-fastiv_io_xcursor_write(G_GNUC_UNUSED XcursorFile *file,
+fiv_io_xcursor_write(G_GNUC_UNUSED XcursorFile *file,
 	G_GNUC_UNUSED unsigned char *buf, G_GNUC_UNUSED int len)
 {
 	errno = EBADF;
@@ -1029,9 +1027,9 @@ fastiv_io_xcursor_write(G_GNUC_UNUSED XcursorFile *file,
 }
 
 static int
-fastiv_io_xcursor_seek(XcursorFile *file, long offset, int whence)
+fiv_io_xcursor_seek(XcursorFile *file, long offset, int whence)
 {
-	struct fastiv_io_xcursor *fix = (struct fastiv_io_xcursor *) file;
+	struct fiv_io_xcursor *fix = (struct fiv_io_xcursor *) file;
 	switch (whence) {
 	case SEEK_SET:
 		fix->position = offset;
@@ -1054,11 +1052,11 @@ fastiv_io_xcursor_seek(XcursorFile *file, long offset, int whence)
 	return fix->position;
 }
 
-static const XcursorFile fastiv_io_xcursor_adaptor = {
+static const XcursorFile fiv_io_xcursor_adaptor = {
 	.closure = NULL,
-	.read    = fastiv_io_xcursor_read,
-	.write   = fastiv_io_xcursor_write,
-	.seek    = fastiv_io_xcursor_seek,
+	.read    = fiv_io_xcursor_read,
+	.write   = fiv_io_xcursor_write,
+	.seek    = fiv_io_xcursor_seek,
 };
 
 static cairo_surface_t *
@@ -1069,8 +1067,8 @@ open_xcursor(const gchar *data, gsize len, GError **error)
 		return NULL;
 	}
 
-	struct fastiv_io_xcursor file = {
-		.parent = fastiv_io_xcursor_adaptor,
+	struct fiv_io_xcursor file = {
+		.parent = fiv_io_xcursor_adaptor,
 		.data = (unsigned char *) data,
 		.position = 0,
 		.len = len,
@@ -1094,24 +1092,22 @@ open_xcursor(const gchar *data, gsize len, GError **error)
 		cairo_surface_t *surface = cairo_image_surface_create_for_data(
 			(unsigned char *) image->pixels, CAIRO_FORMAT_ARGB32,
 			image->width, image->height, image->width * sizeof *image->pixels);
-		cairo_surface_set_user_data(surface, &fastiv_io_key_frame_duration,
+		cairo_surface_set_user_data(surface, &fiv_io_key_frame_duration,
 			(void *) (intptr_t) image->delay, NULL);
 
 		if (pages && image->size == last_nominal) {
-			cairo_surface_set_user_data(surface,
-				&fastiv_io_key_frame_previous, frames_tail, NULL);
-			cairo_surface_set_user_data(frames_tail,
-				&fastiv_io_key_frame_next, surface,
-				(cairo_destroy_func_t) cairo_surface_destroy);
+			cairo_surface_set_user_data(
+				surface, &fiv_io_key_frame_previous, frames_tail, NULL);
+			cairo_surface_set_user_data(frames_tail, &fiv_io_key_frame_next,
+				surface, (cairo_destroy_func_t) cairo_surface_destroy);
 		} else if (frames_head) {
-			cairo_surface_set_user_data(frames_head,
-				&fastiv_io_key_frame_previous, frames_tail, NULL);
+			cairo_surface_set_user_data(
+				frames_head, &fiv_io_key_frame_previous, frames_tail, NULL);
 
-			cairo_surface_set_user_data(frames_head,
-				&fastiv_io_key_page_next, surface,
-				(cairo_destroy_func_t) cairo_surface_destroy);
-			cairo_surface_set_user_data(surface,
-				&fastiv_io_key_page_previous, frames_head, NULL);
+			cairo_surface_set_user_data(frames_head, &fiv_io_key_page_next,
+				surface, (cairo_destroy_func_t) cairo_surface_destroy);
+			cairo_surface_set_user_data(
+				surface, &fiv_io_key_page_previous, frames_head, NULL);
 			frames_head = surface;
 		} else {
 			pages = frames_head = surface;
@@ -1127,7 +1123,7 @@ open_xcursor(const gchar *data, gsize len, GError **error)
 
 	// Wrap around animations in the last page.
 	cairo_surface_set_user_data(
-		frames_head, &fastiv_io_key_frame_previous, frames_tail, NULL);
+		frames_head, &fiv_io_key_frame_previous, frames_tail, NULL);
 
 	// There is no need to copy data, assign it to the surface.
 	static cairo_user_data_key_t key = {};
@@ -1214,7 +1210,7 @@ load_libwebp_frame(WebPAnimDecoder *dec, const WebPAnimInfo *info,
 	cairo_surface_mark_dirty(surface);
 
 	// This API is confusing and awkward.
-	cairo_surface_set_user_data(surface, &fastiv_io_key_frame_duration,
+	cairo_surface_set_user_data(surface, &fiv_io_key_frame_duration,
 		(void *) (intptr_t) (timestamp - *last_timestamp), NULL);
 	*last_timestamp = timestamp;
 	return surface;
@@ -1248,20 +1244,19 @@ load_libwebp_animated(const WebPData *wd, GError **error)
 		}
 
 		if (frames_tail)
-			cairo_surface_set_user_data(frames_tail,
-				&fastiv_io_key_frame_next, surface,
-				(cairo_destroy_func_t) cairo_surface_destroy);
+			cairo_surface_set_user_data(frames_tail, &fiv_io_key_frame_next,
+				surface, (cairo_destroy_func_t) cairo_surface_destroy);
 		else
 			frames = surface;
 
-		cairo_surface_set_user_data(surface,
-			&fastiv_io_key_frame_previous, frames_tail, NULL);
+		cairo_surface_set_user_data(
+			surface, &fiv_io_key_frame_previous, frames_tail, NULL);
 		frames_tail = surface;
 	}
 
 	if (frames) {
-		cairo_surface_set_user_data(frames, &fastiv_io_key_frame_previous,
-			frames_tail, NULL);
+		cairo_surface_set_user_data(
+			frames, &fiv_io_key_frame_previous, frames_tail, NULL);
 	} else {
 		set_error(error, "the animation has no frames");
 		g_clear_pointer(&frames, cairo_surface_destroy);
@@ -1308,27 +1303,27 @@ open_libwebp(const gchar *data, gsize len, const gchar *path, GError **error)
 	uint32_t flags = WebPDemuxGetI(demux, WEBP_FF_FORMAT_FLAGS);
 	if ((flags & EXIF_FLAG) &&
 		WebPDemuxGetChunk(demux, "EXIF", 1, &chunk_iter)) {
-		cairo_surface_set_user_data(result, &fastiv_io_key_exif,
+		cairo_surface_set_user_data(result, &fiv_io_key_exif,
 			g_bytes_new(chunk_iter.chunk.bytes, chunk_iter.chunk.size),
 			(cairo_destroy_func_t) g_bytes_unref);
 		WebPDemuxReleaseChunkIterator(&chunk_iter);
 	}
 	if ((flags & ICCP_FLAG) &&
 		WebPDemuxGetChunk(demux, "ICCP", 1, &chunk_iter)) {
-		cairo_surface_set_user_data(result, &fastiv_io_key_icc,
+		cairo_surface_set_user_data(result, &fiv_io_key_icc,
 			g_bytes_new(chunk_iter.chunk.bytes, chunk_iter.chunk.size),
 			(cairo_destroy_func_t) g_bytes_unref);
 		WebPDemuxReleaseChunkIterator(&chunk_iter);
 	}
 	if ((flags & XMP_FLAG) &&
 		WebPDemuxGetChunk(demux, "XMP ", 1, &chunk_iter)) {
-		cairo_surface_set_user_data(result, &fastiv_io_key_xmp,
+		cairo_surface_set_user_data(result, &fiv_io_key_xmp,
 			g_bytes_new(chunk_iter.chunk.bytes, chunk_iter.chunk.size),
 			(cairo_destroy_func_t) g_bytes_unref);
 		WebPDemuxReleaseChunkIterator(&chunk_iter);
 	}
 	if (flags & ANIMATION_FLAG) {
-		cairo_surface_set_user_data(result, &fastiv_io_key_loops,
+		cairo_surface_set_user_data(result, &fiv_io_key_loops,
 			(void *) (uintptr_t) WebPDemuxGetI(demux, WEBP_FF_LOOP_COUNT),
 			NULL);
 	}
@@ -1419,7 +1414,7 @@ load_libheif_image(struct heif_image_handle *handle, GError **error)
 			g_warning("%s", err.message);
 			g_free(exif);
 		} else {
-			cairo_surface_set_user_data(surface, &fastiv_io_key_exif,
+			cairo_surface_set_user_data(surface, &fiv_io_key_exif,
 				g_bytes_new_take(exif, exif_len),
 				(cairo_destroy_func_t) g_bytes_unref);
 		}
@@ -1435,7 +1430,7 @@ load_libheif_image(struct heif_image_handle *handle, GError **error)
 			g_warning("%s", err.message);
 			g_free(icc);
 		} else {
-			cairo_surface_set_user_data(surface, &fastiv_io_key_icc,
+			cairo_surface_set_user_data(surface, &fiv_io_key_icc,
 				g_bytes_new_take(icc, icc_len),
 				(cairo_destroy_func_t) g_bytes_unref);
 		}
@@ -1463,8 +1458,8 @@ load_libheif_aux_images(const gchar *path, struct heif_image_handle *top,
 	n = heif_image_handle_get_list_of_auxiliary_image_IDs(top, filter, ids, n);
 	for (int i = 0; i < n; i++) {
 		struct heif_image_handle *handle = NULL;
-		struct heif_error err = heif_image_handle_get_auxiliary_image_handle(
-			top, ids[i], &handle);
+		struct heif_error err =
+			heif_image_handle_get_auxiliary_image_handle(top, ids[i], &handle);
 		if (err.code != heif_error_Ok) {
 			g_warning("%s: %s", path, err.message);
 			continue;
@@ -1534,7 +1529,7 @@ fail_read:
 #endif  // HAVE_LIBHEIF --------------------------------------------------------
 #ifdef HAVE_LIBTIFF  //---------------------------------------------------------
 
-struct fastiv_io_tiff {
+struct fiv_io_tiff {
 	unsigned char *data;
 	gchar *error;
 
@@ -1544,9 +1539,9 @@ struct fastiv_io_tiff {
 };
 
 static tsize_t
-fastiv_io_tiff_read(thandle_t h, tdata_t buf, tsize_t len)
+fiv_io_tiff_read(thandle_t h, tdata_t buf, tsize_t len)
 {
-	struct fastiv_io_tiff *io = h;
+	struct fiv_io_tiff *io = h;
 	if (len < 0) {
 		// What the FUCK! This argument is not supposed to be signed!
 		// How many mistakes can you make in such a basic API?
@@ -1568,7 +1563,7 @@ fastiv_io_tiff_read(thandle_t h, tdata_t buf, tsize_t len)
 }
 
 static tsize_t
-fastiv_io_tiff_write(G_GNUC_UNUSED thandle_t h,
+fiv_io_tiff_write(G_GNUC_UNUSED thandle_t h,
 	G_GNUC_UNUSED tdata_t buf, G_GNUC_UNUSED tsize_t len)
 {
 	errno = EBADF;
@@ -1576,9 +1571,9 @@ fastiv_io_tiff_write(G_GNUC_UNUSED thandle_t h,
 }
 
 static toff_t
-fastiv_io_tiff_seek(thandle_t h, toff_t offset, int whence)
+fiv_io_tiff_seek(thandle_t h, toff_t offset, int whence)
 {
-	struct fastiv_io_tiff *io = h;
+	struct fiv_io_tiff *io = h;
 	switch (whence) {
 	case SEEK_SET:
 		io->position = offset;
@@ -1597,22 +1592,22 @@ fastiv_io_tiff_seek(thandle_t h, toff_t offset, int whence)
 }
 
 static int
-fastiv_io_tiff_close(G_GNUC_UNUSED thandle_t h)
+fiv_io_tiff_close(G_GNUC_UNUSED thandle_t h)
 {
 	return 0;
 }
 
 static toff_t
-fastiv_io_tiff_size(thandle_t h)
+fiv_io_tiff_size(thandle_t h)
 {
-	return ((struct fastiv_io_tiff *) h)->len;
+	return ((struct fiv_io_tiff *) h)->len;
 }
 
 static void
-fastiv_io_tiff_error(thandle_t h,
-	const char *module, const char *format, va_list ap)
+fiv_io_tiff_error(
+	thandle_t h, const char *module, const char *format, va_list ap)
 {
-	struct fastiv_io_tiff *io = h;
+	struct fiv_io_tiff *io = h;
 	gchar *message = g_strdup_vprintf(format, ap);
 	if (io->error)
 		// I'm not sure if two errors can ever come in a succession,
@@ -1624,7 +1619,7 @@ fastiv_io_tiff_error(thandle_t h,
 }
 
 static void
-fastiv_io_tiff_warning(G_GNUC_UNUSED thandle_t h,
+fiv_io_tiff_warning(G_GNUC_UNUSED thandle_t h,
 	const char *module, const char *format, va_list ap)
 {
 	gchar *message = g_strdup_vprintf(format, ap);
@@ -1683,25 +1678,23 @@ load_libtiff_directory(TIFF *tiff, GError **error)
 	const uint32_t meta_len = 0;
 	const void *meta = NULL;
 	if (TIFFGetField(tiff, TIFFTAG_ICCPROFILE, &meta_len, &meta)) {
-		cairo_surface_set_user_data(surface, &fastiv_io_key_icc,
-			g_bytes_new(meta, meta_len),
-			(cairo_destroy_func_t) g_bytes_unref);
+		cairo_surface_set_user_data(surface, &fiv_io_key_icc,
+			g_bytes_new(meta, meta_len), (cairo_destroy_func_t) g_bytes_unref);
 	}
 	if (TIFFGetField(tiff, TIFFTAG_XMLPACKET, &meta_len, &meta)) {
-		cairo_surface_set_user_data(surface, &fastiv_io_key_xmp,
-			g_bytes_new(meta, meta_len),
-			(cairo_destroy_func_t) g_bytes_unref);
+		cairo_surface_set_user_data(surface, &fiv_io_key_xmp,
+			g_bytes_new(meta, meta_len), (cairo_destroy_func_t) g_bytes_unref);
 	}
 
 	// Don't ask. The API is high, alright, I'm just not sure about the level.
 	uint16_t orientation = 0;
 	if (TIFFGetField(tiff, TIFFTAG_ORIENTATION, &orientation)) {
 		if (orientation == 5 || orientation == 7)
-			cairo_surface_set_user_data(surface, &fastiv_io_key_orientation,
-				(void *) (uintptr_t) 5, NULL);
+			cairo_surface_set_user_data(
+				surface, &fiv_io_key_orientation, (void *) (uintptr_t) 5, NULL);
 		if (orientation == 6 || orientation == 8)
-			cairo_surface_set_user_data(surface, &fastiv_io_key_orientation,
-				(void *) (uintptr_t) 7, NULL);
+			cairo_surface_set_user_data(
+				surface, &fiv_io_key_orientation, (void *) (uintptr_t) 7, NULL);
 	}
 
 fail:
@@ -1716,9 +1709,9 @@ open_libtiff(const gchar *data, gsize len, const gchar *path, GError **error)
 	// Both kinds of handlers are called, redirect everything.
 	TIFFErrorHandler eh = TIFFSetErrorHandler(NULL);
 	TIFFErrorHandler wh = TIFFSetWarningHandler(NULL);
-	TIFFErrorHandlerExt ehe = TIFFSetErrorHandlerExt(fastiv_io_tiff_error);
-	TIFFErrorHandlerExt whe = TIFFSetWarningHandlerExt(fastiv_io_tiff_warning);
-	struct fastiv_io_tiff h = {
+	TIFFErrorHandlerExt ehe = TIFFSetErrorHandlerExt(fiv_io_tiff_error);
+	TIFFErrorHandlerExt whe = TIFFSetWarningHandlerExt(fiv_io_tiff_warning);
+	struct fiv_io_tiff h = {
 		.data = (unsigned char *) data,
 		.position = 0,
 		.len = len,
@@ -1726,8 +1719,8 @@ open_libtiff(const gchar *data, gsize len, const gchar *path, GError **error)
 
 	cairo_surface_t *result = NULL, *result_tail = NULL;
 	TIFF *tiff = TIFFClientOpen(path, "rm" /* Avoid mmap. */, &h,
-		fastiv_io_tiff_read, fastiv_io_tiff_write, fastiv_io_tiff_seek,
-		fastiv_io_tiff_close, fastiv_io_tiff_size, NULL, NULL);
+		fiv_io_tiff_read, fiv_io_tiff_write, fiv_io_tiff_seek,
+		fiv_io_tiff_close, fiv_io_tiff_size, NULL, NULL);
 	if (!tiff)
 		goto fail;
 
@@ -1759,7 +1752,7 @@ open_libtiff(const gchar *data, gsize len, const gchar *path, GError **error)
 		// We inform about unsupported directories, but do not fail on them.
 		GError *err = NULL;
 		if (!try_append_page(
-			load_libtiff_directory(tiff, &err), &result, &result_tail)) {
+				load_libtiff_directory(tiff, &err), &result, &result_tail)) {
 			g_warning("%s: %s", path, err->message);
 			g_error_free(err);
 		}
@@ -1803,8 +1796,8 @@ open_gdkpixbuf(const gchar *data, gsize len, GError **error)
 	if (orientation && strlen(orientation) == 1) {
 		int n = *orientation - '0';
 		if (n >= 1 && n <= 8)
-			cairo_surface_set_user_data(surface, &fastiv_io_key_orientation,
-				(void *) (uintptr_t) n, NULL);
+			cairo_surface_set_user_data(
+				surface, &fiv_io_key_orientation, (void *) (uintptr_t) n, NULL);
 	}
 
 	const char *icc_profile = gdk_pixbuf_get_option(pixbuf, "icc-profile");
@@ -1812,7 +1805,7 @@ open_gdkpixbuf(const gchar *data, gsize len, GError **error)
 		gsize out_len = 0;
 		guchar *raw = g_base64_decode(icc_profile, &out_len);
 		if (raw) {
-			cairo_surface_set_user_data(surface, &fastiv_io_key_icc,
+			cairo_surface_set_user_data(surface, &fiv_io_key_icc,
 				g_bytes_new_take(raw, out_len),
 				(cairo_destroy_func_t) g_bytes_unref);
 		}
@@ -1824,21 +1817,21 @@ open_gdkpixbuf(const gchar *data, gsize len, GError **error)
 
 #endif  // HAVE_GDKPIXBUF ------------------------------------------------------
 
-cairo_user_data_key_t fastiv_io_key_exif;
-cairo_user_data_key_t fastiv_io_key_orientation;
-cairo_user_data_key_t fastiv_io_key_icc;
-cairo_user_data_key_t fastiv_io_key_xmp;
+cairo_user_data_key_t fiv_io_key_exif;
+cairo_user_data_key_t fiv_io_key_orientation;
+cairo_user_data_key_t fiv_io_key_icc;
+cairo_user_data_key_t fiv_io_key_xmp;
 
-cairo_user_data_key_t fastiv_io_key_frame_next;
-cairo_user_data_key_t fastiv_io_key_frame_previous;
-cairo_user_data_key_t fastiv_io_key_frame_duration;
-cairo_user_data_key_t fastiv_io_key_loops;
+cairo_user_data_key_t fiv_io_key_frame_next;
+cairo_user_data_key_t fiv_io_key_frame_previous;
+cairo_user_data_key_t fiv_io_key_frame_duration;
+cairo_user_data_key_t fiv_io_key_loops;
 
-cairo_user_data_key_t fastiv_io_key_page_next;
-cairo_user_data_key_t fastiv_io_key_page_previous;
+cairo_user_data_key_t fiv_io_key_page_next;
+cairo_user_data_key_t fiv_io_key_page_previous;
 
 cairo_surface_t *
-fastiv_io_open(const gchar *path, GError **error)
+fiv_io_open(const gchar *path, GError **error)
 {
 	// TODO(p): Don't always load everything into memory, test type first,
 	// so that we can reject non-pictures early.  Wuffs only needs the first
@@ -1859,14 +1852,14 @@ fastiv_io_open(const gchar *path, GError **error)
 	if (!g_file_get_contents(path, &data, &len, error))
 		return NULL;
 
-	cairo_surface_t *surface = fastiv_io_open_from_data(data, len, path, error);
+	cairo_surface_t *surface = fiv_io_open_from_data(data, len, path, error);
 	free(data);
 	return surface;
 }
 
 cairo_surface_t *
-fastiv_io_open_from_data(const char *data, size_t len, const gchar *path,
-	GError **error)
+fiv_io_open_from_data(
+	const char *data, size_t len, const gchar *path, GError **error)
 {
 	wuffs_base__slice_u8 prefix =
 		wuffs_base__make_slice_u8((uint8_t *) data, len);
@@ -1972,11 +1965,11 @@ fastiv_io_open_from_data(const char *data, size_t len, const gchar *path,
 	gsize exif_len = 0;
 	gconstpointer exif_data = NULL;
 	if (surface &&
-		(exif = cairo_surface_get_user_data(surface, &fastiv_io_key_exif)) &&
+		(exif = cairo_surface_get_user_data(surface, &fiv_io_key_exif)) &&
 		(exif_data = g_bytes_get_data(exif, &exif_len))) {
-		cairo_surface_set_user_data(surface, &fastiv_io_key_orientation,
-			(void *) (uintptr_t) fastiv_io_exif_orientation(
-				exif_data, exif_len), NULL);
+		cairo_surface_set_user_data(surface, &fiv_io_key_orientation,
+			(void *) (uintptr_t) fiv_io_exif_orientation(exif_data, exif_len),
+			NULL);
 	}
 	return surface;
 }
@@ -2067,11 +2060,11 @@ encode_webp_animation(WebPMux *mux, cairo_surface_t *page)
 {
 	gboolean ok = TRUE;
 	for (cairo_surface_t *frame = page; ok && frame; frame =
-			cairo_surface_get_user_data(frame, &fastiv_io_key_frame_next)) {
+			cairo_surface_get_user_data(frame, &fiv_io_key_frame_next)) {
 		WebPMuxFrameInfo info = {
 			.bitstream = encode_lossless_webp(frame),
 			.duration = (intptr_t) cairo_surface_get_user_data(
-				frame, &fastiv_io_key_frame_duration),
+				frame, &fiv_io_key_frame_duration),
 			.id = WEBP_CHUNK_ANMF,
 			.dispose_method = WEBP_MUX_DISPOSE_NONE,
 			.blend_method = WEBP_MUX_NO_BLEND,
@@ -2082,7 +2075,7 @@ encode_webp_animation(WebPMux *mux, cairo_surface_t *page)
 	WebPMuxAnimParams params = {
 		.bgcolor = 0x00000000,  // BGRA, curiously.
 		.loop_count = (uintptr_t)
-			cairo_surface_get_user_data(page, &fastiv_io_key_loops),
+			cairo_surface_get_user_data(page, &fiv_io_key_loops),
 	};
 	return ok && WebPMuxSetAnimationParams(mux, &params) == WEBP_MUX_OK;
 }
@@ -2102,7 +2095,7 @@ transfer_metadata(WebPMux *mux, const char *fourcc, cairo_surface_t *page,
 }
 
 gboolean
-fastiv_io_save(cairo_surface_t *page, cairo_surface_t *frame, const gchar *path,
+fiv_io_save(cairo_surface_t *page, cairo_surface_t *frame, const gchar *path,
 	GError **error)
 {
 	g_return_val_if_fail(page != NULL, FALSE);
@@ -2112,14 +2105,14 @@ fastiv_io_save(cairo_surface_t *page, cairo_surface_t *frame, const gchar *path,
 	WebPMux *mux = WebPMuxNew();
 	if (frame)
 		ok = encode_webp_image(mux, frame);
-	else if (!cairo_surface_get_user_data(page, &fastiv_io_key_frame_next))
+	else if (!cairo_surface_get_user_data(page, &fiv_io_key_frame_next))
 		ok = encode_webp_image(mux, page);
 	else
 		ok = encode_webp_animation(mux, page);
 
-	ok = ok && transfer_metadata(mux, "EXIF", page, &fastiv_io_key_exif);
-	ok = ok && transfer_metadata(mux, "ICCP", page, &fastiv_io_key_icc);
-	ok = ok && transfer_metadata(mux, "XMP ", page, &fastiv_io_key_xmp);
+	ok = ok && transfer_metadata(mux, "EXIF", page, &fiv_io_key_exif);
+	ok = ok && transfer_metadata(mux, "ICCP", page, &fiv_io_key_icc);
+	ok = ok && transfer_metadata(mux, "XMP ", page, &fiv_io_key_xmp);
 
 	WebPData assembled = {};
 	WebPDataInit(&assembled);
@@ -2137,8 +2130,8 @@ fastiv_io_save(cairo_surface_t *page, cairo_surface_t *frame, const gchar *path,
 #endif  // HAVE_LIBWEBP
 // --- Metadata ----------------------------------------------------------------
 
-FastivIoOrientation
-fastiv_io_exif_orientation(const guint8 *tiff, gsize len)
+FivIoOrientation
+fiv_io_exif_orientation(const guint8 *tiff, gsize len)
 {
 	// libtiff also knows how to do this, but it's not a lot of code.
 	// The "Orientation" tag/field is part of Baseline TIFF 6.0 (1992),
@@ -2152,7 +2145,7 @@ fastiv_io_exif_orientation(const guint8 *tiff, gsize len)
 	uint16_t (*u16)(const uint8_t *) = NULL;
 	uint32_t (*u32)(const uint8_t *) = NULL;
 	if (tiff + 8 > end) {
-		return FastivIoOrientationUnknown;
+		return FivIoOrientationUnknown;
 	} else if (!memcmp(tiff, le, sizeof le)) {
 		u16 = wuffs_base__peek_u16le__no_bounds_check;
 		u32 = wuffs_base__peek_u32le__no_bounds_check;
@@ -2160,12 +2153,12 @@ fastiv_io_exif_orientation(const guint8 *tiff, gsize len)
 		u16 = wuffs_base__peek_u16be__no_bounds_check;
 		u32 = wuffs_base__peek_u32be__no_bounds_check;
 	} else {
-		return FastivIoOrientationUnknown;
+		return FivIoOrientationUnknown;
 	}
 
 	const uint8_t *ifd0 = tiff + u32(tiff + 4);
 	if (ifd0 + 2 > end)
-		return FastivIoOrientationUnknown;
+		return FivIoOrientationUnknown;
 
 	uint16_t fields = u16(ifd0);
 	enum { BYTE = 1, ASCII, SHORT, LONG, RATIONAL,
@@ -2178,12 +2171,11 @@ fastiv_io_exif_orientation(const guint8 *tiff, gsize len)
 			value16 >= 1 && value16 <= 8)
 			return value16;
 	}
-	return FastivIoOrientationUnknown;
+	return FivIoOrientationUnknown;
 }
 
 gboolean
-fastiv_io_save_metadata(
-	cairo_surface_t *page, const gchar *path, GError **error)
+fiv_io_save_metadata(cairo_surface_t *page, const gchar *path, GError **error)
 {
 	g_return_val_if_fail(page != NULL, FALSE);
 
@@ -2204,7 +2196,7 @@ fastiv_io_save_metadata(
 
 	// Adobe XMP Specification Part 3: Storage in Files, 2020/1, 1.1.3
 	// I don't care if Exiv2 supports it this way.
-	if ((data = cairo_surface_get_user_data(page, &fastiv_io_key_exif)) &&
+	if ((data = cairo_surface_get_user_data(page, &fiv_io_key_exif)) &&
 		(p = g_bytes_get_data(data, &len))) {
 		while (len) {
 			gsize chunk = MIN(len, 0xFFFF - 2 - 6);
@@ -2221,7 +2213,7 @@ fastiv_io_save_metadata(
 	}
 
 	// https://www.color.org/specification/ICC1v43_2010-12.pdf B.4
-	if ((data = cairo_surface_get_user_data(page, &fastiv_io_key_icc)) &&
+	if ((data = cairo_surface_get_user_data(page, &fiv_io_key_icc)) &&
 		(p = g_bytes_get_data(data, &len))) {
 		gsize limit = 0xFFFF - 2 - 12;
 		uint8_t current = 0, total = (len + limit - 1) / limit;
@@ -2244,7 +2236,7 @@ fastiv_io_save_metadata(
 	// Adobe XMP Specification Part 3: Storage in Files, 2020/1, 1.1.3
 	// If the main segment overflows, then it's a sign of bad luck,
 	// because 1.1.3.1 is way too complex.
-	if ((data = cairo_surface_get_user_data(page, &fastiv_io_key_xmp)) &&
+	if ((data = cairo_surface_get_user_data(page, &fiv_io_key_xmp)) &&
 		(p = g_bytes_get_data(data, &len))) {
 		while (len) {
 			gsize chunk = MIN(len, 0xFFFF - 2 - 29);
@@ -2277,25 +2269,25 @@ fastiv_io_save_metadata(
 // --- Thumbnails --------------------------------------------------------------
 
 GType
-fastiv_io_thumbnail_size_get_type(void)
+fiv_io_thumbnail_size_get_type(void)
 {
 	static gsize guard;
 	if (g_once_init_enter(&guard)) {
-#define XX(name, value, dir) {FASTIV_IO_THUMBNAIL_SIZE_ ## name, \
-	"FASTIV_IO_THUMBNAIL_SIZE_" #name, #name},
-		static const GEnumValue values[] = {FASTIV_IO_THUMBNAIL_SIZES(XX) {}};
+#define XX(name, value, dir) {FIV_IO_THUMBNAIL_SIZE_ ## name, \
+	"FIV_IO_THUMBNAIL_SIZE_" #name, #name},
+		static const GEnumValue values[] = {FIV_IO_THUMBNAIL_SIZES(XX) {}};
 #undef XX
 		GType type = g_enum_register_static(
-			g_intern_static_string("FastivIoThumbnailSize"), values);
+			g_intern_static_string("FivIoThumbnailSize"), values);
 		g_once_init_leave(&guard, type);
 	}
 	return guard;
 }
 
 #define XX(name, value, dir) {value, dir},
-FastivIoThumbnailSizeInfo
-	fastiv_io_thumbnail_sizes[FASTIV_IO_THUMBNAIL_SIZE_COUNT] = {
-		FASTIV_IO_THUMBNAIL_SIZES(XX)};
+FivIoThumbnailSizeInfo
+	fiv_io_thumbnail_sizes[FIV_IO_THUMBNAIL_SIZE_COUNT] = {
+		FIV_IO_THUMBNAIL_SIZES(XX)};
 #undef XX
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -2436,10 +2428,10 @@ fail_init:
 }
 
 cairo_surface_t *
-fastiv_io_lookup_thumbnail(GFile *target, FastivIoThumbnailSize size)
+fiv_io_lookup_thumbnail(GFile *target, FivIoThumbnailSize size)
 {
-	g_return_val_if_fail(size >= FASTIV_IO_THUMBNAIL_SIZE_MIN &&
-		size <= FASTIV_IO_THUMBNAIL_SIZE_MAX, NULL);
+	g_return_val_if_fail(size >= FIV_IO_THUMBNAIL_SIZE_MIN &&
+		size <= FIV_IO_THUMBNAIL_SIZE_MAX, NULL);
 
 	// Local files only, at least for now.
 	gchar *path = g_file_get_path(target);
@@ -2459,13 +2451,13 @@ fastiv_io_lookup_thumbnail(GFile *target, FastivIoThumbnailSize size)
 	// The lookup sequence is: nominal..max, then mirroring back to ..min.
 	cairo_surface_t *result = NULL;
 	GError *error = NULL;
-	for (int i = 0; i < FASTIV_IO_THUMBNAIL_SIZE_COUNT; i++) {
+	for (int i = 0; i < FIV_IO_THUMBNAIL_SIZE_COUNT; i++) {
 		int use = size + i;
-		if (use > FASTIV_IO_THUMBNAIL_SIZE_MAX)
-			use = FASTIV_IO_THUMBNAIL_SIZE_MAX - i;
+		if (use > FIV_IO_THUMBNAIL_SIZE_MAX)
+			use = FIV_IO_THUMBNAIL_SIZE_MAX - i;
 
 		gchar *path = g_strdup_printf("%s/thumbnails/%s/%s.png", cache_dir,
-			fastiv_io_thumbnail_sizes[use].thumbnail_spec_name, sum);
+			fiv_io_thumbnail_sizes[use].thumbnail_spec_name, sum);
 		result = read_spng_thumbnail(path, uri, st.st_mtim.tv_sec, &error);
 		if (error) {
 			g_debug("%s: %s", path, error->message);
@@ -2483,7 +2475,7 @@ fastiv_io_lookup_thumbnail(GFile *target, FastivIoThumbnailSize size)
 }
 
 int
-fastiv_io_filecmp(GFile *location1, GFile *location2)
+fiv_io_filecmp(GFile *location1, GFile *location2)
 {
 	if (g_file_has_prefix(location1, location2))
 		return +1;
