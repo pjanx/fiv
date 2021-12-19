@@ -88,6 +88,7 @@ enum {
 	PROP_SCALE = 1,
 	PROP_SCALE_TO_FIT,
 	PROP_FILTER,
+	PROP_PLAYING,
 	N_PROPERTIES
 };
 
@@ -116,6 +117,9 @@ fiv_view_get_property(
 		break;
 	case PROP_FILTER:
 		g_value_set_boolean(value, self->filter);
+		break;
+	case PROP_PLAYING:
+		g_value_set_boolean(value, !!self->frame_update_connection);
 		break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
@@ -472,6 +476,7 @@ stop_animating(FivView *self)
 	self->frame_time = 0;
 	self->frame_update_connection = 0;
 	self->remaining_loops = 0;
+	g_object_notify_by_pspec(G_OBJECT(self), view_properties[PROP_PLAYING]);
 }
 
 static gboolean
@@ -546,6 +551,7 @@ start_animating(FivView *self)
 		(uintptr_t) cairo_surface_get_user_data(self->page, &fiv_io_key_loops);
 
 	gdk_frame_clock_begin_updating(clock);
+	g_object_notify_by_pspec(G_OBJECT(self), view_properties[PROP_PLAYING]);
 }
 
 static void
@@ -790,6 +796,8 @@ fiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 		return command(self, FIV_VIEW_COMMAND_FRAME_PREVIOUS);
 	case GDK_KEY_braceright:
 		return command(self, FIV_VIEW_COMMAND_FRAME_NEXT);
+	case GDK_KEY_space:
+		return command(self, FIV_VIEW_COMMAND_TOGGLE_PLAYBACK);
 	}
 	return FALSE;
 }
@@ -810,6 +818,9 @@ fiv_view_class_init(FivViewClass *klass)
 		TRUE, G_PARAM_READWRITE);
 	view_properties[PROP_FILTER] = g_param_spec_boolean(
 		"filter", "Use filtering", "Scale images smoothly",
+		TRUE, G_PARAM_READWRITE);
+	view_properties[PROP_PLAYING] = g_param_spec_boolean(
+		"playing", "Playing animation", "An animation is running",
 		TRUE, G_PARAM_READWRITE);
 	g_object_class_install_properties(
 		object_class, N_PROPERTIES, view_properties);
@@ -918,6 +929,10 @@ fiv_view_command(FivView *self, FivViewCommand command)
 		frame_step(self, -1);
 	break; case FIV_VIEW_COMMAND_FRAME_NEXT:
 		frame_step(self, +1);
+	break; case FIV_VIEW_COMMAND_TOGGLE_PLAYBACK:
+		self->frame_update_connection
+			? stop_animating(self)
+			: start_animating(self);
 
 	break; case FIV_VIEW_COMMAND_TOGGLE_FILTER:
 		self->filter = !self->filter;

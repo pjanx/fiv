@@ -70,12 +70,11 @@ exit_fatal(const gchar *format, ...)
 	XX(S2,            make_separator()) \
 	XX(SKIP_BACK,     B("media-skip-backward-symbolic", "Rewind playback")) \
 	XX(SEEK_BACK,     B("media-seek-backward-symbolic", "Previous frame")) \
-	/* TODO(p): The opposite is "media-playback-play-symbolic". */ \
-	/* XX(PAUSE,      B("media-playback-pause-symbolic", "Pause")) */ \
+	XX(PLAY_PAUSE,    B("media-playback-start-symbolic", "Pause")) \
 	XX(SEEK_FORWARD,  B("media-seek-forward-symbolic", "Next frame")) \
 	XX(S3,            make_separator()) \
 	XX(PLUS,          B("zoom-in-symbolic", "Zoom in")) \
-	XX(SCALE,         gtk_label_new("100%")) \
+	XX(SCALE,         gtk_label_new("")) \
 	XX(MINUS,         B("zoom-out-symbolic", "Zoom out")) \
 	XX(ONE,           B("zoom-original-symbolic", "Original size")) \
 	XX(FIT,           T("zoom-fit-best-symbolic", "Scale to fit")) \
@@ -457,8 +456,10 @@ on_window_state_event(G_GNUC_UNUSED GtkWidget *widget,
 	const char *name = (event->new_window_state & GDK_WINDOW_STATE_FULLSCREEN)
 		? "view-restore-symbolic"
 		: "view-fullscreen-symbolic";
-	gtk_button_set_image(GTK_BUTTON(g.toolbar[TOOLBAR_FULLSCREEN]),
-		gtk_image_new_from_icon_name(name, GTK_ICON_SIZE_BUTTON));
+
+	GtkButton *button = GTK_BUTTON(g.toolbar[TOOLBAR_FULLSCREEN]);
+	GtkImage *image = GTK_IMAGE(gtk_button_get_image(button));
+	gtk_image_set_from_icon_name(image, name, GTK_ICON_SIZE_BUTTON);
 }
 
 // Cursor keys, e.g., simply cannot be bound through accelerators
@@ -650,6 +651,21 @@ on_notify_view_scale(
 }
 
 static void
+on_notify_view_playing(
+	GObject *object, GParamSpec *param_spec, G_GNUC_UNUSED gpointer user_data)
+{
+	gboolean b = FALSE;
+	g_object_get(object, g_param_spec_get_name(param_spec), &b, NULL);
+	const char *name = b
+		? "media-playback-pause-symbolic"
+		: "media-playback-start-symbolic";
+
+	GtkButton *button = GTK_BUTTON(g.toolbar[TOOLBAR_PLAY_PAUSE]);
+	GtkImage *image = GTK_IMAGE(gtk_button_get_image(button));
+	gtk_image_set_from_icon_name(image, name, GTK_ICON_SIZE_BUTTON);
+}
+
+static void
 on_notify_view_boolean(
 	GObject *object, GParamSpec *param_spec, gpointer user_data)
 {
@@ -728,6 +744,7 @@ make_view_toolbar(void)
 	toolbar_command(TOOLBAR_PAGE_LAST,     FIV_VIEW_COMMAND_PAGE_LAST);
 	toolbar_command(TOOLBAR_SKIP_BACK,     FIV_VIEW_COMMAND_FRAME_FIRST);
 	toolbar_command(TOOLBAR_SEEK_BACK,     FIV_VIEW_COMMAND_FRAME_PREVIOUS);
+	toolbar_command(TOOLBAR_PLAY_PAUSE,    FIV_VIEW_COMMAND_TOGGLE_PLAYBACK);
 	toolbar_command(TOOLBAR_SEEK_FORWARD,  FIV_VIEW_COMMAND_FRAME_NEXT);
 	toolbar_command(TOOLBAR_PLUS,          FIV_VIEW_COMMAND_ZOOM_IN);
 	toolbar_command(TOOLBAR_MINUS,         FIV_VIEW_COMMAND_ZOOM_OUT);
@@ -741,10 +758,17 @@ make_view_toolbar(void)
 	toolbar_command(TOOLBAR_RIGHT,         FIV_VIEW_COMMAND_ROTATE_RIGHT);
 	toolbar_connect(TOOLBAR_FULLSCREEN,    G_CALLBACK(toggle_fullscreen));
 
+	g_signal_connect(g.view, "notify::scale",
+		G_CALLBACK(on_notify_view_scale), NULL);
+	g_signal_connect(g.view, "notify::playing",
+		G_CALLBACK(on_notify_view_playing), NULL);
 	g_signal_connect(g.view, "notify::scale-to-fit",
 		G_CALLBACK(on_notify_view_boolean), g.toolbar[TOOLBAR_FIT]);
 	g_signal_connect(g.view, "notify::filter",
 		G_CALLBACK(on_notify_view_boolean), g.toolbar[TOOLBAR_SMOOTH]);
+
+	g_object_notify(G_OBJECT(g.view), "scale");
+	g_object_notify(G_OBJECT(g.view), "playing");
 	g_object_notify(G_OBJECT(g.view), "scale-to-fit");
 	g_object_notify(G_OBJECT(g.view), "filter");
 	return view_toolbar;
@@ -840,8 +864,6 @@ main(int argc, char *argv[])
 		G_CALLBACK(on_key_press_view), NULL);
 	g_signal_connect(g.view, "button-press-event",
 		G_CALLBACK(on_button_press_view), NULL);
-	g_signal_connect(g.view, "notify::scale",
-		G_CALLBACK(on_notify_view_scale), NULL);
 	gtk_container_add(GTK_CONTAINER(view_scroller), g.view);
 
 	// Maybe our custom widgets should derive colours from the theme instead.

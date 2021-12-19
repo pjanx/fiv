@@ -39,6 +39,7 @@ typedef enum _FivViewCommand {
 	FIV_VIEW_COMMAND_FRAME_PREVIOUS,
 	FIV_VIEW_COMMAND_FRAME_NEXT,
 	// Going to the end frame makes no sense, wrap around if needed.
+	FIV_VIEW_COMMAND_TOGGLE_PLAYBACK,
 
 	FIV_VIEW_COMMAND_TOGGLE_FILTER,
 	FIV_VIEW_COMMAND_PRINT,
