@@ -602,9 +602,7 @@ make_toolbar_button(const gchar *symbolic, const gchar *tooltip)
 	GtkWidget *button =
 		gtk_button_new_from_icon_name(symbolic, GTK_ICON_SIZE_BUTTON);
 	gtk_widget_set_tooltip_text(button, tooltip);
-//	gtk_widget_set_sensitive(button, FALSE);
 	gtk_widget_set_focus_on_click(button, FALSE);
-
 	gtk_style_context_add_class(
 		gtk_widget_get_style_context(button), GTK_STYLE_CLASS_FLAT);
 	return button;
@@ -617,9 +615,7 @@ make_toolbar_toggle(const gchar *symbolic, const gchar *tooltip)
 	gtk_button_set_image(GTK_BUTTON(button),
 		gtk_image_new_from_icon_name(symbolic, GTK_ICON_SIZE_BUTTON));
 	gtk_widget_set_tooltip_text(button, tooltip);
-//	gtk_widget_set_sensitive(button, FALSE);
 	gtk_widget_set_focus_on_click(button, FALSE);
-
 	gtk_style_context_add_class(
 		gtk_widget_get_style_context(button), GTK_STYLE_CLASS_FLAT);
 	return button;
@@ -635,6 +631,42 @@ make_separator(void)
 	gtk_widget_set_margin_end(separator, 10);
 	return separator;
 }
+
+static void
+on_view_actions_changed(void)
+{
+	gboolean has_image = FALSE, can_animate = FALSE;
+	gboolean has_previous = FALSE, has_next = FALSE;
+	g_object_get(g.view, "has-image", &has_image, "can-animate", &can_animate,
+		"has-previous-page", &has_previous, "has-next-page", &has_next, NULL);
+
+	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_PAGE_FIRST], has_previous);
+	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_PAGE_PREVIOUS], has_previous);
+	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_PAGE_NEXT], has_next);
+	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_PAGE_LAST], has_next);
+
+	// We don't want these to flash during playback.
+	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_SKIP_BACK], can_animate);
+	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_SEEK_BACK], can_animate);
+	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_PLAY_PAUSE], can_animate);
+	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_SEEK_FORWARD], can_animate);
+
+	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_PLUS], has_image);
+	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_SCALE], has_image);
+	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_MINUS], has_image);
+	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_ONE], has_image);
+	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_FIT], has_image);
+
+	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_SMOOTH], has_image);
+	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_SAVE], has_image);
+	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_PRINT], has_image);
+
+	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_LEFT], has_image);
+	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_MIRROR], has_image);
+	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_RIGHT], has_image);
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 static void
 on_notify_view_scale(
@@ -771,6 +803,13 @@ make_view_toolbar(void)
 	g_object_notify(G_OBJECT(g.view), "playing");
 	g_object_notify(G_OBJECT(g.view), "scale-to-fit");
 	g_object_notify(G_OBJECT(g.view), "filter");
+
+	GCallback callback = G_CALLBACK(on_view_actions_changed);
+	g_signal_connect(g.view, "notify::has-image", callback, NULL);
+	g_signal_connect(g.view, "notify::can-animate", callback, NULL);
+	g_signal_connect(g.view, "notify::has-previous-page", callback, NULL);
+	g_signal_connect(g.view, "notify::has-next-page", callback, NULL);
+	callback();
 	return view_toolbar;
 }
 

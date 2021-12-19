@@ -89,6 +89,10 @@ enum {
 	PROP_SCALE_TO_FIT,
 	PROP_FILTER,
 	PROP_PLAYING,
+	PROP_HAS_IMAGE,
+	PROP_CAN_ANIMATE,
+	PROP_HAS_PREVIOUS_PAGE,
+	PROP_HAS_NEXT_PAGE,
 	N_PROPERTIES
 };
 
@@ -120,6 +124,20 @@ fiv_view_get_property(
 		break;
 	case PROP_PLAYING:
 		g_value_set_boolean(value, !!self->frame_update_connection);
+		break;
+	case PROP_HAS_IMAGE:
+		g_value_set_boolean(value, !!self->image);
+		break;
+	case PROP_CAN_ANIMATE:
+		g_value_set_boolean(value, self->page &&
+			cairo_surface_get_user_data(self->page, &fiv_io_key_frame_next));
+		break;
+	case PROP_HAS_PREVIOUS_PAGE:
+		g_value_set_boolean(value, self->image && self->page != self->image);
+		break;
+	case PROP_HAS_NEXT_PAGE:
+		g_value_set_boolean(value, self->page &&
+			cairo_surface_get_user_data(self->page, &fiv_io_key_page_next));
 		break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
@@ -564,6 +582,13 @@ switch_page(FivView *self, cairo_surface_t *page)
 
 	start_animating(self);
 	gtk_widget_queue_resize(GTK_WIDGET(self));
+
+	g_object_notify_by_pspec(
+		G_OBJECT(self), view_properties[PROP_CAN_ANIMATE]);
+	g_object_notify_by_pspec(
+		G_OBJECT(self), view_properties[PROP_HAS_PREVIOUS_PAGE]);
+	g_object_notify_by_pspec(
+		G_OBJECT(self), view_properties[PROP_HAS_NEXT_PAGE]);
 }
 
 static void
@@ -821,7 +846,19 @@ fiv_view_class_init(FivViewClass *klass)
 		TRUE, G_PARAM_READWRITE);
 	view_properties[PROP_PLAYING] = g_param_spec_boolean(
 		"playing", "Playing animation", "An animation is running",
-		TRUE, G_PARAM_READWRITE);
+		FALSE, G_PARAM_READABLE);
+	view_properties[PROP_HAS_IMAGE] = g_param_spec_boolean(
+		"has-image", "Has an image", "An image is loaded",
+		FALSE, G_PARAM_READABLE);
+	view_properties[PROP_CAN_ANIMATE] = g_param_spec_boolean(
+		"can-animate", "Can animate", "An animation is loaded",
+		FALSE, G_PARAM_READABLE);
+	view_properties[PROP_HAS_PREVIOUS_PAGE] = g_param_spec_boolean(
+		"has-previous-page", "Has a previous page", "Preceding pages exist",
+		FALSE, G_PARAM_READABLE);
+	view_properties[PROP_HAS_NEXT_PAGE] = g_param_spec_boolean(
+		"has-next-page", "Has a next page", "Following pages exist",
+		FALSE, G_PARAM_READABLE);
 	g_object_class_install_properties(
 		object_class, N_PROPERTIES, view_properties);
 
@@ -867,6 +904,8 @@ fiv_view_open(FivView *self, const gchar *path, GError **error)
 	self->image = surface;
 	switch_page(self, self->image);
 	set_scale_to_fit(self, true);
+
+	g_object_notify_by_pspec(G_OBJECT(self), view_properties[PROP_HAS_IMAGE]);
 	return TRUE;
 }
 
