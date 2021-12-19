@@ -1835,7 +1835,7 @@ fiv_io_open(const gchar *path, GError **error)
 {
 	// TODO(p): Don't always load everything into memory, test type first,
 	// so that we can reject non-pictures early.  Wuffs only needs the first
-	// 16 bytes to make a guess right now.
+	// 16 bytes (soon 12) to make a guess right now.
 	//
 	// LibRaw poses an issue--there is no good registry for identification
 	// of supported files.  Many of them are compliant TIFF files.
