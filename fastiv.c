@@ -243,6 +243,11 @@ load_directory(const gchar *dirname)
 	} else {
 		show_error_dialog(error);
 	}
+
+	gtk_widget_set_sensitive(
+		g.toolbar[TOOLBAR_FILE_PREVIOUS], g.files->len > 1);
+	gtk_widget_set_sensitive(
+		g.toolbar[TOOLBAR_FILE_NEXT], g.files->len > 1);
 	g_ptr_array_add(g.files, NULL);
 
 	// XXX: When something outside the filtered entries is open, the index is
