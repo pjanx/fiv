@@ -109,7 +109,7 @@ struct {
 	GPtrArray *files;
 	gint files_index;
 
-	gchar *basename;
+	gchar *path;
 
 	GtkWidget *window;
 	GtkWidget *stack;
@@ -178,7 +178,7 @@ static void
 load_directory(const gchar *dirname)
 {
 	if (dirname) {
-		free(g.directory);
+		g_free(g.directory);
 		g.directory = g_strdup(dirname);
 
 		GtkAdjustment *vadjustment = gtk_scrolled_window_get_vadjustment(
@@ -207,9 +207,11 @@ load_directory(const gchar *dirname)
 			if (is_dir || !is_supported(name))
 				continue;
 
-			// XXX: We presume that this basename is from the same directory.
-			if (!g_strcmp0(g.basename, name))
+			// FIXME: We presume that this basename is from the same directory.
+			gchar *basename = g.path ? g_path_get_basename(g.path) : NULL;
+			if (!g_strcmp0(basename, name))
 				g.files_index = g.files->len;
+			g_free(basename);
 
 			g_ptr_array_add(g.files, g_strdup(name));
 		}
@@ -254,9 +256,8 @@ open(const gchar *path)
 		g_free(uri);
 	}
 
-	gchar *basename = g_path_get_basename(path);
-	g_free(g.basename);
-	g.basename = basename;
+	g_free(g.path);
+	g.path = g_strdup(path);
 
 	// So that load_directory() itself can be used for reloading.
 	gchar *dirname = g_path_get_dirname(path);
@@ -265,10 +266,11 @@ open(const gchar *path)
 		load_directory(dirname);
 	} else {
 		g.files_index = -1;
-		for (guint i = 0; i + 1 < g.files->len; i++) {
-			if (!g_strcmp0(g.basename, g_ptr_array_index(g.files, i)))
+		gchar *basename = g_path_get_basename(g.path);
+		for (guint i = 0; i + 1 < g.files->len; i++)
+			if (!g_strcmp0(basename, g_ptr_array_index(g.files, i)))
 				g.files_index = i;
-		}
+		g_free(basename);
 	}
 	g_free(dirname);
 
@@ -588,8 +590,7 @@ on_button_press_browser(G_GNUC_UNUSED GtkWidget *widget, GdkEventButton *event)
 		return FALSE;
 	switch (event->button) {
 	case 9:  // forward
-		// FIXME: This is inconsistent, normally there is an absolute path.
-		switch_to_view(g.basename);
+		switch_to_view(g.path);
 		return TRUE;
 	default:
 		return FALSE;
