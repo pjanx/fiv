@@ -173,30 +173,29 @@ get_surface_dimensions(FivView *self, double *width, double *height)
 	cairo_rectangle_t extents = {};
 	switch (cairo_surface_get_type(self->page)) {
 	case CAIRO_SURFACE_TYPE_IMAGE:
-		switch (self->orientation) {
-		case FivIoOrientation90:
-		case FivIoOrientationMirror90:
-		case FivIoOrientation270:
-		case FivIoOrientationMirror270:
-			*width = cairo_image_surface_get_height(self->page);
-			*height = cairo_image_surface_get_width(self->page);
-			break;
-		default:
-			*width = cairo_image_surface_get_width(self->page);
-			*height = cairo_image_surface_get_height(self->page);
-		}
-		return;
+		extents.width = cairo_image_surface_get_width(self->page);
+		extents.height = cairo_image_surface_get_height(self->page);
+		break;
 	case CAIRO_SURFACE_TYPE_RECORDING:
-		if (!cairo_recording_surface_get_extents(self->page, &extents)) {
+		if (!cairo_recording_surface_get_extents(self->page, &extents))
 			cairo_recording_surface_ink_extents(self->page,
 				&extents.x, &extents.y, &extents.width, &extents.height);
-		}
-
-		*width = extents.width;
-		*height = extents.height;
-		return;
+		break;
 	default:
 		g_assert_not_reached();
+	}
+
+	switch (self->orientation) {
+	case FivIoOrientation90:
+	case FivIoOrientationMirror90:
+	case FivIoOrientation270:
+	case FivIoOrientationMirror270:
+		*width = extents.height;
+		*height = extents.width;
+		return;
+	default:
+		*width = extents.width;
+		*height = extents.height;
 	}
 }
 
@@ -379,16 +378,19 @@ fiv_view_draw(GtkWidget *widget, cairo_t *cr)
 
 	// FIXME: Recording surfaces do not work well with CAIRO_SURFACE_TYPE_XLIB,
 	// we always get a shitty pixmap, where transparency contains junk.
+	cairo_matrix_t matrix = get_orientation_matrix(self->orientation, sw, sh);
+	cairo_translate(cr, x, y);
 	if (cairo_surface_get_type(self->frame) == CAIRO_SURFACE_TYPE_RECORDING) {
 		cairo_surface_t *image =
 			cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
 		cairo_t *tcr = cairo_create(image);
 		cairo_scale(tcr, self->scale, self->scale);
 		cairo_set_source_surface(tcr, self->frame, 0, 0);
+		cairo_pattern_set_matrix(cairo_get_source(tcr), &matrix);
 		cairo_paint(tcr);
 		cairo_destroy(tcr);
 
-		cairo_set_source_surface(cr, image, x, y);
+		cairo_set_source_surface(cr, image, 0, 0);
 		cairo_paint(cr);
 		cairo_surface_destroy(image);
 		return TRUE;
@@ -396,14 +398,12 @@ fiv_view_draw(GtkWidget *widget, cairo_t *cr)
 
 	// XXX: The rounding together with padding may result in up to
 	// a pixel's worth of made-up picture data.
-	cairo_rectangle(cr, x, y, w, h);
+	cairo_rectangle(cr, 0, 0, w, h);
 	cairo_clip(cr);
 
-	cairo_translate(cr, x, y);
 	cairo_scale(cr, self->scale, self->scale);
 	cairo_set_source_surface(cr, self->frame, 0, 0);
 
-	cairo_matrix_t matrix = get_orientation_matrix(self->orientation, sw, sh);
 	cairo_pattern_t *pattern = cairo_get_source(cr);
 	cairo_pattern_set_matrix(pattern, &matrix);
 	cairo_pattern_set_extend(pattern, CAIRO_EXTEND_PAD);
