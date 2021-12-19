@@ -105,7 +105,9 @@ struct {
 	gchar **supported_globs;
 	gboolean filtering;
 
-	gchar *directory;
+	gchar *directory;          ///< Full path to the currently browsed directory
+	GList *directory_back;     ///< History paths going backwards
+	GList *directory_forward;  ///< History paths going forwards
 	GPtrArray *files;
 	gint files_index;
 
@@ -204,11 +206,51 @@ update_files_index(void)
 }
 
 static void
+load_directory_without_reload(const gchar *dirname)
+{
+	gchar *dirname_duplicated = g_strdup(dirname);
+	if (g.directory_back &&
+			!strcmp(dirname, g.directory_back->data)) {
+		// We're going back in history.
+		if (g.directory) {
+			g.directory_forward =
+				g_list_prepend(g.directory_forward, g.directory);
+			g.directory = NULL;
+		}
+
+		GList *link = g.directory_back;
+		g.directory_back = g_list_remove_link(g.directory_back, link);
+		g_list_free_full(link, g_free);
+	} else if (g.directory_forward &&
+			!strcmp(dirname, g.directory_forward->data)) {
+		// We're going forward in history.
+		if (g.directory) {
+			g.directory_back =
+				g_list_prepend(g.directory_back, g.directory);
+			g.directory = NULL;
+		}
+
+		GList *link = g.directory_forward;
+		g.directory_forward = g_list_remove_link(g.directory_forward, link);
+		g_list_free_full(link, g_free);
+	} else if (g.directory && strcmp(dirname, g.directory)) {
+		// We're on a new subpath.
+		g_list_free_full(g.directory_forward, g_free);
+		g.directory_forward = NULL;
+
+		g.directory_back = g_list_prepend(g.directory_back, g.directory);
+		g.directory = NULL;
+	}
+
+	g_free(g.directory);
+	g.directory = dirname_duplicated;
+}
+
+static void
 load_directory(const gchar *dirname)
 {
 	if (dirname) {
-		g_free(g.directory);
-		g.directory = g_strdup(dirname);
+		load_directory_without_reload(dirname);
 
 		GtkAdjustment *vadjustment = gtk_scrolled_window_get_vadjustment(
 			GTK_SCROLLED_WINDOW(g.browser_scroller));
@@ -284,6 +326,9 @@ open(const gchar *path)
 		gtk_recent_manager_add_item(gtk_recent_manager_get_default(), uri);
 		g_free(uri);
 	}
+
+	g_list_free_full(g.directory_forward, g_free);
+	g.directory_forward = NULL;
 
 	g_free(g.path);
 	g.path = g_strdup(path);
@@ -520,6 +565,22 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 			return TRUE;
 		}
 		break;
+	case GDK_MOD1_MASK:
+		switch (event->keyval) {
+		case GDK_KEY_Left:
+			if (gtk_stack_get_visible_child(GTK_STACK(g.stack)) == g.view_box)
+				switch_to_browser();
+			else if (g.directory_back)
+				load_directory(g.directory_back->data);
+			return TRUE;
+		case GDK_KEY_Right:
+			if (g.directory_forward)
+				load_directory(g.directory_forward->data);
+			else
+				switch_to_view(g.path);
+			return TRUE;
+		}
+		break;
 	case 0:
 		switch (event->keyval) {
 		case GDK_KEY_Escape:
@@ -570,18 +631,11 @@ on_key_press_view(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 			on_next();
 			return TRUE;
 
-		case GDK_KEY_Tab:
 		case GDK_KEY_Return:
 			switch_to_browser();
 			return TRUE;
 		}
 		break;
-	case GDK_MOD1_MASK:
-		switch (event->keyval) {
-		case GDK_KEY_Left:
-			switch_to_browser();
-			return TRUE;
-		}
 	}
 	return FALSE;
 }
@@ -607,13 +661,23 @@ on_button_press_view(G_GNUC_UNUSED GtkWidget *widget, GdkEventButton *event)
 }
 
 static gboolean
-on_button_press_browser(G_GNUC_UNUSED GtkWidget *widget, GdkEventButton *event)
+on_button_press_browser_paned(
+	G_GNUC_UNUSED GtkWidget *widget, GdkEventButton *event)
 {
 	if ((event->state & gtk_accelerator_get_default_mod_mask()))
 		return FALSE;
 	switch (event->button) {
+	case 8:  // back
+		if (g.directory_back)
+			load_directory(g.directory_back->data);
+		return TRUE;
 	case 9:  // forward
-		switch_to_view(g.path);
+		// FIXME: It may be inappropriate to go to the picture,
+		// which may be left over from a different directory.
+		if (g.directory_forward)
+			load_directory(g.directory_forward->data);
+		else
+			switch_to_view(g.path);
 		return TRUE;
 	default:
 		return FALSE;
@@ -954,8 +1018,6 @@ main(int argc, char *argv[])
 	gtk_widget_set_hexpand(g.browser, TRUE);
 	g_signal_connect(g.browser, "item-activated",
 		G_CALLBACK(on_item_activated), NULL);
-	g_signal_connect(g.browser, "button-press-event",
-		G_CALLBACK(on_button_press_browser), NULL);
 	gtk_container_add(GTK_CONTAINER(g.browser_scroller), g.browser);
 
 	// Christ, no, do not scroll all the way to the top on focus.
@@ -1013,6 +1075,8 @@ main(int argc, char *argv[])
 	g.browser_paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
 	gtk_paned_add1(GTK_PANED(g.browser_paned), g.browser_sidebar);
 	gtk_paned_add2(GTK_PANED(g.browser_paned), g.browser_scroller);
+	g_signal_connect(g.browser_paned, "button-press-event",
+		G_CALLBACK(on_button_press_browser_paned), NULL);
 
 	// TODO(p): Can we not do it here separately?
 	gtk_widget_show_all(g.browser_paned);
