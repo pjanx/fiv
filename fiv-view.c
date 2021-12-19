@@ -49,39 +49,39 @@ struct _FivView {
 G_DEFINE_TYPE(FivView, fiv_view, GTK_TYPE_WIDGET)
 
 static FivIoOrientation view_left[9] = {
-	[FivIoOrientationUnknown] = FivIoOrientationUnknown,
-	[FivIoOrientation0] = FivIoOrientation270,
-	[FivIoOrientationMirror0] = FivIoOrientationMirror270,
-	[FivIoOrientation180] = FivIoOrientation90,
+	[FivIoOrientationUnknown]   = FivIoOrientationUnknown,
+	[FivIoOrientation0]         = FivIoOrientation270,
+	[FivIoOrientationMirror0]   = FivIoOrientationMirror270,
+	[FivIoOrientation180]       = FivIoOrientation90,
 	[FivIoOrientationMirror180] = FivIoOrientationMirror90,
 	[FivIoOrientationMirror270] = FivIoOrientationMirror180,
-	[FivIoOrientation90] = FivIoOrientation0,
-	[FivIoOrientationMirror90] = FivIoOrientationMirror0,
-	[FivIoOrientation270] = FivIoOrientation180
+	[FivIoOrientation90]        = FivIoOrientation0,
+	[FivIoOrientationMirror90]  = FivIoOrientationMirror0,
+	[FivIoOrientation270]       = FivIoOrientation180,
 };
 
 static FivIoOrientation view_mirror[9] = {
-	[FivIoOrientationUnknown] = FivIoOrientationUnknown,
-	[FivIoOrientation0] = FivIoOrientationMirror0,
-	[FivIoOrientationMirror0] = FivIoOrientation0,
-	[FivIoOrientation180] = FivIoOrientationMirror180,
+	[FivIoOrientationUnknown]   = FivIoOrientationUnknown,
+	[FivIoOrientation0]         = FivIoOrientationMirror0,
+	[FivIoOrientationMirror0]   = FivIoOrientation0,
+	[FivIoOrientation180]       = FivIoOrientationMirror180,
 	[FivIoOrientationMirror180] = FivIoOrientation180,
 	[FivIoOrientationMirror270] = FivIoOrientation270,
-	[FivIoOrientation90] = FivIoOrientationMirror270,
-	[FivIoOrientationMirror90] = FivIoOrientation90,
-	[FivIoOrientation270] = FivIoOrientationMirror270
+	[FivIoOrientation90]        = FivIoOrientationMirror270,
+	[FivIoOrientationMirror90]  = FivIoOrientation90,
+	[FivIoOrientation270]       = FivIoOrientationMirror270,
 };
 
 static FivIoOrientation view_right[9] = {
-	[FivIoOrientationUnknown] = FivIoOrientationUnknown,
-	[FivIoOrientation0] = FivIoOrientation90,
-	[FivIoOrientationMirror0] = FivIoOrientationMirror90,
-	[FivIoOrientation180] = FivIoOrientation270,
+	[FivIoOrientationUnknown]   = FivIoOrientationUnknown,
+	[FivIoOrientation0]         = FivIoOrientation90,
+	[FivIoOrientationMirror0]   = FivIoOrientationMirror90,
+	[FivIoOrientation180]       = FivIoOrientation270,
 	[FivIoOrientationMirror180] = FivIoOrientationMirror270,
 	[FivIoOrientationMirror270] = FivIoOrientationMirror0,
-	[FivIoOrientation90] = FivIoOrientation180,
-	[FivIoOrientationMirror90] = FivIoOrientationMirror180,
-	[FivIoOrientation270] = FivIoOrientation0
+	[FivIoOrientation90]        = FivIoOrientation180,
+	[FivIoOrientationMirror90]  = FivIoOrientationMirror180,
+	[FivIoOrientation270]       = FivIoOrientation0,
 };
 
 enum {
