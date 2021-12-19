@@ -174,6 +174,35 @@ switch_to_view(const char *path)
 	gtk_widget_grab_focus(g.view);
 }
 
+static gint
+files_compare(gconstpointer a, gconstpointer b)
+{
+	gchar *path1 = g_canonicalize_filename(*(gchar **) a, g.directory);
+	gchar *path2 = g_canonicalize_filename(*(gchar **) b, g.directory);
+	GFile *location1 = g_file_new_for_path(path1);
+	GFile *location2 = g_file_new_for_path(path2);
+	g_free(path1);
+	g_free(path2);
+	gint result = fiv_io_filecmp(location1, location2);
+	g_object_unref(location1);
+	g_object_unref(location2);
+	return result;
+}
+
+static void
+update_files_index(void)
+{
+	g.files_index = -1;
+
+	// FIXME: We presume that this basename is from the same directory.
+	gchar *basename = g.path ? g_path_get_basename(g.path) : NULL;
+	for (guint i = 0; i < g.files->len; i++) {
+		if (!g_strcmp0(basename, g_ptr_array_index(g.files, i)))
+			g.files_index = i;
+	}
+	g_free(basename);
+}
+
 static void
 load_directory(const gchar *dirname)
 {
@@ -204,18 +233,13 @@ load_directory(const gchar *dirname)
 			char *absolute = g_canonicalize_filename(name, g.directory);
 			gboolean is_dir = g_file_test(absolute, G_FILE_TEST_IS_DIR);
 			g_free(absolute);
-			if (is_dir || !is_supported(name))
-				continue;
-
-			// FIXME: We presume that this basename is from the same directory.
-			gchar *basename = g.path ? g_path_get_basename(g.path) : NULL;
-			if (!g_strcmp0(basename, name))
-				g.files_index = g.files->len;
-			g_free(basename);
-
-			g_ptr_array_add(g.files, g_strdup(name));
+			if (!is_dir && is_supported(name))
+				g_ptr_array_add(g.files, g_strdup(name));
 		}
 		g_dir_close(dir);
+
+		g_ptr_array_sort(g.files, files_compare);
+		update_files_index();
 	} else {
 		show_error_dialog(error);
 	}
@@ -262,16 +286,10 @@ open(const gchar *path)
 	// So that load_directory() itself can be used for reloading.
 	gchar *dirname = g_path_get_dirname(path);
 	if (!g.files->len /* hack to always load the directory after launch */ ||
-		!g.directory || strcmp(dirname, g.directory)) {
+		!g.directory || strcmp(dirname, g.directory))
 		load_directory(dirname);
-	} else {
-		g.files_index = -1;
-		gchar *basename = g_path_get_basename(g.path);
-		for (guint i = 0; i + 1 < g.files->len; i++)
-			if (!g_strcmp0(basename, g_ptr_array_index(g.files, i)))
-				g.files_index = i;
-		g_free(basename);
-	}
+	else
+		update_files_index();
 	g_free(dirname);
 
 	switch_to_view(path);
