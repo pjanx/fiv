@@ -757,9 +757,13 @@ make_view_toolbar(void)
 	TOOLBAR(XX)
 #undef XX
 
-	// TODO(p): The scale should be at least as wide as "999%".
 	gtk_widget_set_margin_start(g.toolbar[TOOLBAR_SCALE], 5);
 	gtk_widget_set_margin_end(g.toolbar[TOOLBAR_SCALE], 5);
+
+	// So that the width doesn't jump around in the usual zoom range.
+	// Ideally, we'd measure the widest digit and use width(NNN%).
+	gtk_label_set_width_chars(GTK_LABEL(g.toolbar[TOOLBAR_SCALE]), 5);
+	gtk_widget_set_halign(g.toolbar[TOOLBAR_SCALE], GTK_ALIGN_CENTER);
 
 	// GtkStatusBar solves a problem we do not have here.
 	GtkWidget *view_toolbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
