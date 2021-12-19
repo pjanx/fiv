@@ -559,6 +559,10 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 		case GDK_KEY_n:
 			spawn_path(g.directory);
 			return TRUE;
+		case GDK_KEY_r:
+			// TODO(p): Reload the image instead, if it's currently visible.
+			load_directory(NULL);
+			return TRUE;
 		case GDK_KEY_q:
 		case GDK_KEY_w:
 			gtk_widget_destroy(g.window);
@@ -594,6 +598,7 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 
 		case GDK_KEY_F5:
 		case GDK_KEY_r:
+			// TODO(p): See the comment for C-r above.
 			load_directory(NULL);
 			return TRUE;
 
