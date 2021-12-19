@@ -786,6 +786,76 @@ save_as(FivView *self, gboolean frame)
 	}
 }
 
+static void
+info(FivView *self)
+{
+	// TODO(p): Add a fallback to internal capabilities.
+	// The simplest is to specify the filename and the resolution.
+	GtkWindow *window = get_toplevel(GTK_WIDGET(self));
+	int flags = G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_PIPE;
+
+	GError *error = NULL;
+	GSubprocess *subprocess = g_subprocess_new(flags, &error, "exiftool",
+		"-tab", "-groupNames", "-duplicates", "-extractEmbedded", "--binary",
+		"-quiet", "--", self->path, NULL);
+	if (error) {
+		show_error_dialog(window, error);
+		return;
+	}
+
+	gchar *out = NULL, *err = NULL;
+	if (!g_subprocess_communicate_utf8(
+			subprocess, NULL, NULL, &out, &err, &error)) {
+		show_error_dialog(window, error);
+		return;
+	}
+
+	GtkWidget *dialog = gtk_widget_new(GTK_TYPE_DIALOG,
+		"use-header-bar", TRUE,
+		"title", "Information",
+		"transient-for", window,
+		"destroy-with-parent", TRUE, NULL);
+
+	GtkWidget *content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
+	if (*err) {
+		GtkWidget *info = gtk_info_bar_new();
+		GtkInfoBar *info_bar = GTK_INFO_BAR(info);
+		gtk_info_bar_set_message_type(info_bar, GTK_MESSAGE_WARNING);
+
+		GtkWidget *info_area = gtk_info_bar_get_content_area(info_bar);
+		GtkWidget *label = gtk_label_new(g_strstrip(err));
+		gtk_container_add(GTK_CONTAINER(info_area), label);
+
+		gtk_container_add(GTK_CONTAINER(content_area), info);
+	}
+
+	// TODO(p): Parse as GROUP\tTAG\tVALUE, do s/_/ /g in the group name,
+	// put the data in a GtkTreeModel/GtkTreeView.
+	GtkWidget *label = gtk_label_new(out);
+	gtk_label_set_selectable(GTK_LABEL(label), TRUE);
+	gtk_label_set_xalign(GTK_LABEL(label), 0.);
+	gtk_label_set_yalign(GTK_LABEL(label), 0.);
+	gtk_widget_set_hexpand(label, TRUE);
+	gtk_widget_set_vexpand(label, TRUE);
+
+	GtkWidget *scroller = gtk_scrolled_window_new(NULL, NULL);
+	gtk_scrolled_window_set_max_content_width(
+		GTK_SCROLLED_WINDOW(scroller), 800);
+	gtk_scrolled_window_set_max_content_height(
+		GTK_SCROLLED_WINDOW(scroller), 800);
+	gtk_scrolled_window_set_propagate_natural_width(
+		GTK_SCROLLED_WINDOW(scroller), TRUE);
+	gtk_scrolled_window_set_propagate_natural_height(
+		GTK_SCROLLED_WINDOW(scroller), TRUE);
+	gtk_container_add(GTK_CONTAINER(scroller), label);
+	gtk_container_add(GTK_CONTAINER(content_area), scroller);
+
+	g_free(out);
+	g_free(err);
+	g_object_unref(subprocess);
+	gtk_widget_show_all(dialog);
+}
+
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 static inline gboolean
@@ -821,6 +891,12 @@ fiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 			return command(self, FIV_VIEW_COMMAND_SAVE_PAGE);
 		case GDK_KEY_S:
 			return save_as(self, TRUE);
+		}
+	}
+	if (state == GDK_MOD1_MASK) {
+		switch (event->keyval) {
+		case GDK_KEY_Return:
+			return command(self, FIV_VIEW_COMMAND_INFO);
 		}
 	}
 	if (state != 0)
@@ -1043,6 +1119,8 @@ fiv_view_command(FivView *self, FivViewCommand command)
 		print(self);
 	break; case FIV_VIEW_COMMAND_SAVE_PAGE:
 		save_as(self, FALSE);
+	break; case FIV_VIEW_COMMAND_INFO:
+		info(self);
 
 	break; case FIV_VIEW_COMMAND_ZOOM_IN:
 		set_scale(self, self->scale * SCALE_STEP);

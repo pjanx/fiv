@@ -147,6 +147,7 @@ static struct key_group help_keys_view[] = {
 		{"<control>p", "Print..."},
 		{"<control>s", "Save page as..."},
 		{"<control><shift>s", "Save frame as..."},
+		{"<alt>Return", "Show file information"},
 		{}
 	}},
 	{}
@@ -203,7 +204,6 @@ make_key_window(void)
 
 // TODO(p): See if it's possible to give separators room to shrink
 // by some minor amount of pixels, margin-wise.
-// TODO(p): Implement commented-out actions.
 #define B make_toolbar_button
 #define T make_toolbar_toggle
 #define TOOLBAR(XX) \
@@ -234,7 +234,7 @@ make_key_window(void)
 	/* XX(COLOR,      B("preferences-color-symbolic", "Color management")) */ \
 	XX(SAVE,          B("document-save-as-symbolic", "Save as...")) \
 	XX(PRINT,         B("document-print-symbolic", "Print...")) \
-	/* XX(INFO,       B("info-symbolic", "Information")) */ \
+	XX(INFO,          B("info-symbolic", "Information")) \
 	XX(S5,            gtk_separator_new(GTK_ORIENTATION_HORIZONTAL)) \
 	XX(LEFT,          B("object-rotate-left-symbolic", "Rotate left")) \
 	XX(MIRROR,        B("object-flip-horizontal-symbolic", "Mirror")) \
@@ -948,6 +948,7 @@ on_view_actions_changed(void)
 	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_CHECKERBOARD], has_image);
 	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_SAVE], has_image);
 	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_PRINT], has_image);
+	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_INFO], has_image);
 
 	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_LEFT], has_image);
 	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_MIRROR], has_image);
@@ -1092,6 +1093,7 @@ make_view_toolbar(void)
 	toolbar_toggler(TOOLBAR_CHECKERBOARD,  "checkerboard");
 	toolbar_command(TOOLBAR_PRINT,         FIV_VIEW_COMMAND_PRINT);
 	toolbar_command(TOOLBAR_SAVE,          FIV_VIEW_COMMAND_SAVE_PAGE);
+	toolbar_command(TOOLBAR_INFO,          FIV_VIEW_COMMAND_INFO);
 	toolbar_command(TOOLBAR_LEFT,          FIV_VIEW_COMMAND_ROTATE_LEFT);
 	toolbar_command(TOOLBAR_MIRROR,        FIV_VIEW_COMMAND_MIRROR);
 	toolbar_command(TOOLBAR_RIGHT,         FIV_VIEW_COMMAND_ROTATE_RIGHT);
