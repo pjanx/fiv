@@ -972,7 +972,8 @@ main(int argc, char *argv[])
 
 	// This is incredibly broken https://stackoverflow.com/a/51054396/76313
 	// thus resolving the problem using overlaps.
-	const char *style = "@define-color fiv-tile #3c3c3c; \
+	// We're trying to be universal for light and dark themes both. It's hard.
+	const char *style = "@define-color fiv-tile @content_view_bg; \
 		fiv-view, fiv-browser { background: @content_view_bg; } \
 		placessidebar.fiv .toolbar { padding: 2px 6px; } \
 		placessidebar.fiv box > separator { margin: 4px 0; } \
@@ -985,9 +986,8 @@ main(int argc, char *argv[])
 		} \
 		fiv-browser { padding: 5px; } \
 		fiv-browser.item { \
-			border: 1px solid rgba(255, 255, 255, 0.375); \
-			margin: 10px; color: #000; \
-			background: #333; \
+			color: mix(#000, @content_view_bg, 0.625); margin: 8px; \
+			border: 2px solid #fff; background: @theme_bg_color; \
 			background-image: \
 				linear-gradient(45deg, @fiv-tile 26%, transparent 26%), \
 				linear-gradient(-45deg, @fiv-tile 26%, transparent 26%), \
@@ -996,8 +996,12 @@ main(int argc, char *argv[])
 			background-size: 40px 40px; \
 			background-position: 0 0, 0 20px, 20px -20px, -20px 0px; \
 		} \
+		fiv-browser.item:backdrop { \
+			color: mix(#000, @content_view_bg, 0.875); \
+			border-color: mix(#fff, @content_view_bg, 0.5); \
+		} \
 		fiv-browser.item.symbolic { \
-			border-color: transparent; color: @content_view_bg; \
+			border-color: transparent; color: shade(@theme_bg_color, 0.875); \
 			background: @theme_bg_color; background-image: none; \
 		}";
 
@@ -1014,10 +1018,6 @@ main(int argc, char *argv[])
 	g_signal_connect(g.view, "button-press-event",
 		G_CALLBACK(on_button_press_view), NULL);
 	gtk_container_add(GTK_CONTAINER(view_scroller), g.view);
-
-	// TODO(p): Base most colours on the theme, and make this configurable.
-	g_object_set(gtk_settings_get_default(),
-		"gtk-application-prefer-dark-theme", TRUE, NULL);
 
 	// Need to put the toolbar at the top, because of the horizontal scrollbar.
 	g.view_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
