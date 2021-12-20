@@ -837,12 +837,16 @@ toolbar_connect(int index, GCallback callback)
 	g_signal_connect_swapped(g.toolbar[index], "clicked", callback, NULL);
 }
 
-// TODO(p): The toolbar should not be visible in fullscreen,
-// or show up only when the cursor reaches the bottom of the screen.
-// Presumably, GtkOverlay could be used for this. Proximity-based?
-// Might want to make the toolbar normally translucent.
-// TODO(p): The text and icons should be faded, unless the mouse cursor
-// is on the toolbar.
+// TODO(p): The text and icons should be faded, unless the mouse cursor is
+// on the toolbar. However, GtkEventBox is of no use, because either buttons
+// steal our {enter,leave}-notify-events, or we steal all their input.
+// Not even connecting to these signals on children works, insensitive buttons
+// will not trigger anything.
+// TODO(p): The toolbar should not be visible in fullscreen, or should show up
+// only when the cursor reaches the top of the screen. Translucency sounds
+// like a good mechanism here. Presumably, GtkOverlay could be used for this,
+// but it faces the same problem as above--the input model sucks.
+// TODO(p): Simply hide it in fullscreen and add a replacement context menu.
 static GtkWidget *
 make_view_toolbar(void)
 {
