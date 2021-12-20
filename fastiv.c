@@ -548,6 +548,15 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 	G_GNUC_UNUSED gpointer data)
 {
 	switch (event->state & gtk_accelerator_get_default_mod_mask()) {
+	case GDK_MOD1_MASK | GDK_SHIFT_MASK:
+		if (event->keyval == GDK_KEY_D) {
+			GtkSettings *settings = gtk_settings_get_default();
+			const char *property = "gtk-application-prefer-dark-theme";
+			gboolean set = FALSE;
+			g_object_get(settings, property, &set, NULL);
+			g_object_set(settings, property, !set, NULL);
+		}
+		break;
 	case GDK_CONTROL_MASK:
 		switch (event->keyval) {
 		case GDK_KEY_o:
@@ -1006,7 +1015,7 @@ main(int argc, char *argv[])
 		G_CALLBACK(on_button_press_view), NULL);
 	gtk_container_add(GTK_CONTAINER(view_scroller), g.view);
 
-	// Maybe our custom widgets should derive colours from the theme instead.
+	// TODO(p): Base most colours on the theme, and make this configurable.
 	g_object_set(gtk_settings_get_default(),
 		"gtk-application-prefer-dark-theme", TRUE, NULL);
 
