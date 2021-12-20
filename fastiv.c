@@ -52,6 +52,146 @@ exit_fatal(const gchar *format, ...)
 	exit(EXIT_FAILURE);
 }
 
+// --- Help --------------------------------------------------------------------
+// Fuck XML, this can be easily represented in static structures.
+// Though it would be nice if the accelerators could be customized.
+
+struct key {
+	const char *accelerator;
+	const char *title;
+};
+
+struct key_group {
+	const char *title;
+	const struct key *keys;
+};
+
+struct key_section {
+	const char *title;
+	const char *section_name;
+	const struct key_group *groups;
+};
+
+static struct key help_keys_general[] = {
+	{"F1 <control>F1", "Show this list of shortcuts"},
+	{"F11 f", "Toggle fullscreen view"},
+	{"<alt><shift>d", "Toggle dark theme variant"},
+	{"q <control>q", "Exit the program"},
+	{"Escape <control>w", "Exit the program"},
+	{}
+};
+
+static struct key_section help_keys[] = {
+	{"Browser", "browser", (struct key_group[]) {
+		{"General", help_keys_general},
+		{"View", (struct key[]) {
+			{"F9", "Toggle navigation sidebar"},
+			{}
+		}},
+		{"Navigation", (struct key[]) {
+			{"<control>l", "Open location..."},
+			{"<control>n", "Open a new window"},
+			{"<alt>Left", "Go back in history"},
+			{"<alt>Right", "Go forward in history"},
+			{"<alt>Up", "Go to parent directory"},
+			{"F5 r <control>r", "Refresh"},
+			{}
+		}},
+		{}
+	}},
+	{"View", "view", (struct key_group[]) {
+		{"General", help_keys_general},
+		{"View", (struct key[]) {
+			{"F8", "Toggle toolbar"},
+			{}
+		}},
+		{"Navigation", (struct key[]) {
+			{"<control>l", "Open location..."},
+			{"<control>n", "Open a new window"},
+			{"Left Up Page_Up", "Previous image"},
+			{"Right Down Page_Down", "Next image"},
+			{"Return <alt>Left", "Return to browser"},
+			{}
+		}},
+		{"Zoom", (struct key[]) {
+			{"<control>0", "Set zoom to 100%"},
+			{"1...9", "Set zoom to N:1"},
+			{"plus <control>plus", "Zoom in"},
+			{"minus <control>minus", "Zoom out"},
+			{}
+		}},
+		{"Orientation", (struct key[]) {
+			{"less", "Rotate anticlockwise"},
+			{"equal", "Mirror"},
+			{"greater", "Rotate clockwise"},
+			{}
+		}},
+		{"Control", (struct key[]) {
+			{"bracketleft", "Previous page"},
+			{"bracketright", "Next page"},
+			{"braceleft", "Previous frame"},
+			{"braceright", "Next frame"},
+			{"space", "Toggle playback"},
+			{}
+		}},
+		{"Configuration", (struct key[]) {
+			{"x", "Toggle scale to fit"},
+			{"i", "Toggle smooth scaling"},
+			{"t", "Toggle transparency highlighting"},
+			{}
+		}},
+		{"Tools", (struct key[]) {
+			{"<control>p", "Print..."},
+			{"<control>s", "Save page as..."},
+			{"<control><shift>s", "Save frame as..."},
+			{}
+		}},
+		{}
+	}},
+	{}
+};
+
+static GtkWidget *
+make_key(const struct key *key)
+{
+	return gtk_widget_new(GTK_TYPE_SHORTCUTS_SHORTCUT,
+		"title", key->title,
+		"shortcut-type", GTK_SHORTCUT_ACCELERATOR,
+		"accelerator", key->accelerator, NULL);
+}
+
+static GtkWidget *
+make_key_group(const struct key_group *group)
+{
+	GtkWidget *widget = gtk_widget_new(
+		GTK_TYPE_SHORTCUTS_GROUP, "title", group->title, NULL);
+	for (const struct key *p = group->keys; p->title; p++)
+		gtk_container_add(GTK_CONTAINER(widget), make_key(p));
+	return widget;
+}
+
+static GtkWidget *
+make_key_section(const struct key_section *section)
+{
+	GtkWidget *widget = gtk_widget_new(GTK_TYPE_SHORTCUTS_SECTION,
+		"title", section->title, "section-name", section->section_name, NULL);
+	for (const struct key_group *p = section->groups; p->title; p++)
+		gtk_container_add(GTK_CONTAINER(widget), make_key_group(p));
+	return widget;
+}
+
+static GtkWidget *
+make_key_window(void)
+{
+	GtkWidget *window = gtk_widget_new(GTK_TYPE_SHORTCUTS_WINDOW, NULL);
+	for (const struct key_section *p = help_keys; p->title; p++) {
+		GtkWidget *section = make_key_section(p);
+		gtk_widget_show_all(section);
+		gtk_container_add(GTK_CONTAINER(window), section);
+	}
+	return window;
+}
+
 // --- Main --------------------------------------------------------------------
 
 // TODO(p): See if it's possible to give separators room to shrink
@@ -535,6 +675,31 @@ on_window_state_event(G_GNUC_UNUSED GtkWidget *widget,
 	gtk_image_set_from_icon_name(image, name, GTK_ICON_SIZE_BUTTON);
 }
 
+static void
+on_help_destroyed(GtkWidget *window, GtkWidget **storage)
+{
+	g_return_if_fail(*storage == window);
+	*storage = NULL;
+}
+
+static void
+show_help_shortcuts(void)
+{
+	static GtkWidget *window;
+	if (!window) {
+		window = make_key_window();
+		g_signal_connect(
+			window, "destroy", G_CALLBACK(on_help_destroyed), &window);
+	}
+
+	g_object_set(window, "section-name",
+		gtk_stack_get_visible_child(GTK_STACK(g.stack)) == g.view_box
+			? "view"
+			: "browser",
+		NULL);
+	gtk_widget_show(window);
+}
+
 // Cursor keys, e.g., simply cannot be bound through accelerators
 // (and GtkWidget::keynav-failed would arguably be an awful solution).
 //
@@ -579,6 +744,10 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 		case GDK_KEY_w:
 			gtk_widget_destroy(g.window);
 			return TRUE;
+
+		case GDK_KEY_F1:
+			show_help_shortcuts();
+			return TRUE;
 		}
 		break;
 	case GDK_MOD1_MASK:
@@ -615,13 +784,15 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 		case GDK_KEY_o:
 			on_open();
 			return TRUE;
-
 		case GDK_KEY_F5:
 		case GDK_KEY_r:
 			// TODO(p): See the comment for C-r above.
 			load_directory(NULL);
 			return TRUE;
 
+		case GDK_KEY_F1:
+			show_help_shortcuts();
+			return TRUE;
 		case GDK_KEY_F9:
 			gtk_widget_set_visible(g.browser_sidebar,
 				!gtk_widget_is_visible(g.browser_sidebar));
@@ -657,7 +828,6 @@ on_key_press_view(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 		case GDK_KEY_Right:
 		case GDK_KEY_Down:
 		case GDK_KEY_Page_Down:
-		case GDK_KEY_space:
 			on_next();
 			return TRUE;
 
