@@ -594,6 +594,14 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 			else
 				switch_to_view(g.path);
 			return TRUE;
+		case GDK_KEY_Up:
+			if (gtk_stack_get_visible_child(GTK_STACK(g.stack)) != g.view_box) {
+				// This isn't exact, trailing slashes should be ignored.
+				gchar *parent = g_path_get_dirname(g.directory);
+				load_directory(parent);
+				g_free(parent);
+			}
+			return TRUE;
 		}
 		break;
 	case 0:
