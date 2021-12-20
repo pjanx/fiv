@@ -54,6 +54,8 @@ exit_fatal(const gchar *format, ...)
 
 // --- Main --------------------------------------------------------------------
 
+// TODO(p): See if it's possible to give separators room to shrink
+// by some minor amount of pixels, margin-wise.
 // TODO(p): Add a toggle for a checkerboard background.
 // TODO(p): Implement commented-out actions.
 #define B make_toolbar_button
@@ -62,23 +64,23 @@ exit_fatal(const gchar *format, ...)
 	XX(BROWSE,        B("view-grid-symbolic", "Browse")) \
 	XX(FILE_PREVIOUS, B("go-previous-symbolic", "Previous file")) \
 	XX(FILE_NEXT,     B("go-next-symbolic", "Next file")) \
-	XX(S1,            make_separator()) \
+	XX(S1,            gtk_separator_new(GTK_ORIENTATION_HORIZONTAL)) \
 	XX(PAGE_FIRST,    B("go-top-symbolic", "First page")) \
 	XX(PAGE_PREVIOUS, B("go-up-symbolic", "Previous page")) \
 	XX(PAGE_NEXT,     B("go-down-symbolic", "Next page")) \
 	XX(PAGE_LAST,     B("go-bottom-symbolic", "Last page")) \
-	XX(S2,            make_separator()) \
+	XX(S2,            gtk_separator_new(GTK_ORIENTATION_HORIZONTAL)) \
 	XX(SKIP_BACK,     B("media-skip-backward-symbolic", "Rewind playback")) \
 	XX(SEEK_BACK,     B("media-seek-backward-symbolic", "Previous frame")) \
 	XX(PLAY_PAUSE,    B("media-playback-start-symbolic", "Pause")) \
 	XX(SEEK_FORWARD,  B("media-seek-forward-symbolic", "Next frame")) \
-	XX(S3,            make_separator()) \
+	XX(S3,            gtk_separator_new(GTK_ORIENTATION_HORIZONTAL)) \
 	XX(PLUS,          B("zoom-in-symbolic", "Zoom in")) \
 	XX(SCALE,         gtk_label_new("")) \
 	XX(MINUS,         B("zoom-out-symbolic", "Zoom out")) \
 	XX(ONE,           B("zoom-original-symbolic", "Original size")) \
 	XX(FIT,           T("zoom-fit-best-symbolic", "Scale to fit")) \
-	XX(S4,            make_separator()) \
+	XX(S4,            gtk_separator_new(GTK_ORIENTATION_HORIZONTAL)) \
 	/* XX(PIN,        B("view-pin-symbolic", "Keep view configuration")) */ \
 	/* Or perhaps "blur-symbolic", also in the extended set. */ \
 	XX(SMOOTH,        T("blend-tool-symbolic", "Smooth scaling")) \
@@ -86,11 +88,11 @@ exit_fatal(const gchar *format, ...)
 	XX(SAVE,          B("document-save-as-symbolic", "Save as...")) \
 	XX(PRINT,         B("document-print-symbolic", "Print...")) \
 	/* XX(INFO,       B("info-symbolic", "Information")) */ \
-	XX(S5,            make_separator()) \
+	XX(S5,            gtk_separator_new(GTK_ORIENTATION_HORIZONTAL)) \
 	XX(LEFT,          B("object-rotate-left-symbolic", "Rotate left")) \
 	XX(MIRROR,        B("object-flip-horizontal-symbolic", "Mirror")) \
 	XX(RIGHT,         B("object-rotate-right-symbolic", "Rotate right")) \
-	XX(S6,            make_separator()) \
+	XX(S6,            gtk_separator_new(GTK_ORIENTATION_HORIZONTAL)) \
 	/* We are YouTube. */ \
 	XX(FULLSCREEN,    B("view-fullscreen-symbolic", "Fullscreen"))
 
@@ -723,17 +725,6 @@ make_toolbar_toggle(const gchar *symbolic, const gchar *tooltip)
 	return button;
 }
 
-static GtkWidget *
-make_separator(void)
-{
-	// TODO(p): See if it's possible to give the separator room to shrink
-	// by some minor amount of pixels, margin-wise.
-	GtkWidget *separator = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
-	gtk_widget_set_margin_start(separator, 10);
-	gtk_widget_set_margin_end(separator, 10);
-	return separator;
-}
-
 static void
 on_view_actions_changed(void)
 {
@@ -990,7 +981,7 @@ main(int argc, char *argv[])
 		#toolbar > button:last-child { padding-right: 4px; } \
 		#toolbar separator { \
 			background: mix(@insensitive_fg_color, \
-				@insensitive_bg_color, 0.4); margin: 6px 0; \
+				@insensitive_bg_color, 0.4); margin: 6px 10px; \
 		} \
 		fiv-browser { padding: 5px; } \
 		fiv-browser.item { \
