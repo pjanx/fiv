@@ -45,6 +45,7 @@ struct _FivBrowser {
 	int item_height;                    ///< Thumbnail height in pixels
 	int item_spacing;                   ///< Space between items in pixels
 
+	char *path;                         ///< Current path
 	GArray *entries;                    ///< [Entry]
 	GArray *layouted_rows;              ///< [Row]
 	int selected;
@@ -626,6 +627,7 @@ static void
 fiv_browser_finalize(GObject *gobject)
 {
 	FivBrowser *self = FIV_BROWSER(gobject);
+	g_free(self->path);
 	g_array_free(self->entries, TRUE);
 	g_array_free(self->layouted_rows, TRUE);
 	cairo_surface_destroy(self->glow);
@@ -804,6 +806,12 @@ fiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 		gtk_widget_grab_focus(widget);
 
 	const Entry *entry = entry_at(self, event->x, event->y);
+	if (!entry && event->button == GDK_BUTTON_SECONDARY) {
+		gchar *uri = g_filename_to_uri(self->path, NULL, NULL);
+		show_context_menu(widget, uri);
+		g_free(uri);
+		return TRUE;
+	}
 	if (!entry)
 		return FALSE;
 
@@ -1038,8 +1046,9 @@ fiv_browser_load(
 {
 	g_array_set_size(self->entries, 0);
 	g_array_set_size(self->layouted_rows, 0);
+	g_clear_pointer(&self->path, g_free);
 
-	GFile *file = g_file_new_for_path(path);
+	GFile *file = g_file_new_for_path((self->path = g_strdup(path)));
 	GFileEnumerator *enumerator = g_file_enumerate_children(file,
 		G_FILE_ATTRIBUTE_STANDARD_NAME "," G_FILE_ATTRIBUTE_STANDARD_TYPE,
 		G_FILE_QUERY_INFO_NONE, NULL, NULL);
