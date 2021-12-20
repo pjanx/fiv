@@ -38,6 +38,7 @@ struct _FivView {
 	cairo_surface_t *frame;             ///< Current frame within page, weak
 	FivIoOrientation orientation;       ///< Current page orientation
 	bool filter;                        ///< Smooth scaling toggle
+	bool checkerboard;                  ///< Show checkerboard background
 	bool scale_to_fit;                  ///< Image no larger than the allocation
 	double scale;                       ///< Scaling factor
 
@@ -88,6 +89,7 @@ enum {
 	PROP_SCALE = 1,
 	PROP_SCALE_TO_FIT,
 	PROP_FILTER,
+	PROP_CHECKERBOARD,
 	PROP_PLAYING,
 	PROP_HAS_IMAGE,
 	PROP_CAN_ANIMATE,
@@ -121,6 +123,9 @@ fiv_view_get_property(
 		break;
 	case PROP_FILTER:
 		g_value_set_boolean(value, self->filter);
+		break;
+	case PROP_CHECKERBOARD:
+		g_value_set_boolean(value, self->checkerboard);
 		break;
 	case PROP_PLAYING:
 		g_value_set_boolean(value, !!self->frame_update_connection);
@@ -157,6 +162,10 @@ fiv_view_set_property(
 	case PROP_FILTER:
 		if (self->filter != g_value_get_boolean(value))
 			fiv_view_command(self, FIV_VIEW_COMMAND_TOGGLE_FILTER);
+		break;
+	case PROP_CHECKERBOARD:
+		if (self->checkerboard != g_value_get_boolean(value))
+			fiv_view_command(self, FIV_VIEW_COMMAND_TOGGLE_CHECKERBOARD);
 		break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
@@ -356,8 +365,8 @@ fiv_view_draw(GtkWidget *widget, cairo_t *cr)
 	// which makes the widget have no double buffering or default background.
 	GtkAllocation allocation;
 	gtk_widget_get_allocation(widget, &allocation);
-	gtk_render_background(gtk_widget_get_style_context(widget), cr, 0, 0,
-		allocation.width, allocation.height);
+	GtkStyleContext *style = gtk_widget_get_style_context(widget);
+	gtk_render_background(style, cr, 0, 0, allocation.width, allocation.height);
 
 	FivView *self = FIV_VIEW(widget);
 	if (!self->image ||
@@ -376,10 +385,17 @@ fiv_view_draw(GtkWidget *widget, cairo_t *cr)
 	if (h < allocation.height)
 		y = round((allocation.height - h) / 2.);
 
-	// FIXME: Recording surfaces do not work well with CAIRO_SURFACE_TYPE_XLIB,
-	// we always get a shitty pixmap, where transparency contains junk.
 	cairo_matrix_t matrix = get_orientation_matrix(self->orientation, sw, sh);
 	cairo_translate(cr, x, y);
+	if (self->checkerboard) {
+		gtk_style_context_save(style);
+		gtk_style_context_add_class(style, "checkerboard");
+		gtk_render_background(style, cr, 0, 0, w, h);
+		gtk_style_context_restore(style);
+	}
+
+	// FIXME: Recording surfaces do not work well with CAIRO_SURFACE_TYPE_XLIB,
+	// we always get a shitty pixmap, where transparency contains junk.
 	if (cairo_surface_get_type(self->frame) == CAIRO_SURFACE_TYPE_RECORDING) {
 		cairo_surface_t *image =
 			cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
@@ -804,6 +820,8 @@ fiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 		return command(self, FIV_VIEW_COMMAND_TOGGLE_SCALE_TO_FIT);
 	case GDK_KEY_i:
 		return command(self, FIV_VIEW_COMMAND_TOGGLE_FILTER);
+	case GDK_KEY_t:
+		return command(self, FIV_VIEW_COMMAND_TOGGLE_CHECKERBOARD);
 
 	case GDK_KEY_less:
 		return command(self, FIV_VIEW_COMMAND_ROTATE_LEFT);
@@ -843,6 +861,9 @@ fiv_view_class_init(FivViewClass *klass)
 		TRUE, G_PARAM_READWRITE);
 	view_properties[PROP_FILTER] = g_param_spec_boolean(
 		"filter", "Use filtering", "Scale images smoothly",
+		TRUE, G_PARAM_READWRITE);
+	view_properties[PROP_CHECKERBOARD] = g_param_spec_boolean(
+		"checkerboard", "Show checkerboard", "Highlight transparent background",
 		TRUE, G_PARAM_READWRITE);
 	view_properties[PROP_PLAYING] = g_param_spec_boolean(
 		"playing", "Playing animation", "An animation is running",
@@ -885,6 +906,7 @@ fiv_view_init(FivView *self)
 	gtk_widget_set_can_focus(GTK_WIDGET(self), TRUE);
 
 	self->filter = true;
+	self->checkerboard = false;
 	self->scale = 1.0;
 }
 
@@ -975,7 +997,13 @@ fiv_view_command(FivView *self, FivViewCommand command)
 
 	break; case FIV_VIEW_COMMAND_TOGGLE_FILTER:
 		self->filter = !self->filter;
-		g_object_notify_by_pspec(G_OBJECT(self), view_properties[PROP_FILTER]);
+		g_object_notify_by_pspec(
+			G_OBJECT(self), view_properties[PROP_FILTER]);
+		gtk_widget_queue_draw(widget);
+	break; case FIV_VIEW_COMMAND_TOGGLE_CHECKERBOARD:
+		self->checkerboard = !self->checkerboard;
+		g_object_notify_by_pspec(
+			G_OBJECT(self), view_properties[PROP_CHECKERBOARD]);
 		gtk_widget_queue_draw(widget);
 	break; case FIV_VIEW_COMMAND_PRINT:
 		print(self);

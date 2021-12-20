@@ -56,7 +56,6 @@ exit_fatal(const gchar *format, ...)
 
 // TODO(p): See if it's possible to give separators room to shrink
 // by some minor amount of pixels, margin-wise.
-// TODO(p): Add a toggle for a checkerboard background.
 // TODO(p): Implement commented-out actions.
 #define B make_toolbar_button
 #define T make_toolbar_toggle
@@ -84,6 +83,7 @@ exit_fatal(const gchar *format, ...)
 	/* XX(PIN,        B("view-pin-symbolic", "Keep view configuration")) */ \
 	/* Or perhaps "blur-symbolic", also in the extended set. */ \
 	XX(SMOOTH,        T("blend-tool-symbolic", "Smooth scaling")) \
+	XX(CHECKERBOARD,  T("checkerboard-symbolic", "Highlight transparency")) \
 	/* XX(COLOR,      B("preferences-color-symbolic", "Color management")) */ \
 	XX(SAVE,          B("document-save-as-symbolic", "Save as...")) \
 	XX(PRINT,         B("document-print-symbolic", "Print...")) \
@@ -759,6 +759,7 @@ on_view_actions_changed(void)
 	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_FIT], has_image);
 
 	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_SMOOTH], has_image);
+	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_CHECKERBOARD], has_image);
 	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_SAVE], has_image);
 	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_PRINT], has_image);
 
@@ -902,6 +903,7 @@ make_view_toolbar(void)
 	toolbar_command(TOOLBAR_ONE,           FIV_VIEW_COMMAND_ZOOM_1);
 	toolbar_toggler(TOOLBAR_FIT,           "scale-to-fit");
 	toolbar_toggler(TOOLBAR_SMOOTH,        "filter");
+	toolbar_toggler(TOOLBAR_CHECKERBOARD,  "checkerboard");
 	toolbar_command(TOOLBAR_PRINT,         FIV_VIEW_COMMAND_PRINT);
 	toolbar_command(TOOLBAR_SAVE,          FIV_VIEW_COMMAND_SAVE_PAGE);
 	toolbar_command(TOOLBAR_LEFT,          FIV_VIEW_COMMAND_ROTATE_LEFT);
@@ -917,11 +919,14 @@ make_view_toolbar(void)
 		G_CALLBACK(on_notify_view_boolean), g.toolbar[TOOLBAR_FIT]);
 	g_signal_connect(g.view, "notify::filter",
 		G_CALLBACK(on_notify_view_boolean), g.toolbar[TOOLBAR_SMOOTH]);
+	g_signal_connect(g.view, "notify::checkerboard",
+		G_CALLBACK(on_notify_view_boolean), g.toolbar[TOOLBAR_CHECKERBOARD]);
 
 	g_object_notify(G_OBJECT(g.view), "scale");
 	g_object_notify(G_OBJECT(g.view), "playing");
 	g_object_notify(G_OBJECT(g.view), "scale-to-fit");
 	g_object_notify(G_OBJECT(g.view), "filter");
+	g_object_notify(G_OBJECT(g.view), "checkerboard");
 
 	GCallback callback = G_CALLBACK(on_view_actions_changed);
 	g_signal_connect(g.view, "notify::has-image", callback, NULL);
@@ -995,8 +1000,10 @@ main(int argc, char *argv[])
 		fiv-browser { padding: 5px; } \
 		fiv-browser.item { \
 			color: mix(#000, @content_view_bg, 0.625); margin: 8px; \
-			border: 2px solid #fff; background: @theme_bg_color; \
-			background-image: \
+			border: 2px solid #fff; \
+		} \
+		fiv-browser.item, fiv-view.checkerboard { \
+			background: @theme_bg_color; background-image: \
 				linear-gradient(45deg, @fiv-tile 26%, transparent 26%), \
 				linear-gradient(-45deg, @fiv-tile 26%, transparent 26%), \
 				linear-gradient(45deg, transparent 74%, @fiv-tile 74%), \
