@@ -254,8 +254,12 @@ draw_row(FivBrowser *self, cairo_t *cr, const Row *row)
 				border.top + extents.height + border.bottom);
 		}
 
-		gtk_render_background(
-			style, cr, border.left, border.top, extents.width, extents.height);
+		// Performance optimization--specifically targeting the checkerboard.
+		if (cairo_image_surface_get_format(item->entry->thumbnail) !=
+				CAIRO_FORMAT_RGB24) {
+			gtk_render_background(style, cr, border.left, border.top,
+				extents.width, extents.height);
+		}
 
 		gtk_render_frame(style, cr, 0, 0,
 			border.left + extents.width + border.right,
@@ -306,8 +310,9 @@ rescale_thumbnail(cairo_surface_t *thumbnail, double row_height)
 
 	int projected_width = round(scale_x * width);
 	int projected_height = round(scale_y * height);
+	cairo_format_t cairo_format = cairo_image_surface_get_format(thumbnail);
 	cairo_surface_t *scaled = cairo_image_surface_create(
-		CAIRO_FORMAT_ARGB32, projected_width, projected_height);
+		cairo_format, projected_width, projected_height);
 
 	// pixman can take gamma into account when scaling, unlike Cairo.
 	struct pixman_f_transform xform_floating;
@@ -315,7 +320,8 @@ rescale_thumbnail(cairo_surface_t *thumbnail, double row_height)
 
 	// PIXMAN_a8r8g8b8_sRGB can be used for gamma-correct results,
 	// but it's an incredibly slow transformation
-	pixman_format_code_t format = PIXMAN_a8r8g8b8;
+	pixman_format_code_t format =
+		cairo_format == CAIRO_FORMAT_RGB24 ? PIXMAN_x8r8g8b8 : PIXMAN_a8r8g8b8;
 
 	pixman_image_t *src = pixman_image_create_bits(format, width, height,
 		(uint32_t *) cairo_image_surface_get_data(thumbnail),

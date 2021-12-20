@@ -2366,9 +2366,15 @@ read_spng_thumbnail(
 	}
 
 	struct spng_ihdr ihdr = {};
+	struct spng_trns trns = {};
 	spng_get_ihdr(ctx, &ihdr);
+	bool may_be_translucent = !spng_get_trns(ctx, &trns) ||
+		ihdr.color_type == SPNG_COLOR_TYPE_GRAYSCALE_ALPHA ||
+		ihdr.color_type == SPNG_COLOR_TYPE_TRUECOLOR_ALPHA;
+
 	cairo_surface_t *surface = cairo_image_surface_create(
-		CAIRO_FORMAT_ARGB32, ihdr.width, ihdr.height);
+		may_be_translucent ? CAIRO_FORMAT_ARGB32 : CAIRO_FORMAT_RGB24,
+		ihdr.width, ihdr.height);
 
 	cairo_status_t surface_status = cairo_surface_status(surface);
 	if (surface_status != CAIRO_STATUS_SUCCESS) {
@@ -2396,10 +2402,7 @@ read_spng_thumbnail(
 	}
 
 	// pixman can be mildly abused to do this operation, but it won't be faster.
-	struct spng_trns trns = {};
-	if (ihdr.color_type == SPNG_COLOR_TYPE_GRAYSCALE_ALPHA ||
-		ihdr.color_type == SPNG_COLOR_TYPE_TRUECOLOR_ALPHA ||
-		!spng_get_trns(ctx, &trns)) {
+	if (may_be_translucent) {
 		for (size_t i = size / sizeof *data; i--; ) {
 			const uint8_t *unit = (const uint8_t *) &data[i];
 			uint32_t a = unit[3],
