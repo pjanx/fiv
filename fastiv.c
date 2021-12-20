@@ -873,9 +873,19 @@ make_view_toolbar(void)
 
 	// GtkStatusBar solves a problem we do not have here.
 	GtkWidget *view_toolbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+	gtk_widget_set_name(view_toolbar, "toolbar");
 	GtkBox *box = GTK_BOX(view_toolbar);
-	for (int i = 0; i < TOOLBAR_COUNT; i++)
+
+	// Exploring different versions of awkward layouts.
+	for (int i = 0; i <= TOOLBAR_S1; i++)
 		gtk_box_pack_start(box, g.toolbar[i], FALSE, FALSE, 0);
+	for (int i = TOOLBAR_COUNT; --i >= TOOLBAR_S6; )
+		gtk_box_pack_end(box, g.toolbar[i], FALSE, FALSE, 0);
+
+	GtkWidget *center = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+	for (int i = TOOLBAR_S1; ++i < TOOLBAR_S6; )
+		gtk_box_pack_start(GTK_BOX(center), g.toolbar[i], FALSE, FALSE, 0);
+	gtk_box_set_center_widget(box, center);
 
 	toolbar_connect(TOOLBAR_BROWSE,        G_CALLBACK(switch_to_browser));
 	toolbar_connect(TOOLBAR_FILE_PREVIOUS, G_CALLBACK(on_previous));
@@ -971,15 +981,14 @@ main(int argc, char *argv[])
 
 	// This is incredibly broken https://stackoverflow.com/a/51054396/76313
 	// thus resolving the problem using overlaps.
-	// XXX: button.flat is too generic, it's only for the view toolbar.
-	// XXX: Similarly, box > separator.horizontal is a temporary hack.
-	// Consider using a #name or a .class here, possibly for a parent widget.
 	const char *style = "@define-color fiv-tile #3c3c3c; \
 		fiv-view, fiv-browser { background: @content_view_bg; } \
 		placessidebar.fiv .toolbar { padding: 2px 6px; } \
 		placessidebar.fiv box > separator { margin: 4px 0; } \
-		button.flat { padding-left: 0; padding-right: 0 } \
-		box > separator.horizontal { \
+		#toolbar button { padding-left: 0; padding-right: 0; } \
+		#toolbar > button:first-child { padding-left: 4px; } \
+		#toolbar > button:last-child { padding-right: 4px; } \
+		#toolbar separator { \
 			background: mix(@insensitive_fg_color, \
 				@insensitive_bg_color, 0.4); margin: 6px 0; \
 		} \
@@ -1019,11 +1028,9 @@ main(int argc, char *argv[])
 	g_object_set(gtk_settings_get_default(),
 		"gtk-application-prefer-dark-theme", TRUE, NULL);
 
-	GtkWidget *view_toolbar = make_view_toolbar();
-	gtk_widget_set_halign(view_toolbar, GTK_ALIGN_CENTER);
-
 	// Need to put the toolbar at the top, because of the horizontal scrollbar.
 	g.view_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	GtkWidget *view_toolbar = make_view_toolbar();
 	gtk_box_pack_start(GTK_BOX(g.view_box), view_toolbar, FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(g.view_box),
 		gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, 0);
