@@ -816,7 +816,7 @@ fiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 	case GDK_KEY_minus:
 		return command(self, FIV_VIEW_COMMAND_ZOOM_OUT);
 
-	case GDK_KEY_x:  // Inspired by gThumb.
+	case GDK_KEY_x:  // Inspired by gThumb, which has more such modes.
 		return command(self, FIV_VIEW_COMMAND_TOGGLE_SCALE_TO_FIT);
 	case GDK_KEY_i:
 		return command(self, FIV_VIEW_COMMAND_TOGGLE_FILTER);

@@ -126,6 +126,7 @@ struct {
 	GtkWidget *browser;
 
 	GtkWidget *view_box;
+	GtkWidget *view_toolbar;
 	GtkWidget *toolbar[TOOLBAR_COUNT];
 	GtkWidget *view;
 } g;
@@ -642,6 +643,11 @@ on_key_press_view(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 	switch (event->state & gtk_accelerator_get_default_mod_mask()) {
 	case 0:
 		switch (event->keyval) {
+		case GDK_KEY_F8:
+			gtk_widget_set_visible(g.view_toolbar,
+				!gtk_widget_is_visible(g.view_toolbar));
+			return TRUE;
+
 		case GDK_KEY_Left:
 		case GDK_KEY_Up:
 		case GDK_KEY_Page_Up:
@@ -1036,8 +1042,8 @@ main(int argc, char *argv[])
 
 	// Need to put the toolbar at the top, because of the horizontal scrollbar.
 	g.view_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-	GtkWidget *view_toolbar = make_view_toolbar();
-	gtk_box_pack_start(GTK_BOX(g.view_box), view_toolbar, FALSE, FALSE, 0);
+	g.view_toolbar = make_view_toolbar();
+	gtk_box_pack_start(GTK_BOX(g.view_box), g.view_toolbar, FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(g.view_box),
 		gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(g.view_box), view_scroller, TRUE, TRUE, 0);
