@@ -786,6 +786,55 @@ save_as(FivView *self, gboolean frame)
 	}
 }
 
+enum { INFO_KEY, INFO_VALUE, INFO_WEIGHT, INFO_COUNT };
+
+static GtkTreeModel *
+info_model(char *tsv)
+{
+	GtkTreeStore *store = gtk_tree_store_new(
+		INFO_COUNT, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_INT, G_TYPE_BOOLEAN);
+	GtkTreeIter category = {}, entry = {};
+	const char *last_group = NULL;
+
+	int line = 1;
+	for (char *nl; (nl = strchr(tsv, '\n')); line++, tsv = ++nl) {
+		*nl = 0;
+		if (nl > tsv && nl[-1] == '\r')
+			nl[-1] = 0;
+
+		char *group = tsv, *tag = strchr(group, '\t');
+		if (!tag) {
+			g_warning("ExifTool parse error on line %d", line);
+			continue;
+		}
+
+		*tag++ = 0;
+		for (char *p = group; *p; p++)
+			if (*p == '_')
+				*p = ' ';
+
+		char *value = strchr(tag, '\t');
+		if (!value) {
+			g_warning("ExifTool parse error on line %d", line);
+			continue;
+		}
+
+		*value++ = 0;
+		if (!last_group || strcmp(last_group, group)) {
+			last_group = group;
+
+			gtk_tree_store_append(store, &category, NULL);
+			gtk_tree_store_set(store, &category, INFO_KEY, group,
+				INFO_WEIGHT, PANGO_WEIGHT_BOLD, -1);
+		}
+
+		gtk_tree_store_append(store, &entry, &category);
+		gtk_tree_store_set(store, &entry, INFO_KEY, tag, INFO_VALUE, value,
+			INFO_WEIGHT, PANGO_WEIGHT_NORMAL, -1);
+	}
+	return GTK_TREE_MODEL(store);
+}
+
 static void
 info(FivView *self)
 {
@@ -829,25 +878,32 @@ info(FivView *self)
 		gtk_container_add(GTK_CONTAINER(content_area), info);
 	}
 
-	// TODO(p): Parse as GROUP\tTAG\tVALUE, do s/_/ /g in the group name,
-	// put the data in a GtkTreeModel/GtkTreeView.
-	GtkWidget *label = gtk_label_new(out);
-	gtk_label_set_selectable(GTK_LABEL(label), TRUE);
-	gtk_label_set_xalign(GTK_LABEL(label), 0.);
-	gtk_label_set_yalign(GTK_LABEL(label), 0.);
-	gtk_widget_set_hexpand(label, TRUE);
-	gtk_widget_set_vexpand(label, TRUE);
+	// TODO(p): Replace this disaster with:
+	// GtkBox -> GtkExpander, GtkBox/GtkGrid -> GtkLabel, GtkSizeGroup.
+	// We'll lose search, but the user will be able to copy text out.
+	GtkWidget *view = gtk_tree_view_new();
+	gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(view), -1,
+		"Field", gtk_cell_renderer_text_new(), "text", INFO_KEY,
+		"weight", INFO_WEIGHT, NULL);
+	gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(view), -1,
+		"Value", gtk_cell_renderer_text_new(), "text", INFO_VALUE, NULL);
 
+	GtkTreeModel *model = info_model(out);
+	gtk_tree_view_set_model(GTK_TREE_VIEW(view), model);
+	gtk_tree_view_expand_all(GTK_TREE_VIEW(view));
+	g_object_unref(model);
+
+	// GtkTreeView doesn't have a useful natural height.
 	GtkWidget *scroller = gtk_scrolled_window_new(NULL, NULL);
 	gtk_scrolled_window_set_max_content_width(
 		GTK_SCROLLED_WINDOW(scroller), 800);
-	gtk_scrolled_window_set_max_content_height(
-		GTK_SCROLLED_WINDOW(scroller), 800);
 	gtk_scrolled_window_set_propagate_natural_width(
 		GTK_SCROLLED_WINDOW(scroller), TRUE);
-	gtk_scrolled_window_set_propagate_natural_height(
-		GTK_SCROLLED_WINDOW(scroller), TRUE);
-	gtk_container_add(GTK_CONTAINER(scroller), label);
+	gtk_window_set_default_size(GTK_WINDOW(dialog), -1, 800);
+
+	gtk_widget_set_hexpand(view, TRUE);
+	gtk_widget_set_vexpand(view, TRUE);
+	gtk_container_add(GTK_CONTAINER(scroller), view);
 	gtk_container_add(GTK_CONTAINER(content_area), scroller);
 
 	g_free(out);
