@@ -50,6 +50,10 @@ struct _FivView {
 
 G_DEFINE_TYPE(FivView, fiv_view, GTK_TYPE_WIDGET)
 
+struct size {
+	double width, height;
+};
+
 static FivIoOrientation view_left[9] = {
 	[FivIoOrientationUnknown]   = FivIoOrientationUnknown,
 	[FivIoOrientation0]         = FivIoOrientation270,
@@ -174,12 +178,11 @@ fiv_view_set_property(
 	}
 }
 
-static void
-get_surface_dimensions(FivView *self, double *width, double *height)
+static struct size
+get_surface_dimensions(FivView *self)
 {
-	*width = *height = 0;
 	if (!self->image)
-		return;
+		return (struct size) {};
 
 	cairo_rectangle_t extents = {};
 	switch (cairo_surface_get_type(self->page)) {
@@ -201,23 +204,18 @@ get_surface_dimensions(FivView *self, double *width, double *height)
 	case FivIoOrientationMirror90:
 	case FivIoOrientation270:
 	case FivIoOrientationMirror270:
-		*width = extents.height;
-		*height = extents.width;
-		return;
+		return (struct size) {extents.height, extents.width};
 	default:
-		*width = extents.width;
-		*height = extents.height;
+		return (struct size) {extents.width, extents.height};
 	}
 }
 
 static void
 get_display_dimensions(FivView *self, int *width, int *height)
 {
-	double w, h;
-	get_surface_dimensions(self, &w, &h);
-
-	*width = ceil(w * self->scale);
-	*height = ceil(h * self->scale);
+	struct size surface_dimensions = get_surface_dimensions(self);
+	*width = ceil(surface_dimensions.width * self->scale);
+	*height = ceil(surface_dimensions.height * self->scale);
 }
 
 static cairo_matrix_t
@@ -265,9 +263,7 @@ fiv_view_get_preferred_height(GtkWidget *widget, gint *minimum, gint *natural)
 {
 	FivView *self = FIV_VIEW(widget);
 	if (self->scale_to_fit) {
-		double sw, sh;
-		get_surface_dimensions(self, &sw, &sh);
-		*natural = ceil(sh);
+		*natural = ceil(get_surface_dimensions(self).height);
 		*minimum = 1;
 	} else {
 		int dw, dh;
@@ -281,9 +277,7 @@ fiv_view_get_preferred_width(GtkWidget *widget, gint *minimum, gint *natural)
 {
 	FivView *self = FIV_VIEW(widget);
 	if (self->scale_to_fit) {
-		double sw, sh;
-		get_surface_dimensions(self, &sw, &sh);
-		*natural = ceil(sw);
+		*natural = ceil(get_surface_dimensions(self).width);
 		*minimum = 1;
 	} else {
 		int dw, dh;
@@ -301,14 +295,13 @@ fiv_view_size_allocate(GtkWidget *widget, GtkAllocation *allocation)
 	if (!self->image || !self->scale_to_fit)
 		return;
 
-	double w, h;
-	get_surface_dimensions(self, &w, &h);
-
+	struct size surface_dimensions = get_surface_dimensions(self);
 	self->scale = 1;
-	if (ceil(w * self->scale) > allocation->width)
-		self->scale = allocation->width / w;
-	if (ceil(h * self->scale) > allocation->height)
-		self->scale = allocation->height / h;
+
+	if (ceil(surface_dimensions.width * self->scale) > allocation->width)
+		self->scale = allocation->width / surface_dimensions.width;
+	if (ceil(surface_dimensions.height * self->scale) > allocation->height)
+		self->scale = allocation->height / surface_dimensions.height;
 	g_object_notify_by_pspec(G_OBJECT(widget), view_properties[PROP_SCALE]);
 }
 
@@ -376,9 +369,7 @@ fiv_view_draw(GtkWidget *widget, cairo_t *cr)
 		return TRUE;
 
 	int w, h;
-	double sw, sh;
 	get_display_dimensions(self, &w, &h);
-	get_surface_dimensions(self, &sw, &sh);
 
 	double x = 0;
 	double y = 0;
@@ -387,7 +378,9 @@ fiv_view_draw(GtkWidget *widget, cairo_t *cr)
 	if (h < allocation.height)
 		y = round((allocation.height - h) / 2.);
 
-	cairo_matrix_t matrix = get_orientation_matrix(self->orientation, sw, sh);
+	struct size surface_dimensions = get_surface_dimensions(self);
+	cairo_matrix_t matrix = get_orientation_matrix(
+		self->orientation, surface_dimensions.width, surface_dimensions.height);
 	cairo_translate(cr, x, y);
 	if (self->checkerboard) {
 		gtk_style_context_save(style);
@@ -476,6 +469,28 @@ set_scale(FivView *self, double scale)
 	g_object_notify_by_pspec(G_OBJECT(self), view_properties[PROP_SCALE]);
 	gtk_widget_queue_resize(GTK_WIDGET(self));
 	return set_scale_to_fit(self, false);
+}
+
+static gboolean
+set_scale_to_fit_width(FivView *self)
+{
+	double w = get_surface_dimensions(self).width;
+	int allocated = gtk_widget_get_allocated_width(
+		gtk_widget_get_parent(GTK_WIDGET(self)));
+	if (ceil(w * self->scale) > allocated)
+		return set_scale(self, allocated / w);
+	return TRUE;
+}
+
+static gboolean
+set_scale_to_fit_height(FivView *self)
+{
+	double h = get_surface_dimensions(self).height;
+	int allocated = gtk_widget_get_allocated_height(
+		gtk_widget_get_parent(GTK_WIDGET(self)));
+	if (ceil(h * self->scale) > allocated)
+		return set_scale(self, allocated / h);
+	return TRUE;
 }
 
 static gboolean
@@ -649,12 +664,11 @@ static void
 on_draw_page(G_GNUC_UNUSED GtkPrintOperation *operation,
 	GtkPrintContext *context, G_GNUC_UNUSED int page_nr, FivView *self)
 {
-	double surface_width_px = 0, surface_height_px = 0;
-	get_surface_dimensions(self, &surface_width_px, &surface_height_px);
-
 	// Any DPI will be wrong, unless we import that information from the image.
 	double scale = 1 / 96.;
-	double w = surface_width_px * scale, h = surface_height_px * scale;
+	struct size surface_dimensions = get_surface_dimensions(self);
+	double w = surface_dimensions.width * scale;
+	double h = surface_dimensions.height * scale;
 
 	// Scale down to fit the print area, taking care to not divide by zero.
 	double areaw = gtk_print_context_get_width(context);
@@ -665,7 +679,7 @@ on_draw_page(G_GNUC_UNUSED GtkPrintOperation *operation,
 	cairo_scale(cr, scale, scale);
 	cairo_set_source_surface(cr, self->frame, 0, 0);
 	cairo_matrix_t matrix = get_orientation_matrix(
-		self->orientation, surface_width_px, surface_height_px);
+		self->orientation, surface_dimensions.width, surface_dimensions.height);
 	cairo_pattern_set_matrix(cairo_get_source(cr), &matrix);
 	cairo_paint(cr);
 }
@@ -827,6 +841,11 @@ fiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 		return command(self, FIV_VIEW_COMMAND_ZOOM_IN);
 	case GDK_KEY_minus:
 		return command(self, FIV_VIEW_COMMAND_ZOOM_OUT);
+
+	case GDK_KEY_w:
+		return set_scale_to_fit_width(self);
+	case GDK_KEY_h:
+		return set_scale_to_fit_height(self);
 
 	case GDK_KEY_x:  // Inspired by gThumb, which has more such modes.
 		return command(self, FIV_VIEW_COMMAND_TOGGLE_SCALE_TO_FIT);

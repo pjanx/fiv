@@ -119,6 +119,8 @@ static struct key_section help_keys[] = {
 			{"1...9", "Set zoom to N:1"},
 			{"plus <control>plus", "Zoom in"},
 			{"minus <control>minus", "Zoom out"},
+			{"w", "Zoom to fit width if larger"},
+			{"h", "Zoom to fit height if larger"},
 			{}
 		}},
 		{"Orientation", (struct key[]) {
@@ -127,18 +129,18 @@ static struct key_section help_keys[] = {
 			{"greater", "Rotate clockwise"},
 			{}
 		}},
+		{"Configuration", (struct key[]) {
+			{"x", "Toggle scale to fit if larger"},
+			{"i", "Toggle smooth scaling"},
+			{"t", "Toggle transparency highlighting"},
+			{}
+		}},
 		{"Control", (struct key[]) {
 			{"bracketleft", "Previous page"},
 			{"bracketright", "Next page"},
 			{"braceleft", "Previous frame"},
 			{"braceright", "Next frame"},
 			{"space", "Toggle playback"},
-			{}
-		}},
-		{"Configuration", (struct key[]) {
-			{"x", "Toggle scale to fit"},
-			{"i", "Toggle smooth scaling"},
-			{"t", "Toggle transparency highlighting"},
 			{}
 		}},
 		{"Tools", (struct key[]) {
