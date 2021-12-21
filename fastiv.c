@@ -52,7 +52,7 @@ exit_fatal(const gchar *format, ...)
 	exit(EXIT_FAILURE);
 }
 
-// --- Help --------------------------------------------------------------------
+// --- Keyboard shortcuts ------------------------------------------------------
 // Fuck XML, this can be easily represented in static structures.
 // Though it would be nice if the accelerators could be customized.
 
@@ -81,76 +81,80 @@ static struct key help_keys_general[] = {
 	{}
 };
 
+static struct key_group help_keys_browser[] = {
+	{"General", help_keys_general},
+	{"View", (struct key[]) {
+		{"F9", "Toggle navigation sidebar"},
+		{}
+	}},
+	{"Navigation", (struct key[]) {
+		{"<control>l", "Open location..."},
+		{"<control>n", "Open a new window"},
+		{"<alt>Left", "Go back in history"},
+		{"<alt>Right", "Go forward in history"},
+		{"<alt>Up", "Go to parent directory"},
+		{"<alt>Home", "Go home"},
+		{"F5 r <control>r", "Refresh"},
+		{}
+	}},
+	{}
+};
+
+static struct key_group help_keys_view[] = {
+	{"General", help_keys_general},
+	{"View", (struct key[]) {
+		{"F8", "Toggle toolbar"},
+		{}
+	}},
+	{"Navigation", (struct key[]) {
+		{"<control>l", "Open location..."},
+		{"<control>n", "Open a new window"},
+		{"Left Up Page_Up", "Previous image"},
+		{"Right Down Page_Down", "Next image"},
+		{"Return <alt>Left", "Return to browser"},
+		{}
+	}},
+	{"Zoom", (struct key[]) {
+		{"<control>0", "Set zoom to 100%"},
+		{"1...9", "Set zoom to N:1"},
+		{"plus <control>plus", "Zoom in"},
+		{"minus <control>minus", "Zoom out"},
+		{"w", "Zoom to fit width if larger"},
+		{"h", "Zoom to fit height if larger"},
+		{}
+	}},
+	{"Orientation", (struct key[]) {
+		{"less", "Rotate anticlockwise"},
+		{"equal", "Mirror"},
+		{"greater", "Rotate clockwise"},
+		{}
+	}},
+	{"Configuration", (struct key[]) {
+		{"x", "Toggle scale to fit if larger"},
+		{"i", "Toggle smooth scaling"},
+		{"t", "Toggle transparency highlighting"},
+		{}
+	}},
+	{"Control", (struct key[]) {
+		{"bracketleft", "Previous page"},
+		{"bracketright", "Next page"},
+		{"braceleft", "Previous frame"},
+		{"braceright", "Next frame"},
+		{"space", "Toggle playback"},
+		{}
+	}},
+	{"Tools", (struct key[]) {
+		{"<control>p", "Print..."},
+		{"<control>s", "Save page as..."},
+		{"<control><shift>s", "Save frame as..."},
+		{}
+	}},
+	{}
+};
+
 static struct key_section help_keys[] = {
-	{"Browser", "browser", (struct key_group[]) {
-		{"General", help_keys_general},
-		{"View", (struct key[]) {
-			{"F9", "Toggle navigation sidebar"},
-			{}
-		}},
-		{"Navigation", (struct key[]) {
-			{"<control>l", "Open location..."},
-			{"<control>n", "Open a new window"},
-			{"<alt>Left", "Go back in history"},
-			{"<alt>Right", "Go forward in history"},
-			{"<alt>Up", "Go to parent directory"},
-			{"<alt>Home", "Go home"},
-			{"F5 r <control>r", "Refresh"},
-			{}
-		}},
-		{}
-	}},
-	{"View", "view", (struct key_group[]) {
-		{"General", help_keys_general},
-		{"View", (struct key[]) {
-			{"F8", "Toggle toolbar"},
-			{}
-		}},
-		{"Navigation", (struct key[]) {
-			{"<control>l", "Open location..."},
-			{"<control>n", "Open a new window"},
-			{"Left Up Page_Up", "Previous image"},
-			{"Right Down Page_Down", "Next image"},
-			{"Return <alt>Left", "Return to browser"},
-			{}
-		}},
-		{"Zoom", (struct key[]) {
-			{"<control>0", "Set zoom to 100%"},
-			{"1...9", "Set zoom to N:1"},
-			{"plus <control>plus", "Zoom in"},
-			{"minus <control>minus", "Zoom out"},
-			{"w", "Zoom to fit width if larger"},
-			{"h", "Zoom to fit height if larger"},
-			{}
-		}},
-		{"Orientation", (struct key[]) {
-			{"less", "Rotate anticlockwise"},
-			{"equal", "Mirror"},
-			{"greater", "Rotate clockwise"},
-			{}
-		}},
-		{"Configuration", (struct key[]) {
-			{"x", "Toggle scale to fit if larger"},
-			{"i", "Toggle smooth scaling"},
-			{"t", "Toggle transparency highlighting"},
-			{}
-		}},
-		{"Control", (struct key[]) {
-			{"bracketleft", "Previous page"},
-			{"bracketright", "Next page"},
-			{"braceleft", "Previous frame"},
-			{"braceright", "Next frame"},
-			{"space", "Toggle playback"},
-			{}
-		}},
-		{"Tools", (struct key[]) {
-			{"<control>p", "Print..."},
-			{"<control>s", "Save page as..."},
-			{"<control><shift>s", "Save frame as..."},
-			{}
-		}},
-		{}
-	}},
+	{"Browser", "browser", help_keys_browser},
+	{"View", "view", help_keys_view},
 	{}
 };
 
@@ -1119,6 +1123,43 @@ make_view_toolbar(void)
 	return view_toolbar;
 }
 
+// This is incredibly broken https://stackoverflow.com/a/51054396/76313
+// thus resolving the problem using overlaps.
+// We're trying to be universal for light and dark themes both. It's hard.
+static const char stylesheet[] = "@define-color fiv-tile @content_view_bg; \
+	fiv-view, fiv-browser { background: @content_view_bg; } \
+	placessidebar.fiv .toolbar { padding: 2px 6px; } \
+	placessidebar.fiv box > separator { margin: 4px 0; } \
+	#toolbar button { padding-left: 0; padding-right: 0; } \
+	#toolbar > button:first-child { padding-left: 4px; } \
+	#toolbar > button:last-child { padding-right: 4px; } \
+	#toolbar separator { \
+		background: mix(@insensitive_fg_color, \
+			@insensitive_bg_color, 0.4); margin: 6px 10px; \
+	} \
+	fiv-browser { padding: 5px; } \
+	fiv-browser.item { \
+		color: mix(#000, @content_view_bg, 0.625); margin: 8px; \
+		border: 2px solid #fff; \
+	} \
+	fiv-browser.item, fiv-view.checkerboard { \
+		background: @theme_bg_color; background-image: \
+			linear-gradient(45deg, @fiv-tile 26%, transparent 26%), \
+			linear-gradient(-45deg, @fiv-tile 26%, transparent 26%), \
+			linear-gradient(45deg, transparent 74%, @fiv-tile 74%), \
+			linear-gradient(-45deg, transparent 74%, @fiv-tile 74%); \
+		background-size: 40px 40px; \
+		background-position: 0 0, 0 20px, 20px -20px, -20px 0px; \
+	} \
+	fiv-browser.item:backdrop { \
+		color: mix(#000, @content_view_bg, 0.875); \
+		border-color: mix(#fff, @content_view_bg, 0.5); \
+	} \
+	fiv-browser.item.symbolic { \
+		border-color: transparent; color: shade(@theme_bg_color, 0.875); \
+		background: @theme_bg_color; background-image: none; \
+	}";
+
 int
 main(int argc, char *argv[])
 {
@@ -1165,45 +1206,9 @@ main(int argc, char *argv[])
 	gtk_icon_theme_add_resource_path(
 		gtk_icon_theme_get_default(), "/org/gnome/design/IconLibrary/");
 
-	// This is incredibly broken https://stackoverflow.com/a/51054396/76313
-	// thus resolving the problem using overlaps.
-	// We're trying to be universal for light and dark themes both. It's hard.
-	const char *style = "@define-color fiv-tile @content_view_bg; \
-		fiv-view, fiv-browser { background: @content_view_bg; } \
-		placessidebar.fiv .toolbar { padding: 2px 6px; } \
-		placessidebar.fiv box > separator { margin: 4px 0; } \
-		#toolbar button { padding-left: 0; padding-right: 0; } \
-		#toolbar > button:first-child { padding-left: 4px; } \
-		#toolbar > button:last-child { padding-right: 4px; } \
-		#toolbar separator { \
-			background: mix(@insensitive_fg_color, \
-				@insensitive_bg_color, 0.4); margin: 6px 10px; \
-		} \
-		fiv-browser { padding: 5px; } \
-		fiv-browser.item { \
-			color: mix(#000, @content_view_bg, 0.625); margin: 8px; \
-			border: 2px solid #fff; \
-		} \
-		fiv-browser.item, fiv-view.checkerboard { \
-			background: @theme_bg_color; background-image: \
-				linear-gradient(45deg, @fiv-tile 26%, transparent 26%), \
-				linear-gradient(-45deg, @fiv-tile 26%, transparent 26%), \
-				linear-gradient(45deg, transparent 74%, @fiv-tile 74%), \
-				linear-gradient(-45deg, transparent 74%, @fiv-tile 74%); \
-			background-size: 40px 40px; \
-			background-position: 0 0, 0 20px, 20px -20px, -20px 0px; \
-		} \
-		fiv-browser.item:backdrop { \
-			color: mix(#000, @content_view_bg, 0.875); \
-			border-color: mix(#fff, @content_view_bg, 0.5); \
-		} \
-		fiv-browser.item.symbolic { \
-			border-color: transparent; color: shade(@theme_bg_color, 0.875); \
-			background: @theme_bg_color; background-image: none; \
-		}";
-
 	GtkCssProvider *provider = gtk_css_provider_new();
-	gtk_css_provider_load_from_data(provider, style, strlen(style), NULL);
+	gtk_css_provider_load_from_data(
+		provider, stylesheet, sizeof stylesheet - 1, NULL);
 	gtk_style_context_add_provider_for_screen(gdk_screen_get_default(),
 		GTK_STYLE_PROVIDER(provider), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
 	g_object_unref(provider);
@@ -1238,10 +1243,8 @@ main(int argc, char *argv[])
 	gtk_container_set_focus_hadjustment(GTK_CONTAINER(browser_port), NULL);
 	gtk_container_set_focus_vadjustment(GTK_CONTAINER(browser_port), NULL);
 
-	// TODO(p): As with GtkFileChooserWidget, bind:
-	//  - C-h to filtering,
-	//  - M-Up to going a level above,
-	//  - mayhaps forward the rest to the sidebar, somehow.
+	// TODO(p): As with GtkFileChooserWidget, bind C-h to filtering,
+	// and mayhaps forward the rest to the sidebar, somehow.
 	g.browser_sidebar = g_object_new(FIV_TYPE_SIDEBAR, NULL);
 	g_signal_connect(g.browser_sidebar, "open-location",
 		G_CALLBACK(on_open_location), NULL);
