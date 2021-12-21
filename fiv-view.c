@@ -33,6 +33,7 @@
 
 struct _FivView {
 	GtkWidget parent_instance;
+	gchar *path;                        ///< Path to the current image (if any)
 	cairo_surface_t *image;             ///< The loaded image (sequence)
 	cairo_surface_t *page;              ///< Current page within image, weak
 	cairo_surface_t *frame;             ///< Current frame within page, weak
@@ -105,6 +106,7 @@ fiv_view_finalize(GObject *gobject)
 {
 	FivView *self = FIV_VIEW(gobject);
 	cairo_surface_destroy(self->image);
+	g_free(self->path);
 
 	G_OBJECT_CLASS(fiv_view_parent_class)->finalize(gobject);
 }
@@ -668,7 +670,7 @@ on_draw_page(G_GNUC_UNUSED GtkPrintOperation *operation,
 	cairo_paint(cr);
 }
 
-static gboolean
+static void
 print(FivView *self)
 {
 	GtkPrintOperation *print = gtk_print_operation_new();
@@ -695,7 +697,6 @@ print(FivView *self)
 		show_error_dialog(window, error);
 
 	g_object_unref(print);
-	return TRUE;
 }
 
 static gboolean
@@ -718,21 +719,32 @@ save_as(FivView *self, gboolean frame)
 	GtkFileFilter *webp_filter = gtk_file_filter_new();
 	gtk_file_filter_add_mime_type(webp_filter, "image/webp");
 	gtk_file_filter_add_pattern(webp_filter, "*.webp");
-	gtk_file_filter_set_name(webp_filter, "Lossless WebP");
+	gtk_file_filter_set_name(webp_filter, "Lossless WebP (*.webp)");
 	gtk_file_chooser_add_filter(chooser, webp_filter);
 
-	// TODO(p): Derive it from the currently displayed filename,
-	// and set the directory to the same place.
-	gtk_file_chooser_set_current_name(
-		chooser, frame ? "frame.webp" : "page.webp");
+	// Note that GTK+'s save dialog is too stupid to automatically change
+	// the extension when user changes the filter. Presumably,
+	// gtk_file_chooser_set_extra_widget() can be used to circumvent this.
+	gchar *basename = g_filename_display_basename(self->path);
+	gchar *name =
+		g_strdup_printf(frame ? "%s.frame.webp" : "%s.webp", basename);
+	g_free(basename);
+	gtk_file_chooser_set_current_name(chooser, name);
+	g_free(name);
 #endif  // HAVE_LIBWEBP
+
+	gtk_file_chooser_set_do_overwrite_confirmation(chooser, TRUE);
+
+	gchar *dirname = g_path_get_dirname(self->path);
+	gtk_file_chooser_set_current_folder(chooser, dirname);
+	g_free(dirname);
 
 	// The format is supported by Exiv2 and ExifTool.
 	// This is mostly a developer tool.
 	GtkFileFilter *exv_filter = gtk_file_filter_new();
 	gtk_file_filter_add_mime_type(exv_filter, "image/x-exv");
 	gtk_file_filter_add_pattern(exv_filter, "*.exv");
-	gtk_file_filter_set_name(exv_filter, "Exiv2 metadata");
+	gtk_file_filter_set_name(exv_filter, "Exiv2 metadata (*.exv)");
 	gtk_file_chooser_add_filter(chooser, exv_filter);
 
 	switch (gtk_dialog_run(GTK_DIALOG(dialog))) {
@@ -910,7 +922,7 @@ fiv_view_init(FivView *self)
 	self->scale = 1.0;
 }
 
-// --- Picture loading ---------------------------------------------------------
+// --- Public interface --------------------------------------------------------
 
 // TODO(p): Progressive picture loading, or at least async/cancellable.
 gboolean
@@ -926,6 +938,9 @@ fiv_view_open(FivView *self, const gchar *path, GError **error)
 	self->image = surface;
 	switch_page(self, self->image);
 	set_scale_to_fit(self, true);
+
+	g_free(self->path);
+	self->path = g_strdup(path);
 
 	g_object_notify_by_pspec(G_OBJECT(self), view_properties[PROP_HAS_IMAGE]);
 	return TRUE;
