@@ -94,6 +94,7 @@ static struct key_section help_keys[] = {
 			{"<alt>Left", "Go back in history"},
 			{"<alt>Right", "Go forward in history"},
 			{"<alt>Up", "Go to parent directory"},
+			{"<alt>Home", "Go home"},
 			{"F5 r <control>r", "Refresh"},
 			{}
 		}},
@@ -771,6 +772,9 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 				load_directory(parent);
 				g_free(parent);
 			}
+			return TRUE;
+		case GDK_KEY_Home:
+			load_directory(g_get_home_dir());
 			return TRUE;
 		}
 		break;
