@@ -786,17 +786,38 @@ save_as(FivView *self, gboolean frame)
 	}
 }
 
-enum { INFO_KEY, INFO_VALUE, INFO_WEIGHT, INFO_COUNT };
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-static GtkTreeModel *
-info_model(char *tsv)
+static GtkWidget *
+info_start_group(GtkWidget *vbox, const char *group)
 {
-	GtkTreeStore *store = gtk_tree_store_new(
-		INFO_COUNT, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_INT, G_TYPE_BOOLEAN);
-	GtkTreeIter category = {}, entry = {};
-	const char *last_group = NULL;
+	GtkWidget *label = gtk_label_new(group);
+	gtk_widget_set_hexpand(label, TRUE);
+	gtk_widget_set_halign(label, GTK_ALIGN_FILL);
+	PangoAttrList *attrs = pango_attr_list_new();
+	pango_attr_list_insert(attrs, pango_attr_weight_new(PANGO_WEIGHT_BOLD));
+	gtk_label_set_attributes(GTK_LABEL(label), attrs);
+	pango_attr_list_unref(attrs);
 
-	int line = 1;
+	GtkWidget *grid = gtk_grid_new();
+	GtkWidget *expander = gtk_expander_new(NULL);
+	gtk_expander_set_label_widget(GTK_EXPANDER(expander), label);
+	gtk_expander_set_expanded(GTK_EXPANDER(expander), TRUE);
+	gtk_container_add(GTK_CONTAINER(expander), grid);
+	gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
+	gtk_box_pack_start(GTK_BOX(vbox), expander, FALSE, FALSE, 0);
+	return grid;
+}
+
+static GtkWidget *
+info_parse(char *tsv)
+{
+	GtkSizeGroup *sg = gtk_size_group_new(GTK_SIZE_GROUP_HORIZONTAL);
+	GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+
+	const char *last_group = NULL;
+	GtkWidget *grid = NULL;
+	int line = 1, row = 0;
 	for (char *nl; (nl = strchr(tsv, '\n')); line++, tsv = ++nl) {
 		*nl = 0;
 		if (nl > tsv && nl[-1] == '\r')
@@ -821,18 +842,26 @@ info_model(char *tsv)
 
 		*value++ = 0;
 		if (!last_group || strcmp(last_group, group)) {
-			last_group = group;
-
-			gtk_tree_store_append(store, &category, NULL);
-			gtk_tree_store_set(store, &category, INFO_KEY, group,
-				INFO_WEIGHT, PANGO_WEIGHT_BOLD, -1);
+			grid = info_start_group(vbox, (last_group = group));
+			row = 0;
 		}
 
-		gtk_tree_store_append(store, &entry, &category);
-		gtk_tree_store_set(store, &entry, INFO_KEY, tag, INFO_VALUE, value,
-			INFO_WEIGHT, PANGO_WEIGHT_NORMAL, -1);
+		GtkWidget *a = gtk_label_new(tag);
+		gtk_size_group_add_widget(sg, a);
+		gtk_label_set_selectable(GTK_LABEL(a), TRUE);
+		gtk_label_set_xalign(GTK_LABEL(a), 0.);
+		gtk_grid_attach(GTK_GRID(grid), a, 0, row, 1, 1);
+
+		GtkWidget *b = gtk_label_new(value);
+		gtk_label_set_selectable(GTK_LABEL(b), TRUE);
+		gtk_label_set_xalign(GTK_LABEL(b), 0.);
+		gtk_label_set_line_wrap(GTK_LABEL(b), TRUE);
+		gtk_widget_set_hexpand(b, TRUE);
+		gtk_grid_attach(GTK_GRID(grid), b, 1, row, 1, 1);
+		row++;
 	}
-	return GTK_TREE_MODEL(store);
+	g_object_unref(sg);
+	return vbox;
 }
 
 static void
@@ -878,32 +907,19 @@ info(FivView *self)
 		gtk_container_add(GTK_CONTAINER(content_area), info);
 	}
 
-	// TODO(p): Replace this disaster with:
-	// GtkBox -> GtkExpander, GtkBox/GtkGrid -> GtkLabel, GtkSizeGroup.
-	// We'll lose search, but the user will be able to copy text out.
-	GtkWidget *view = gtk_tree_view_new();
-	gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(view), -1,
-		"Field", gtk_cell_renderer_text_new(), "text", INFO_KEY,
-		"weight", INFO_WEIGHT, NULL);
-	gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(view), -1,
-		"Value", gtk_cell_renderer_text_new(), "text", INFO_VALUE, NULL);
-
-	GtkTreeModel *model = info_model(out);
-	gtk_tree_view_set_model(GTK_TREE_VIEW(view), model);
-	gtk_tree_view_expand_all(GTK_TREE_VIEW(view));
-	g_object_unref(model);
-
-	// GtkTreeView doesn't have a useful natural height.
 	GtkWidget *scroller = gtk_scrolled_window_new(NULL, NULL);
-	gtk_scrolled_window_set_max_content_width(
-		GTK_SCROLLED_WINDOW(scroller), 800);
-	gtk_scrolled_window_set_propagate_natural_width(
-		GTK_SCROLLED_WINDOW(scroller), TRUE);
-	gtk_window_set_default_size(GTK_WINDOW(dialog), -1, 800);
+	GtkScrolledWindow *sw = GTK_SCROLLED_WINDOW(scroller);
+	gtk_scrolled_window_set_max_content_width(sw, 600);
+	gtk_scrolled_window_set_max_content_height(sw, 800);
+	gtk_scrolled_window_set_propagate_natural_width(sw, TRUE);
+	gtk_scrolled_window_set_propagate_natural_height(sw, TRUE);
 
-	gtk_widget_set_hexpand(view, TRUE);
-	gtk_widget_set_vexpand(view, TRUE);
-	gtk_container_add(GTK_CONTAINER(scroller), view);
+	GtkWidget *info = info_parse(out);
+	gtk_widget_set_hexpand(info, TRUE);
+	gtk_widget_set_vexpand(info, TRUE);
+	gtk_style_context_add_class(
+		gtk_widget_get_style_context(GTK_WIDGET(info)), "fiv-information");
+	gtk_container_add(GTK_CONTAINER(scroller), info);
 	gtk_container_add(GTK_CONTAINER(content_area), scroller);
 
 	g_free(out);

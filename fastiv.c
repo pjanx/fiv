@@ -1160,7 +1160,8 @@ static const char stylesheet[] = "@define-color fiv-tile @content_view_bg; \
 	fiv-browser.item.symbolic { \
 		border-color: transparent; color: shade(@theme_bg_color, 0.875); \
 		background: @theme_bg_color; background-image: none; \
-	}";
+	} \
+	.fiv-information label { padding: 0 4px; }";
 
 int
 main(int argc, char *argv[])
