@@ -1110,7 +1110,7 @@ fiv_view_init(FivView *self)
 gboolean
 fiv_view_open(FivView *self, const gchar *path, GError **error)
 {
-	cairo_surface_t *surface = fiv_io_open(path, self->enhance, error);
+	cairo_surface_t *surface = fiv_io_open(path, FALSE, error);
 	if (!surface)
 		return FALSE;
 	if (self->image)
