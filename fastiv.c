@@ -231,6 +231,7 @@ make_key_window(void)
 	/* Or perhaps "blur-symbolic", also in the extended set. */ \
 	XX(SMOOTH,        T("blend-tool-symbolic", "Smooth scaling")) \
 	XX(CHECKERBOARD,  T("checkerboard-symbolic", "Highlight transparency")) \
+	XX(ENHANCE,       T("heal-symbolic", "Enhance low-quality JPEG")) \
 	/* XX(COLOR,      B("preferences-color-symbolic", "Color management")) */ \
 	XX(SAVE,          B("document-save-as-symbolic", "Save as...")) \
 	XX(PRINT,         B("document-print-symbolic", "Print...")) \
@@ -1091,6 +1092,7 @@ make_view_toolbar(void)
 	toolbar_toggler(TOOLBAR_FIT,           "scale-to-fit");
 	toolbar_toggler(TOOLBAR_SMOOTH,        "filter");
 	toolbar_toggler(TOOLBAR_CHECKERBOARD,  "checkerboard");
+	toolbar_toggler(TOOLBAR_ENHANCE,       "enhance");
 	toolbar_command(TOOLBAR_PRINT,         FIV_VIEW_COMMAND_PRINT);
 	toolbar_command(TOOLBAR_SAVE,          FIV_VIEW_COMMAND_SAVE_PAGE);
 	toolbar_command(TOOLBAR_INFO,          FIV_VIEW_COMMAND_INFO);
@@ -1109,12 +1111,19 @@ make_view_toolbar(void)
 		G_CALLBACK(on_notify_view_boolean), g.toolbar[TOOLBAR_SMOOTH]);
 	g_signal_connect(g.view, "notify::checkerboard",
 		G_CALLBACK(on_notify_view_boolean), g.toolbar[TOOLBAR_CHECKERBOARD]);
+	g_signal_connect(g.view, "notify::enhance",
+		G_CALLBACK(on_notify_view_boolean), g.toolbar[TOOLBAR_ENHANCE]);
 
 	g_object_notify(G_OBJECT(g.view), "scale");
 	g_object_notify(G_OBJECT(g.view), "playing");
 	g_object_notify(G_OBJECT(g.view), "scale-to-fit");
 	g_object_notify(G_OBJECT(g.view), "filter");
 	g_object_notify(G_OBJECT(g.view), "checkerboard");
+	g_object_notify(G_OBJECT(g.view), "enhance");
+
+#ifndef HAVE_JPEG_QS
+	gtk_widget_set_no_show_all(g.toolbar[TOOLBAR_ENHANCE], TRUE);
+#endif
 
 	GCallback callback = G_CALLBACK(on_view_actions_changed);
 	g_signal_connect(g.view, "notify::has-image", callback, NULL);

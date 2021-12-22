@@ -1,3 +1,5 @@
+option('jpeg-qs', type : 'feature', value : 'enabled',
+	description : 'Build with JPEG Quant Smooth integration')
 option('libraw', type : 'feature', value : 'auto',
 	description : 'Build with raw photo support, requires LibRaw')
 option('librsvg', type : 'feature', value : 'auto',

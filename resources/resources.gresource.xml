@@ -5,5 +5,6 @@
 		<file preprocess="xml-stripblanks">funnel-symbolic.svg</file>
 		<file preprocess="xml-stripblanks">blend-tool-symbolic.svg</file>
 		<file preprocess="xml-stripblanks">checkerboard-symbolic.svg</file>
+		<file preprocess="xml-stripblanks">heal-symbolic.svg</file>
 	</gresource>
 </gresources>

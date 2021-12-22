@@ -55,9 +55,10 @@ extern cairo_user_data_key_t fiv_io_key_page_next;
 /// There is no wrap-around. This is a weak pointer.
 extern cairo_user_data_key_t fiv_io_key_page_previous;
 
-cairo_surface_t *fiv_io_open(const gchar *path, GError **error);
-cairo_surface_t *fiv_io_open_from_data(
-	const char *data, size_t len, const gchar *path, GError **error);
+cairo_surface_t *fiv_io_open(
+	const gchar *path, gboolean enhance, GError **error);
+cairo_surface_t *fiv_io_open_from_data(const char *data, size_t len,
+	const gchar *path, gboolean enhance, GError **error);
 
 int fiv_io_filecmp(GFile *f1, GFile *f2);
 

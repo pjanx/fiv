@@ -28,6 +28,7 @@ gdkpixbuf = dependency('gdk-pixbuf-2.0', required : get_option('gdk-pixbuf'))
 dependencies = [
 	dependency('gtk+-3.0'),
 	dependency('libturbojpeg'),
+	dependency('libjpeg', required : get_option('jpeg-qs')),
 	dependency('spng', version : '>=0.7.0',
 		default_options: 'default_library=static'),
 	dependency('pixman-1'),
@@ -47,6 +48,8 @@ dependencies = [
 conf = configuration_data()
 conf.set_quoted('PROJECT_NAME', meson.project_name())
 conf.set_quoted('PROJECT_VERSION', meson.project_version())
+# TODO(p): Wrap it in a Meson subproject, try to enable SIMD.
+conf.set('HAVE_JPEG_QS', get_option('jpeg-qs').enabled())
 conf.set('HAVE_LIBRAW', libraw.found())
 conf.set('HAVE_LIBRSVG', librsvg.found())
 conf.set('HAVE_XCURSOR', xcursor.found())

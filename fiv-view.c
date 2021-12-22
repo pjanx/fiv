@@ -40,8 +40,11 @@ struct _FivView {
 	FivIoOrientation orientation;       ///< Current page orientation
 	bool filter;                        ///< Smooth scaling toggle
 	bool checkerboard;                  ///< Show checkerboard background
+	bool enhance;                       ///< Try to enhance picture data
 	bool scale_to_fit;                  ///< Image no larger than the allocation
 	double scale;                       ///< Scaling factor
+
+	cairo_surface_t *enhance_swap;      ///< Quick swap in/out
 
 	int remaining_loops;                ///< Greater than zero if limited
 	gint64 frame_time;                  ///< Current frame's start, µs precision
@@ -95,6 +98,7 @@ enum {
 	PROP_SCALE_TO_FIT,
 	PROP_FILTER,
 	PROP_CHECKERBOARD,
+	PROP_ENHANCE,
 	PROP_PLAYING,
 	PROP_HAS_IMAGE,
 	PROP_CAN_ANIMATE,
@@ -110,6 +114,7 @@ fiv_view_finalize(GObject *gobject)
 {
 	FivView *self = FIV_VIEW(gobject);
 	cairo_surface_destroy(self->image);
+	g_clear_pointer(&self->enhance_swap, cairo_surface_destroy);
 	g_free(self->path);
 
 	G_OBJECT_CLASS(fiv_view_parent_class)->finalize(gobject);
@@ -132,6 +137,9 @@ fiv_view_get_property(
 		break;
 	case PROP_CHECKERBOARD:
 		g_value_set_boolean(value, self->checkerboard);
+		break;
+	case PROP_ENHANCE:
+		g_value_set_boolean(value, self->enhance);
 		break;
 	case PROP_PLAYING:
 		g_value_set_boolean(value, !!self->frame_update_connection);
@@ -172,6 +180,10 @@ fiv_view_set_property(
 	case PROP_CHECKERBOARD:
 		if (self->checkerboard != g_value_get_boolean(value))
 			fiv_view_command(self, FIV_VIEW_COMMAND_TOGGLE_CHECKERBOARD);
+		break;
+	case PROP_ENHANCE:
+		if (self->enhance != g_value_get_boolean(value))
+			fiv_view_command(self, FIV_VIEW_COMMAND_TOGGLE_ENHANCE);
 		break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
@@ -1044,6 +1056,9 @@ fiv_view_class_init(FivViewClass *klass)
 	view_properties[PROP_CHECKERBOARD] = g_param_spec_boolean(
 		"checkerboard", "Show checkerboard", "Highlight transparent background",
 		TRUE, G_PARAM_READWRITE);
+	view_properties[PROP_ENHANCE] = g_param_spec_boolean(
+		"enhance", "Enhance JPEG", "Enhance low-quality JPEG",
+		TRUE, G_PARAM_READWRITE);
 	view_properties[PROP_PLAYING] = g_param_spec_boolean(
 		"playing", "Playing animation", "An animation is running",
 		FALSE, G_PARAM_READABLE);
@@ -1095,11 +1110,19 @@ fiv_view_init(FivView *self)
 gboolean
 fiv_view_open(FivView *self, const gchar *path, GError **error)
 {
-	cairo_surface_t *surface = fiv_io_open(path, error);
+	cairo_surface_t *surface = fiv_io_open(path, self->enhance, error);
 	if (!surface)
 		return FALSE;
 	if (self->image)
 		cairo_surface_destroy(self->image);
+
+	// This is extremely expensive, and only works sometimes.
+	g_clear_pointer(&self->enhance_swap, cairo_surface_destroy);
+	if (self->enhance) {
+		self->enhance = FALSE;
+		g_object_notify_by_pspec(
+			G_OBJECT(self), view_properties[PROP_ENHANCE]);
+	}
 
 	self->frame = self->page = NULL;
 	self->image = surface;
@@ -1132,6 +1155,21 @@ frame_step(FivView *self, int step)
 	if (!step || !(self->frame = cairo_surface_get_user_data(self->frame, key)))
 		self->frame = self->page;
 	gtk_widget_queue_draw(GTK_WIDGET(self));
+}
+
+static void
+swap_enhanced_image(FivView *self)
+{
+	GError *error = NULL;
+	cairo_surface_t *surface = self->enhance_swap;
+	if (!surface)
+		surface = fiv_io_open(self->path, self->enhance, &error);
+	if (!surface) {
+		show_error_dialog(get_toplevel(GTK_WIDGET(self)), error);
+	} else {
+		self->enhance_swap = self->image;
+		switch_page(self, (self->image = surface));
+	}
 }
 
 void
@@ -1187,6 +1225,12 @@ fiv_view_command(FivView *self, FivViewCommand command)
 		g_object_notify_by_pspec(
 			G_OBJECT(self), view_properties[PROP_CHECKERBOARD]);
 		gtk_widget_queue_draw(widget);
+	break; case FIV_VIEW_COMMAND_TOGGLE_ENHANCE:
+		self->enhance = !self->enhance;
+		g_object_notify_by_pspec(
+			G_OBJECT(self), view_properties[PROP_ENHANCE]);
+		swap_enhanced_image(self);
+
 	break; case FIV_VIEW_COMMAND_PRINT:
 		print(self);
 	break; case FIV_VIEW_COMMAND_SAVE_PAGE:

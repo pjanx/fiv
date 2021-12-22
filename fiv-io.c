@@ -24,6 +24,16 @@
 
 #include <spng.h>
 #include <turbojpeg.h>
+
+#ifdef HAVE_JPEG_QS
+#include <jpeglib.h>
+#include <setjmp.h>
+// This library is tricky to build, simply make it work at all.
+#define NO_SIMD
+#include <jpeg-quantsmooth/quantsmooth.h>
+#undef NO_SIMD
+#endif  // HAVE_JPEG_QS
+
 #ifdef HAVE_LIBRAW
 #include <libraw.h>
 #endif  // HAVE_LIBRAW
@@ -159,7 +169,7 @@ try_append_page(cairo_surface_t *surface, cairo_surface_t **result,
 	return true;
 }
 
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+// --- Wuffs -------------------------------------------------------------------
 
 // From libwebp, verified to exactly match [x * a / 255].
 #define PREMULTIPLY8(a, x) (((uint32_t) (x) * (uint32_t) (a) * 32897U) >> 23)
@@ -614,6 +624,8 @@ open_wuffs_using(wuffs_base__image_decoder *(*allocate)(),
 	return surface;
 }
 
+// --- JPEG --------------------------------------------------------------------
+
 static void
 trivial_cmyk_to_host_byte_order_argb(unsigned char *p, int len)
 {
@@ -747,10 +759,10 @@ open_libjpeg_turbo(const gchar *data, gsize len, GError **error)
 
 	int pixel_format = (colorspace == TJCS_CMYK || colorspace == TJCS_YCCK)
 		? TJPF_CMYK
-		: (G_BYTE_ORDER == G_LITTLE_ENDIAN ? TJPF_BGRA : TJPF_ARGB);
+		: (G_BYTE_ORDER == G_LITTLE_ENDIAN ? TJPF_BGRX : TJPF_XRGB);
 
 	cairo_surface_t *surface =
-		cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
+		cairo_image_surface_create(CAIRO_FORMAT_RGB24, width, height);
 	cairo_status_t surface_status = cairo_surface_status(surface);
 	if (surface_status != CAIRO_STATUS_SUCCESS) {
 		set_error(error, cairo_status_to_string(surface_status));
@@ -790,6 +802,97 @@ open_libjpeg_turbo(const gchar *data, gsize len, GError **error)
 	parse_jpeg_metadata(surface, data, len);
 	return surface;
 }
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+#ifdef HAVE_JPEG_QS
+
+struct libjpeg_error_mgr {
+	struct jpeg_error_mgr pub;
+	jmp_buf buf;
+	GError **error;
+};
+
+static void
+libjpeg_error_exit(j_common_ptr cinfo)
+{
+	struct libjpeg_error_mgr *err = (struct libjpeg_error_mgr *) cinfo->err;
+	char buf[JMSG_LENGTH_MAX] = "";
+	(*cinfo->err->format_message)(cinfo, buf);
+	set_error(err->error, buf);
+	longjmp(err->buf, 1);
+}
+
+static cairo_surface_t *
+open_libjpeg_enhanced(const gchar *data, gsize len, GError **error)
+{
+	cairo_surface_t *volatile surface = NULL;
+
+	struct libjpeg_error_mgr jerr = {.error = error};
+	struct jpeg_decompress_struct cinfo = {.err = jpeg_std_error(&jerr.pub)};
+	jerr.pub.error_exit = libjpeg_error_exit;
+	if (setjmp(jerr.buf)) {
+		g_clear_pointer(&surface, cairo_surface_destroy);
+		jpeg_destroy_decompress(&cinfo);
+		return NULL;
+	}
+
+	jpeg_create_decompress(&cinfo);
+	jpeg_mem_src(&cinfo, (const unsigned char *) data, len);
+	(void) jpeg_read_header(&cinfo, true);
+	if (cinfo.jpeg_color_space == JCS_CMYK ||
+		cinfo.jpeg_color_space == JCS_YCCK)
+		cinfo.out_color_space = JCS_CMYK;
+	else if (G_BYTE_ORDER == G_BIG_ENDIAN)
+		cinfo.out_color_space = JCS_EXT_XRGB;
+	else
+		cinfo.out_color_space = JCS_EXT_BGRX;
+
+	jpeg_calc_output_dimensions(&cinfo);
+	int width = cinfo.output_width;
+	int height = cinfo.output_height;
+
+	surface = cairo_image_surface_create(CAIRO_FORMAT_RGB24, width, height);
+	cairo_status_t surface_status = cairo_surface_status(surface);
+	if (surface_status != CAIRO_STATUS_SUCCESS) {
+		set_error(error, cairo_status_to_string(surface_status));
+		longjmp(jerr.buf, 1);
+	}
+
+	unsigned char *surface_data = cairo_image_surface_get_data(surface);
+	int surface_stride = cairo_image_surface_get_stride(surface);
+	JSAMPARRAY lines = (*cinfo.mem->alloc_small)(
+		(j_common_ptr) &cinfo, JPOOL_IMAGE, sizeof *lines * height);
+	for (int i = 0; i < height; i++)
+		lines[i] = surface_data + i * surface_stride;
+
+	// Go for the maximum quality setting.
+	jpegqs_control_t opts = {
+		.flags = JPEGQS_DIAGONALS | JPEGQS_JOINT_YUV | JPEGQS_UPSAMPLE_UV,
+		.threads = g_get_num_processors(),
+		.niter = 3,
+	};
+
+	(void) jpegqs_start_decompress(&cinfo, &opts);
+	while (cinfo.output_scanline < cinfo.output_height)
+		(void) jpeg_read_scanlines(&cinfo, lines + cinfo.output_scanline,
+			cinfo.output_height - cinfo.output_scanline);
+	if (cinfo.out_color_space == JCS_CMYK)
+		trivial_cmyk_to_host_byte_order_argb(
+			surface_data, cinfo.output_width * cinfo.output_height);
+	cairo_surface_mark_dirty(surface);
+	(void) jpegqs_finish_decompress(&cinfo);
+
+	jpeg_destroy_decompress(&cinfo);
+	parse_jpeg_metadata(surface, data, len);
+	return surface;
+}
+
+#else
+#define open_libjpeg_enhanced open_libjpeg_turbo
+#endif
+
+// --- Optional dependencies ---------------------------------------------------
 
 #ifdef HAVE_LIBRAW  // ---------------------------------------------------------
 
@@ -1831,7 +1934,7 @@ cairo_user_data_key_t fiv_io_key_page_next;
 cairo_user_data_key_t fiv_io_key_page_previous;
 
 cairo_surface_t *
-fiv_io_open(const gchar *path, GError **error)
+fiv_io_open(const gchar *path, gboolean enhance, GError **error)
 {
 	// TODO(p): Don't always load everything into memory, test type first,
 	// so that we can reject non-pictures early.  Wuffs only needs the first
@@ -1852,14 +1955,15 @@ fiv_io_open(const gchar *path, GError **error)
 	if (!g_file_get_contents(path, &data, &len, error))
 		return NULL;
 
-	cairo_surface_t *surface = fiv_io_open_from_data(data, len, path, error);
+	cairo_surface_t *surface =
+		fiv_io_open_from_data(data, len, path, enhance, error);
 	free(data);
 	return surface;
 }
 
 cairo_surface_t *
-fiv_io_open_from_data(
-	const char *data, size_t len, const gchar *path, GError **error)
+fiv_io_open_from_data(const char *data, size_t len, const gchar *path,
+	gboolean enhance, GError **error)
 {
 	wuffs_base__slice_u8 prefix =
 		wuffs_base__make_slice_u8((uint8_t *) data, len);
@@ -1884,7 +1988,9 @@ fiv_io_open_from_data(
 			error);
 		break;
 	case WUFFS_BASE__FOURCC__JPEG:
-		surface = open_libjpeg_turbo(data, len, error);
+		surface = enhance
+			? open_libjpeg_enhanced(data, len, error)
+			: open_libjpeg_turbo(data, len, error);
 		break;
 	default:
 #ifdef HAVE_LIBRAW  // ---------------------------------------------------------
