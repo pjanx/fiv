@@ -17,6 +17,9 @@
 
 #include "config.h"
 
+#include "fiv-io.h"
+#include "fiv-view.h"
+
 #include <math.h>
 #include <stdbool.h>
 
@@ -28,9 +31,6 @@
 #include <gdk/gdkquartz.h>
 #endif  // GDK_WINDOWING_QUARTZ
 
-#include "fiv-io.h"
-#include "fiv-view.h"
-
 struct _FivView {
 	GtkWidget parent_instance;
 	gchar *path;                        ///< Path to the current image (if any)
@@ -38,13 +38,15 @@ struct _FivView {
 	cairo_surface_t *page;              ///< Current page within image, weak
 	cairo_surface_t *frame;             ///< Current frame within page, weak
 	FivIoOrientation orientation;       ///< Current page orientation
-	bool filter;                        ///< Smooth scaling toggle
-	bool checkerboard;                  ///< Show checkerboard background
-	bool enhance;                       ///< Try to enhance picture data
-	bool scale_to_fit;                  ///< Image no larger than the allocation
+	bool enable_cms : 1;                ///< Smooth scaling toggle
+	bool filter : 1;                    ///< Smooth scaling toggle
+	bool checkerboard : 1;              ///< Show checkerboard background
+	bool enhance : 1;                   ///< Try to enhance picture data
+	bool scale_to_fit : 1;              ///< Image no larger than the allocation
 	double scale;                       ///< Scaling factor
 
 	cairo_surface_t *enhance_swap;      ///< Quick swap in/out
+	FivIoProfile screen_cms_profile;    ///< Target colour profile for widget
 
 	int remaining_loops;                ///< Greater than zero if limited
 	gint64 frame_time;                  ///< Current frame's start, µs precision
@@ -96,6 +98,7 @@ static FivIoOrientation view_right[9] = {
 enum {
 	PROP_SCALE = 1,
 	PROP_SCALE_TO_FIT,
+	PROP_ENABLE_CMS,
 	PROP_FILTER,
 	PROP_CHECKERBOARD,
 	PROP_ENHANCE,
@@ -113,8 +116,9 @@ static void
 fiv_view_finalize(GObject *gobject)
 {
 	FivView *self = FIV_VIEW(gobject);
-	cairo_surface_destroy(self->image);
+	g_clear_pointer(&self->screen_cms_profile, fiv_io_profile_free);
 	g_clear_pointer(&self->enhance_swap, cairo_surface_destroy);
+	g_clear_pointer(&self->image, cairo_surface_destroy);
 	g_free(self->path);
 
 	G_OBJECT_CLASS(fiv_view_parent_class)->finalize(gobject);
@@ -131,6 +135,9 @@ fiv_view_get_property(
 		break;
 	case PROP_SCALE_TO_FIT:
 		g_value_set_boolean(value, self->scale_to_fit);
+		break;
+	case PROP_ENABLE_CMS:
+		g_value_set_boolean(value, self->enable_cms);
 		break;
 	case PROP_FILTER:
 		g_value_set_boolean(value, self->filter);
@@ -172,6 +179,10 @@ fiv_view_set_property(
 	case PROP_SCALE_TO_FIT:
 		if (self->scale_to_fit != g_value_get_boolean(value))
 			fiv_view_command(self, FIV_VIEW_COMMAND_TOGGLE_SCALE_TO_FIT);
+		break;
+	case PROP_ENABLE_CMS:
+		if (self->enable_cms != g_value_get_boolean(value))
+			fiv_view_command(self, FIV_VIEW_COMMAND_TOGGLE_CMS);
 		break;
 	case PROP_FILTER:
 		if (self->filter != g_value_get_boolean(value))
@@ -317,6 +328,46 @@ fiv_view_size_allocate(GtkWidget *widget, GtkAllocation *allocation)
 	g_object_notify_by_pspec(G_OBJECT(widget), view_properties[PROP_SCALE]);
 }
 
+// https://www.freedesktop.org/wiki/OpenIcc/ICC_Profiles_in_X_Specification_0.4
+// has disappeared, but you can use the wayback machine.
+//
+// Note that Wayland does not have any appropriate protocol, as of writing:
+// https://gitlab.freedesktop.org/wayland/wayland-protocols/-/merge_requests/14
+static void
+reload_screen_cms_profile(FivView *self, GdkWindow *window)
+{
+	g_clear_pointer(&self->screen_cms_profile, fiv_io_profile_free);
+
+	GdkDisplay *display = gdk_window_get_display(window);
+	GdkMonitor *monitor = gdk_display_get_monitor_at_window(display, window);
+
+	int num = -1;
+	for (int i = gdk_display_get_n_monitors(display); num < 0 && i--; )
+		if (gdk_display_get_monitor(display, i) == monitor)
+			num = i;
+	if (num < 0)
+		goto out;
+
+	char atom[32] = "";
+	g_snprintf(atom, sizeof atom, "_ICC_PROFILE%c%d", num ? '_' : '\0', num);
+
+	// Sadly, there is no nice GTK+/GDK mechanism to watch this for changes.
+	int format = 0, length = 0;
+	GdkAtom type = GDK_NONE;
+	guchar *data = NULL;
+	GdkWindow *root = gdk_screen_get_root_window(gdk_window_get_screen(window));
+	if (gdk_property_get(root, gdk_atom_intern(atom, FALSE), GDK_NONE, 0,
+			8 << 20 /* MiB */, FALSE, &type, &format, &length, &data)) {
+		if (format == 8 && length > 0)
+			self->screen_cms_profile = fiv_io_profile_new(data, length);
+		g_free(data);
+	}
+
+out:
+	if (!self->screen_cms_profile)
+		self->screen_cms_profile = fiv_io_profile_new_sRGB();
+}
+
 static void
 fiv_view_realize(GtkWidget *widget)
 {
@@ -363,6 +414,8 @@ fiv_view_realize(GtkWidget *widget)
 	gtk_widget_register_window(widget, window);
 	gtk_widget_set_window(widget, window);
 	gtk_widget_set_realized(widget, TRUE);
+
+	reload_screen_cms_profile(FIV_VIEW(widget), window);
 }
 
 static gboolean
@@ -1050,15 +1103,18 @@ fiv_view_class_init(FivViewClass *klass)
 	view_properties[PROP_SCALE_TO_FIT] = g_param_spec_boolean(
 		"scale-to-fit", "Scale to fit", "Scale images down to fit the window",
 		TRUE, G_PARAM_READWRITE);
+	view_properties[PROP_ENABLE_CMS] = g_param_spec_boolean(
+		"enable-cms", "Enable CMS", "Enable color management",
+		TRUE, G_PARAM_READWRITE);
 	view_properties[PROP_FILTER] = g_param_spec_boolean(
 		"filter", "Use filtering", "Scale images smoothly",
 		TRUE, G_PARAM_READWRITE);
 	view_properties[PROP_CHECKERBOARD] = g_param_spec_boolean(
 		"checkerboard", "Show checkerboard", "Highlight transparent background",
-		TRUE, G_PARAM_READWRITE);
+		FALSE, G_PARAM_READWRITE);
 	view_properties[PROP_ENHANCE] = g_param_spec_boolean(
 		"enhance", "Enhance JPEG", "Enhance low-quality JPEG",
-		TRUE, G_PARAM_READWRITE);
+		FALSE, G_PARAM_READWRITE);
 	view_properties[PROP_PLAYING] = g_param_spec_boolean(
 		"playing", "Playing animation", "An animation is running",
 		FALSE, G_PARAM_READABLE);
@@ -1099,6 +1155,7 @@ fiv_view_init(FivView *self)
 {
 	gtk_widget_set_can_focus(GTK_WIDGET(self), TRUE);
 
+	self->enable_cms = true;
 	self->filter = true;
 	self->checkerboard = false;
 	self->scale = 1.0;
@@ -1110,7 +1167,8 @@ fiv_view_init(FivView *self)
 gboolean
 fiv_view_open(FivView *self, const gchar *path, GError **error)
 {
-	cairo_surface_t *surface = fiv_io_open(path, FALSE, error);
+	cairo_surface_t *surface = fiv_io_open(
+		path, self->enable_cms ? self->screen_cms_profile : NULL, FALSE, error);
 	if (!surface)
 		return FALSE;
 	if (self->image)
@@ -1157,18 +1215,37 @@ frame_step(FivView *self, int step)
 	gtk_widget_queue_draw(GTK_WIDGET(self));
 }
 
+static gboolean
+reload(FivView *self)
+{
+	GError *error = NULL;
+	cairo_surface_t *surface = fiv_io_open(self->path,
+		self->enable_cms ? self->screen_cms_profile : NULL, self->enhance,
+		&error);
+	if (!surface) {
+		show_error_dialog(get_toplevel(GTK_WIDGET(self)), error);
+		return FALSE;
+	}
+
+	g_clear_pointer(&self->image, cairo_surface_destroy);
+	g_clear_pointer(&self->enhance_swap, cairo_surface_destroy);
+	switch_page(self, (self->image = surface));
+	return TRUE;
+}
+
 static void
 swap_enhanced_image(FivView *self)
 {
-	GError *error = NULL;
-	cairo_surface_t *surface = self->enhance_swap;
-	if (!surface)
-		surface = fiv_io_open(self->path, self->enhance, &error);
-	if (!surface) {
-		show_error_dialog(get_toplevel(GTK_WIDGET(self)), error);
+	cairo_surface_t *saved = self->image;
+	self->image = self->page = self->frame = NULL;
+
+	if (self->enhance_swap) {
+		switch_page(self, (self->image = self->enhance_swap));
+		self->enhance_swap = saved;
+	} else if (reload(self)) {
+		self->enhance_swap = saved;
 	} else {
-		self->enhance_swap = self->image;
-		switch_page(self, (self->image = surface));
+		switch_page(self, (self->image = saved));
 	}
 }
 
@@ -1215,6 +1292,11 @@ fiv_view_command(FivView *self, FivViewCommand command)
 			? stop_animating(self)
 			: start_animating(self);
 
+	break; case FIV_VIEW_COMMAND_TOGGLE_CMS:
+		self->enable_cms = !self->enable_cms;
+		g_object_notify_by_pspec(
+			G_OBJECT(self), view_properties[PROP_ENABLE_CMS]);
+		reload(self);
 	break; case FIV_VIEW_COMMAND_TOGGLE_FILTER:
 		self->filter = !self->filter;
 		g_object_notify_by_pspec(

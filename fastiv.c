@@ -229,18 +229,19 @@ make_key_window(void)
 	XX(S4,            gtk_separator_new(GTK_ORIENTATION_HORIZONTAL)) \
 	/* XX(PIN,        B("view-pin-symbolic", "Keep view configuration")) */ \
 	/* Or perhaps "blur-symbolic", also in the extended set. */ \
+	XX(COLOR,         T("preferences-color-symbolic", "Color management")) \
 	XX(SMOOTH,        T("blend-tool-symbolic", "Smooth scaling")) \
 	XX(CHECKERBOARD,  T("checkerboard-symbolic", "Highlight transparency")) \
 	XX(ENHANCE,       T("heal-symbolic", "Enhance low-quality JPEG")) \
-	/* XX(COLOR,      B("preferences-color-symbolic", "Color management")) */ \
+	XX(S5,            gtk_separator_new(GTK_ORIENTATION_HORIZONTAL)) \
 	XX(SAVE,          B("document-save-as-symbolic", "Save as...")) \
 	XX(PRINT,         B("document-print-symbolic", "Print...")) \
 	XX(INFO,          B("info-symbolic", "Information")) \
-	XX(S5,            gtk_separator_new(GTK_ORIENTATION_HORIZONTAL)) \
+	XX(S6,            gtk_separator_new(GTK_ORIENTATION_HORIZONTAL)) \
 	XX(LEFT,          B("object-rotate-left-symbolic", "Rotate left")) \
 	XX(MIRROR,        B("object-flip-horizontal-symbolic", "Mirror")) \
 	XX(RIGHT,         B("object-rotate-right-symbolic", "Rotate right")) \
-	XX(S6,            gtk_separator_new(GTK_ORIENTATION_HORIZONTAL)) \
+	XX(S7,            gtk_separator_new(GTK_ORIENTATION_HORIZONTAL)) \
 	/* We are YouTube. */ \
 	XX(FULLSCREEN,    B("view-fullscreen-symbolic", "Fullscreen"))
 
@@ -1067,11 +1068,11 @@ make_view_toolbar(void)
 	// Exploring different versions of awkward layouts.
 	for (int i = 0; i <= TOOLBAR_S1; i++)
 		gtk_box_pack_start(box, g.toolbar[i], FALSE, FALSE, 0);
-	for (int i = TOOLBAR_COUNT; --i >= TOOLBAR_S6; )
+	for (int i = TOOLBAR_COUNT; --i >= TOOLBAR_S7; )
 		gtk_box_pack_end(box, g.toolbar[i], FALSE, FALSE, 0);
 
 	GtkWidget *center = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	for (int i = TOOLBAR_S1; ++i < TOOLBAR_S6; )
+	for (int i = TOOLBAR_S1; ++i < TOOLBAR_S7; )
 		gtk_box_pack_start(GTK_BOX(center), g.toolbar[i], FALSE, FALSE, 0);
 	gtk_box_set_center_widget(box, center);
 
@@ -1090,6 +1091,7 @@ make_view_toolbar(void)
 	toolbar_command(TOOLBAR_MINUS,         FIV_VIEW_COMMAND_ZOOM_OUT);
 	toolbar_command(TOOLBAR_ONE,           FIV_VIEW_COMMAND_ZOOM_1);
 	toolbar_toggler(TOOLBAR_FIT,           "scale-to-fit");
+	toolbar_toggler(TOOLBAR_COLOR,         "enable-cms");
 	toolbar_toggler(TOOLBAR_SMOOTH,        "filter");
 	toolbar_toggler(TOOLBAR_CHECKERBOARD,  "checkerboard");
 	toolbar_toggler(TOOLBAR_ENHANCE,       "enhance");
@@ -1107,6 +1109,8 @@ make_view_toolbar(void)
 		G_CALLBACK(on_notify_view_playing), NULL);
 	g_signal_connect(g.view, "notify::scale-to-fit",
 		G_CALLBACK(on_notify_view_boolean), g.toolbar[TOOLBAR_FIT]);
+	g_signal_connect(g.view, "notify::enable-cms",
+		G_CALLBACK(on_notify_view_boolean), g.toolbar[TOOLBAR_COLOR]);
 	g_signal_connect(g.view, "notify::filter",
 		G_CALLBACK(on_notify_view_boolean), g.toolbar[TOOLBAR_SMOOTH]);
 	g_signal_connect(g.view, "notify::checkerboard",
@@ -1117,10 +1121,14 @@ make_view_toolbar(void)
 	g_object_notify(G_OBJECT(g.view), "scale");
 	g_object_notify(G_OBJECT(g.view), "playing");
 	g_object_notify(G_OBJECT(g.view), "scale-to-fit");
+	g_object_notify(G_OBJECT(g.view), "enable-cms");
 	g_object_notify(G_OBJECT(g.view), "filter");
 	g_object_notify(G_OBJECT(g.view), "checkerboard");
 	g_object_notify(G_OBJECT(g.view), "enhance");
 
+#ifndef HAVE_LCMS2
+	gtk_widget_set_no_show_all(g.toolbar[TOOLBAR_COLOR], TRUE);
+#endif
 #ifndef HAVE_JPEG_QS
 	gtk_widget_set_no_show_all(g.toolbar[TOOLBAR_ENHANCE], TRUE);
 #endif
@@ -1146,7 +1154,7 @@ static const char stylesheet[] = "@define-color fiv-tile @content_view_bg; \
 	#toolbar > button:last-child { padding-right: 4px; } \
 	#toolbar separator { \
 		background: mix(@insensitive_fg_color, \
-			@insensitive_bg_color, 0.4); margin: 6px 10px; \
+			@insensitive_bg_color, 0.4); margin: 6px 8px; \
 	} \
 	fiv-browser { padding: 5px; } \
 	fiv-browser.item { \
@@ -1333,11 +1341,6 @@ main(int argc, char *argv[])
 	on_toolbar_zoom(NULL, (gpointer) 0);
 	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(funnel), TRUE);
 
-	g.files = g_ptr_array_new_full(16, g_free);
-	g.directory = g_get_current_dir();
-	if (!path_arg || !open_any_path(path_arg, browse))
-		open_any_path(g.directory, FALSE);
-
 	// Try to get half of the screen vertically, in 4:3 aspect ratio.
 	//
 	// We need the GdkMonitor before the GtkWindow has a GdkWindow (i.e.,
@@ -1354,6 +1357,14 @@ main(int argc, char *argv[])
 	// Ask for at least 800x600, to cover ridiculously heterogenous setups.
 	unit = MAX(200, unit);
 	gtk_window_set_default_size(GTK_WINDOW(g.window), 4 * unit, 3 * unit);
+
+	g.files = g_ptr_array_new_full(16, g_free);
+	g.directory = g_get_current_dir();
+
+	// XXX: The widget wants to read the display's profile. The realize is ugly.
+	gtk_widget_realize(g.view);
+	if (!path_arg || !open_any_path(path_arg, browse))
+		open_any_path(g.directory, FALSE);
 
 	gtk_widget_show_all(g.window);
 	gtk_main();

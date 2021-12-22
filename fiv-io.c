@@ -25,6 +25,11 @@
 #include <spng.h>
 #include <turbojpeg.h>
 
+// Colour management must be handled before RGB conversions.
+#ifdef HAVE_LCMS2
+#include <lcms2.h>
+#endif  // HAVE_LCMS2
+
 #ifdef HAVE_JPEG_QS
 #include <jpeglib.h>
 #include <setjmp.h>
@@ -167,6 +172,129 @@ try_append_page(cairo_surface_t *surface, cairo_surface_t **result,
 		*result = *result_tail = surface;
 	}
 	return true;
+}
+
+// --- Colour management -------------------------------------------------------
+
+FivIoProfile
+fiv_io_profile_new(const void *data, size_t len)
+{
+#ifdef HAVE_LCMS2
+	return cmsOpenProfileFromMem(data, len);
+#else
+	(void) data;
+	(void) len;
+	return NULL;
+#endif
+}
+
+FivIoProfile
+fiv_io_profile_new_sRGB(void)
+{
+#ifdef HAVE_LCMS2
+	return cmsCreate_sRGBProfile();
+#else
+	return NULL;
+#endif
+}
+
+void
+fiv_io_profile_free(FivIoProfile self)
+{
+#ifdef HAVE_LCMS2
+	cmsCloseProfile(self);
+#else
+	(void) self;
+#endif
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+// TODO(p): In general, try to use CAIRO_FORMAT_RGB30 or CAIRO_FORMAT_RGBA128F.
+#define FIV_IO_LCMS2_ARGB \
+	(G_BYTE_ORDER == G_LITTLE_ENDIAN ? TYPE_BGRA_8 : TYPE_ARGB_8)
+
+// CAIRO_STRIDE_ALIGNMENT is 4 bytes, so there will be no padding with
+// ARGB/BGRA/XRGB/BGRX.
+static void
+trivial_cmyk_to_host_byte_order_argb(unsigned char *p, int len)
+{
+	// This CMYK handling has been seen in gdk-pixbuf/JPEG, GIMP/JPEG, skcms.
+	// Assume that all YCCK/CMYK JPEG files use inverted CMYK, as Photoshop
+	// does, see https://bugzilla.gnome.org/show_bug.cgi?id=618096
+	while (len--) {
+		int c = p[0], m = p[1], y = p[2], k = p[3];
+#if G_BYTE_ORDER == G_LITTLE_ENDIAN
+		p[0] = k * y / 255;
+		p[1] = k * m / 255;
+		p[2] = k * c / 255;
+		p[3] = 255;
+#else
+		p[3] = k * y / 255;
+		p[2] = k * m / 255;
+		p[1] = k * c / 255;
+		p[0] = 255;
+#endif
+		p += 4;
+	}
+}
+
+static void
+fiv_io_profile_cmyk(
+	cairo_surface_t *surface, FivIoProfile src, FivIoProfile dst)
+{
+	unsigned char *data = cairo_image_surface_get_data(surface);
+	int w = cairo_image_surface_get_width(surface);
+	int h = cairo_image_surface_get_height(surface);
+
+#ifndef HAVE_LCMS2
+	(void) src;
+	(void) dst;
+#else
+	cmsHTRANSFORM transform = NULL;
+	if (src && dst) {
+		transform = cmsCreateTransform(src, TYPE_CMYK_8_REV, dst,
+			FIV_IO_LCMS2_ARGB, INTENT_PERCEPTUAL, 0);
+	}
+	if (transform) {
+		cmsDoTransform(transform, data, data, w * h);
+		cmsDeleteTransform(transform);
+		return;
+	}
+#endif
+	trivial_cmyk_to_host_byte_order_argb(data, w * h);
+}
+
+static void
+fiv_io_profile_xrgb(
+	cairo_surface_t *surface, FivIoProfile src, FivIoProfile dst)
+{
+#ifndef HAVE_LCMS2
+	(void) surface;
+	(void) src;
+	(void) dst;
+#else
+	unsigned char *data = cairo_image_surface_get_data(surface);
+	int w = cairo_image_surface_get_width(surface);
+	int h = cairo_image_surface_get_height(surface);
+
+	// TODO(p): We should make this optional.
+	cmsHPROFILE src_fallback = NULL;
+	if (dst && !src)
+		src = src_fallback = cmsCreate_sRGBProfile();
+
+	cmsHTRANSFORM transform = NULL;
+	if (src && dst) {
+		transform = cmsCreateTransform(src, FIV_IO_LCMS2_ARGB, dst,
+			FIV_IO_LCMS2_ARGB, INTENT_PERCEPTUAL, 0);
+	}
+	if (transform) {
+		cmsDoTransform(transform, data, data, w * h);
+		cmsDeleteTransform(transform);
+	}
+	if (src_fallback)
+		cmsCloseProfile(src_fallback);
+#endif
 }
 
 // --- Wuffs -------------------------------------------------------------------
@@ -626,31 +754,7 @@ open_wuffs_using(wuffs_base__image_decoder *(*allocate)(),
 
 // --- JPEG --------------------------------------------------------------------
 
-static void
-trivial_cmyk_to_host_byte_order_argb(unsigned char *p, int len)
-{
-	// Inspired by gdk-pixbuf's io-jpeg.c:
-	//
-	// Assume that all YCCK/CMYK JPEG files use inverted CMYK, as Photoshop
-	// does, see https://bugzilla.gnome.org/show_bug.cgi?id=618096
-	while (len--) {
-		int c = p[0], m = p[1], y = p[2], k = p[3];
-#if G_BYTE_ORDER == G_LITTLE_ENDIAN
-		p[0] = k * y / 255;
-		p[1] = k * m / 255;
-		p[2] = k * c / 255;
-		p[3] = 255;
-#else
-		p[3] = k * y / 255;
-		p[2] = k * m / 255;
-		p[1] = k * c / 255;
-		p[0] = 255;
-#endif
-		p += 4;
-	}
-}
-
-static void
+static GBytes *
 parse_jpeg_metadata(cairo_surface_t *surface, const gchar *data, gsize len)
 {
 	// Because the JPEG file format is simple, just do it manually.
@@ -732,16 +836,41 @@ parse_jpeg_metadata(cairo_surface_t *surface, const gchar *data, gsize len)
 	else
 		g_byte_array_free(exif, TRUE);
 
+	GBytes *icc_profile = NULL;
 	if (icc_done)
 		cairo_surface_set_user_data(surface, &fiv_io_key_icc,
-			g_byte_array_free_to_bytes(icc),
+			(icc_profile = g_byte_array_free_to_bytes(icc)),
 			(cairo_destroy_func_t) g_bytes_unref);
 	else
 		g_byte_array_free(icc, TRUE);
+	return icc_profile;
+}
+
+static void
+load_jpeg_finalize(cairo_surface_t *surface, bool cmyk,
+	FivIoProfile destination, const gchar *data, size_t len)
+{
+	GBytes *icc_profile = parse_jpeg_metadata(surface, data, len);
+	FivIoProfile source = NULL;
+	if (icc_profile)
+		source = fiv_io_profile_new(
+			g_bytes_get_data(icc_profile, NULL), g_bytes_get_size(icc_profile));
+
+	if (cmyk)
+		fiv_io_profile_cmyk(surface, source, destination);
+	else
+		fiv_io_profile_xrgb(surface, source, destination);
+
+	if (source)
+		fiv_io_profile_free(source);
+
+	// Pixel data has been written, need to let Cairo know.
+	cairo_surface_mark_dirty(surface);
 }
 
 static cairo_surface_t *
-open_libjpeg_turbo(const gchar *data, gsize len, GError **error)
+open_libjpeg_turbo(
+	const gchar *data, gsize len, FivIoProfile profile, GError **error)
 {
 	tjhandle dec = tjInitDecompress();
 	if (!dec) {
@@ -788,18 +917,9 @@ open_libjpeg_turbo(const gchar *data, gsize len, GError **error)
 		}
 	}
 
-	if (pixel_format == TJPF_CMYK) {
-		// CAIRO_STRIDE_ALIGNMENT is 4 bytes, so there will be no padding with
-		// ARGB/BGR/XRGB/BGRX.
-		trivial_cmyk_to_host_byte_order_argb(
-			cairo_image_surface_get_data(surface), width * height);
-	}
-
-	// Pixel data has been written, need to let Cairo know.
-	cairo_surface_mark_dirty(surface);
-
+	load_jpeg_finalize(
+		surface, (pixel_format == TJPF_CMYK), profile, data, len);
 	tjDestroy(dec);
-	parse_jpeg_metadata(surface, data, len);
 	return surface;
 }
 
@@ -824,7 +944,8 @@ libjpeg_error_exit(j_common_ptr cinfo)
 }
 
 static cairo_surface_t *
-open_libjpeg_enhanced(const gchar *data, gsize len, GError **error)
+open_libjpeg_enhanced(
+	const gchar *data, gsize len, FivIoProfile profile, GError **error)
 {
 	cairo_surface_t *volatile surface = NULL;
 
@@ -880,11 +1001,11 @@ open_libjpeg_enhanced(const gchar *data, gsize len, GError **error)
 	if (cinfo.out_color_space == JCS_CMYK)
 		trivial_cmyk_to_host_byte_order_argb(
 			surface_data, cinfo.output_width * cinfo.output_height);
-	cairo_surface_mark_dirty(surface);
 	(void) jpegqs_finish_decompress(&cinfo);
 
+	load_jpeg_finalize(
+		surface, (cinfo.out_color_space == JCS_CMYK), profile, data, len);
 	jpeg_destroy_decompress(&cinfo);
-	parse_jpeg_metadata(surface, data, len);
 	return surface;
 }
 
@@ -1934,7 +2055,8 @@ cairo_user_data_key_t fiv_io_key_page_next;
 cairo_user_data_key_t fiv_io_key_page_previous;
 
 cairo_surface_t *
-fiv_io_open(const gchar *path, gboolean enhance, GError **error)
+fiv_io_open(
+	const gchar *path, FivIoProfile profile, gboolean enhance, GError **error)
 {
 	// TODO(p): Don't always load everything into memory, test type first,
 	// so that we can reject non-pictures early.  Wuffs only needs the first
@@ -1956,14 +2078,14 @@ fiv_io_open(const gchar *path, gboolean enhance, GError **error)
 		return NULL;
 
 	cairo_surface_t *surface =
-		fiv_io_open_from_data(data, len, path, enhance, error);
+		fiv_io_open_from_data(data, len, path, profile, enhance, error);
 	free(data);
 	return surface;
 }
 
 cairo_surface_t *
 fiv_io_open_from_data(const char *data, size_t len, const gchar *path,
-	gboolean enhance, GError **error)
+	FivIoProfile profile, gboolean enhance, GError **error)
 {
 	wuffs_base__slice_u8 prefix =
 		wuffs_base__make_slice_u8((uint8_t *) data, len);
@@ -1989,8 +2111,8 @@ fiv_io_open_from_data(const char *data, size_t len, const gchar *path,
 		break;
 	case WUFFS_BASE__FOURCC__JPEG:
 		surface = enhance
-			? open_libjpeg_enhanced(data, len, error)
-			: open_libjpeg_turbo(data, len, error);
+			? open_libjpeg_enhanced(data, len, profile, error)
+			: open_libjpeg_turbo(data, len, profile, error);
 		break;
 	default:
 #ifdef HAVE_LIBRAW  // ---------------------------------------------------------

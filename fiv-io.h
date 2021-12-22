@@ -21,6 +21,17 @@
 #include <gio/gio.h>
 #include <glib.h>
 
+// --- Colour management -------------------------------------------------------
+
+// TODO(p): Make it possible to use Skia's skcms,
+// which also supports premultiplied alpha.
+typedef void *FivIoProfile;
+FivIoProfile fiv_io_profile_new(const void *data, size_t len);
+FivIoProfile fiv_io_profile_new_sRGB(void);
+void fiv_io_profile_free(FivIoProfile self);
+
+// --- Loading -----------------------------------------------------------------
+
 extern const char *fiv_io_supported_media_types[];
 
 char **fiv_io_all_supported_media_types(void);
@@ -56,9 +67,9 @@ extern cairo_user_data_key_t fiv_io_key_page_next;
 extern cairo_user_data_key_t fiv_io_key_page_previous;
 
 cairo_surface_t *fiv_io_open(
-	const gchar *path, gboolean enhance, GError **error);
+	const gchar *path, FivIoProfile profile, gboolean enhance, GError **error);
 cairo_surface_t *fiv_io_open_from_data(const char *data, size_t len,
-	const gchar *path, gboolean enhance, GError **error);
+	const gchar *path, FivIoProfile profile, gboolean enhance, GError **error);
 
 int fiv_io_filecmp(GFile *f1, GFile *f2);
 

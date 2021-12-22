@@ -15,6 +15,7 @@ if get_option('buildtype').startswith('debug')
 endif
 
 # TODO(p): Use libraw_r later, when we start parallelizing/preloading.
+lcms2 = dependency('lcms2', required : get_option('lcms2'))
 libraw = dependency('libraw', required : get_option('libraw'))
 librsvg = dependency('librsvg-2.0', required : get_option('librsvg'))
 xcursor = dependency('xcursor', required : get_option('xcursor'))
@@ -27,11 +28,14 @@ libtiff = dependency('libtiff-4', required : get_option('libtiff'))
 gdkpixbuf = dependency('gdk-pixbuf-2.0', required : get_option('gdk-pixbuf'))
 dependencies = [
 	dependency('gtk+-3.0'),
+	dependency('pixman-1'),
+
 	dependency('libturbojpeg'),
 	dependency('libjpeg', required : get_option('jpeg-qs')),
 	dependency('spng', version : '>=0.7.0',
 		default_options: 'default_library=static'),
-	dependency('pixman-1'),
+
+	lcms2,
 	libraw,
 	librsvg,
 	xcursor,
@@ -50,6 +54,7 @@ conf.set_quoted('PROJECT_NAME', meson.project_name())
 conf.set_quoted('PROJECT_VERSION', meson.project_version())
 # TODO(p): Wrap it in a Meson subproject, try to enable SIMD.
 conf.set('HAVE_JPEG_QS', get_option('jpeg-qs').enabled())
+conf.set('HAVE_LCMS2', lcms2.found())
 conf.set('HAVE_LIBRAW', libraw.found())
 conf.set('HAVE_LIBRSVG', librsvg.found())
 conf.set('HAVE_XCURSOR', xcursor.found())
