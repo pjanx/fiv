@@ -241,19 +241,19 @@ trivial_cmyk_to_host_byte_order_argb(unsigned char *p, int len)
 
 static void
 fiv_io_profile_cmyk(
-	cairo_surface_t *surface, FivIoProfile src, FivIoProfile dst)
+	cairo_surface_t *surface, FivIoProfile source, FivIoProfile target)
 {
 	unsigned char *data = cairo_image_surface_get_data(surface);
 	int w = cairo_image_surface_get_width(surface);
 	int h = cairo_image_surface_get_height(surface);
 
 #ifndef HAVE_LCMS2
-	(void) src;
-	(void) dst;
+	(void) source;
+	(void) target;
 #else
 	cmsHTRANSFORM transform = NULL;
-	if (src && dst) {
-		transform = cmsCreateTransform(src, TYPE_CMYK_8_REV, dst,
+	if (source && target) {
+		transform = cmsCreateTransform(source, TYPE_CMYK_8_REV, target,
 			FIV_IO_LCMS2_ARGB, INTENT_PERCEPTUAL, 0);
 	}
 	if (transform) {
@@ -267,12 +267,12 @@ fiv_io_profile_cmyk(
 
 static void
 fiv_io_profile_xrgb(
-	cairo_surface_t *surface, FivIoProfile src, FivIoProfile dst)
+	cairo_surface_t *surface, FivIoProfile source, FivIoProfile target)
 {
 #ifndef HAVE_LCMS2
 	(void) surface;
-	(void) src;
-	(void) dst;
+	(void) source;
+	(void) target;
 #else
 	unsigned char *data = cairo_image_surface_get_data(surface);
 	int w = cairo_image_surface_get_width(surface);
@@ -280,12 +280,12 @@ fiv_io_profile_xrgb(
 
 	// TODO(p): We should make this optional.
 	cmsHPROFILE src_fallback = NULL;
-	if (dst && !src)
-		src = src_fallback = cmsCreate_sRGBProfile();
+	if (target && !source)
+		source = src_fallback = cmsCreate_sRGBProfile();
 
 	cmsHTRANSFORM transform = NULL;
-	if (src && dst) {
-		transform = cmsCreateTransform(src, FIV_IO_LCMS2_ARGB, dst,
+	if (source && target) {
+		transform = cmsCreateTransform(source, FIV_IO_LCMS2_ARGB, target,
 			FIV_IO_LCMS2_ARGB, INTENT_PERCEPTUAL, 0);
 	}
 	if (transform) {
@@ -295,6 +295,47 @@ fiv_io_profile_xrgb(
 	if (src_fallback)
 		cmsCloseProfile(src_fallback);
 #endif
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+static void
+fiv_io_profile_finalize_page(cairo_surface_t *page, FivIoProfile target)
+{
+	GBytes *bytes = NULL;
+	gsize len = 0;
+	gconstpointer p = NULL;
+	FivIoProfile source = NULL;
+	if ((bytes = cairo_surface_get_user_data(page, &fiv_io_key_icc)) &&
+		(p = g_bytes_get_data(bytes, &len)))
+		source = fiv_io_profile_new(p, len);
+
+	// TODO(p): Animations need to be composited in a linear colour space.
+	for (cairo_surface_t *frame = page; frame != NULL;
+		frame = cairo_surface_get_user_data(frame, &fiv_io_key_frame_next))
+		fiv_io_profile_xrgb(frame, source, target);
+
+	if (source)
+		fiv_io_profile_free(source);
+}
+
+// TODO(p): Offer better integration, upgrade the bit depth if appropriate.
+static cairo_surface_t *
+fiv_io_profile_finalize(cairo_surface_t *image, FivIoProfile target)
+{
+	if (!image || !target)
+		return image;
+
+	for (cairo_surface_t *page = image; page != NULL;
+		page = cairo_surface_get_user_data(page, &fiv_io_key_page_next)) {
+		// TODO(p): 1. un/premultiply ARGB, 2. do colour management
+		// early enough, so that no avoidable increase of quantization error
+		// occurs beforehands, and also for correct alpha compositing.
+		// FIXME: This assumes that if the first frame is opaque, they all are.
+		if (cairo_image_surface_get_format(page) == CAIRO_FORMAT_RGB24)
+			fiv_io_profile_finalize_page(page, target);
+	}
+	return image;
 }
 
 // --- Wuffs -------------------------------------------------------------------
@@ -738,7 +779,7 @@ fail:
 
 static cairo_surface_t *
 open_wuffs_using(wuffs_base__image_decoder *(*allocate)(),
-	const gchar *data, gsize len, GError **error)
+	const gchar *data, gsize len, FivIoProfile profile, GError **error)
 {
 	wuffs_base__image_decoder *dec = allocate();
 	if (!dec) {
@@ -749,7 +790,7 @@ open_wuffs_using(wuffs_base__image_decoder *(*allocate)(),
 	cairo_surface_t *surface = open_wuffs(
 		dec, wuffs_base__ptr_u8__reader((uint8_t *) data, len, TRUE), error);
 	free(dec);
-	return surface;
+	return fiv_io_profile_finalize(surface, profile);
 }
 
 // --- JPEG --------------------------------------------------------------------
@@ -886,7 +927,8 @@ open_libjpeg_turbo(
 		return NULL;
 	}
 
-	int pixel_format = (colorspace == TJCS_CMYK || colorspace == TJCS_YCCK)
+	bool use_cmyk = colorspace == TJCS_CMYK || colorspace == TJCS_YCCK;
+	int pixel_format = use_cmyk
 		? TJPF_CMYK
 		: (G_BYTE_ORDER == G_LITTLE_ENDIAN ? TJPF_BGRX : TJPF_XRGB);
 
@@ -917,8 +959,7 @@ open_libjpeg_turbo(
 		}
 	}
 
-	load_jpeg_finalize(
-		surface, (pixel_format == TJPF_CMYK), profile, data, len);
+	load_jpeg_finalize(surface, use_cmyk, profile, data, len);
 	tjDestroy(dec);
 	return surface;
 }
@@ -961,8 +1002,10 @@ open_libjpeg_enhanced(
 	jpeg_create_decompress(&cinfo);
 	jpeg_mem_src(&cinfo, (const unsigned char *) data, len);
 	(void) jpeg_read_header(&cinfo, true);
-	if (cinfo.jpeg_color_space == JCS_CMYK ||
-		cinfo.jpeg_color_space == JCS_YCCK)
+
+	bool use_cmyk = cinfo.jpeg_color_space == JCS_CMYK ||
+		cinfo.jpeg_color_space == JCS_YCCK;
+	if (use_cmyk)
 		cinfo.out_color_space = JCS_CMYK;
 	else if (G_BYTE_ORDER == G_BIG_ENDIAN)
 		cinfo.out_color_space = JCS_EXT_XRGB;
@@ -1003,8 +1046,7 @@ open_libjpeg_enhanced(
 			surface_data, cinfo.output_width * cinfo.output_height);
 	(void) jpegqs_finish_decompress(&cinfo);
 
-	load_jpeg_finalize(
-		surface, (cinfo.out_color_space == JCS_CMYK), profile, data, len);
+	load_jpeg_finalize(surface, use_cmyk, profile, data, len);
 	jpeg_destroy_decompress(&cinfo);
 	return surface;
 }
@@ -1353,6 +1395,8 @@ open_xcursor(const gchar *data, gsize len, GError **error)
 	static cairo_user_data_key_t key = {};
 	cairo_surface_set_user_data(
 		pages, &key, images, (cairo_destroy_func_t) XcursorImagesDestroy);
+
+	// Do not bother doing colour correction, there is no correct rendering.
 	return pages;
 }
 
@@ -1492,7 +1536,8 @@ fail:
 }
 
 static cairo_surface_t *
-open_libwebp(const gchar *data, gsize len, const gchar *path, GError **error)
+open_libwebp(const gchar *data, gsize len, const gchar *path,
+	FivIoProfile profile, GError **error)
 {
 	// It is wholly zero-initialized by libwebp.
 	WebPDecoderConfig config = {};
@@ -1556,7 +1601,7 @@ open_libwebp(const gchar *data, gsize len, const gchar *path, GError **error)
 
 fail:
 	WebPFreeDecBuffer(&config.output);
-	return result;
+	return fiv_io_profile_finalize(result, profile);
 }
 
 #endif  // HAVE_LIBWEBP --------------------------------------------------------
@@ -1703,7 +1748,8 @@ load_libheif_aux_images(const gchar *path, struct heif_image_handle *top,
 }
 
 static cairo_surface_t *
-open_libheif(const gchar *data, gsize len, const gchar *path, GError **error)
+open_libheif(const gchar *data, gsize len, const gchar *path,
+	FivIoProfile profile, GError **error)
 {
 	// libheif will throw C++ exceptions on allocation failures.
 	// The library is generally awful through and through.
@@ -1747,7 +1793,7 @@ open_libheif(const gchar *data, gsize len, const gchar *path, GError **error)
 	g_free(ids);
 fail_read:
 	heif_context_free(ctx);
-	return result;
+	return fiv_io_profile_finalize(result, profile);
 }
 
 #endif  // HAVE_LIBHEIF --------------------------------------------------------
@@ -2003,7 +2049,8 @@ fail:
 #ifdef HAVE_GDKPIXBUF  // ------------------------------------------------------
 
 static cairo_surface_t *
-open_gdkpixbuf(const gchar *data, gsize len, GError **error)
+open_gdkpixbuf(
+	const gchar *data, gsize len, FivIoProfile profile, GError **error)
 {
 	// gdk-pixbuf controls the playback itself, there is no reliable method of
 	// extracting individual frames (due to loops).
@@ -2036,7 +2083,7 @@ open_gdkpixbuf(const gchar *data, gsize len, GError **error)
 	}
 
 	g_object_unref(pixbuf);
-	return surface;
+	return fiv_io_profile_finalize(surface, profile);
 }
 
 #endif  // HAVE_GDKPIXBUF ------------------------------------------------------
@@ -2097,17 +2144,17 @@ fiv_io_open_from_data(const char *data, size_t len, const gchar *path,
 		// which is so far unsupported here.
 		surface = open_wuffs_using(
 			wuffs_bmp__decoder__alloc_as__wuffs_base__image_decoder, data, len,
-			error);
+			profile, error);
 		break;
 	case WUFFS_BASE__FOURCC__GIF:
 		surface = open_wuffs_using(
 			wuffs_gif__decoder__alloc_as__wuffs_base__image_decoder, data, len,
-			error);
+			profile, error);
 		break;
 	case WUFFS_BASE__FOURCC__PNG:
 		surface = open_wuffs_using(
 			wuffs_png__decoder__alloc_as__wuffs_base__image_decoder, data, len,
-			error);
+			profile, error);
 		break;
 	case WUFFS_BASE__FOURCC__JPEG:
 		surface = enhance
@@ -2146,7 +2193,7 @@ fiv_io_open_from_data(const char *data, size_t len, const gchar *path,
 #endif  // HAVE_XCURSOR --------------------------------------------------------
 #ifdef HAVE_LIBWEBP  //---------------------------------------------------------
 		// TODO(p): https://github.com/google/wuffs/commit/4c04ac1
-		if ((surface = open_libwebp(data, len, path, error)))
+		if ((surface = open_libwebp(data, len, path, profile, error)))
 			break;
 		if (error) {
 			g_debug("%s", (*error)->message);
@@ -2154,7 +2201,7 @@ fiv_io_open_from_data(const char *data, size_t len, const gchar *path,
 		}
 #endif  // HAVE_LIBWEBP --------------------------------------------------------
 #ifdef HAVE_LIBHEIF  //---------------------------------------------------------
-		if ((surface = open_libheif(data, len, path, error)))
+		if ((surface = open_libheif(data, len, path, profile, error)))
 			break;
 		if (error) {
 			g_debug("%s", (*error)->message);
@@ -2172,7 +2219,7 @@ fiv_io_open_from_data(const char *data, size_t len, const gchar *path,
 #endif  // HAVE_LIBTIFF --------------------------------------------------------
 #ifdef HAVE_GDKPIXBUF  // ------------------------------------------------------
 		// This is only used as a last resort, the rest above is special-cased.
-		if ((surface = open_gdkpixbuf(data, len, error)))
+		if ((surface = open_gdkpixbuf(data, len, profile, error)))
 			break;
 		if (error && (*error)->code != GDK_PIXBUF_ERROR_UNKNOWN_TYPE)
 			break;

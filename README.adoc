@@ -5,7 +5,8 @@ fastiv
 raw photos, HEIC, AVIF, WebP, SVG, X11 cursors and TIFF, or whatever gdk-pixbuf
 loads.
 
-Its development status can be summarized as '`beta`'.
+Its development status can be summarized as '`beta`'.  E.g., colour management
+is partial, and certain GIFs animate wrong.
 
 Non-goals
 ---------
@@ -25,8 +26,8 @@ Building and Running
 Build dependencies: Meson, pkg-config +
 Runtime dependencies: gtk+-3.0, glib>=2.64, pixman-1, shared-mime-info,
 spng>=0.7.0, libturbojpeg +
-Optional dependencies: LibRaw, librsvg-2.0, xcursor, libwebp, libheif, libtiff,
-gdk-pixbuf-2.0, ExifTool
+Optional dependencies: lcms2, LibRaw, librsvg-2.0, xcursor, libwebp, libheif,
+libtiff, gdk-pixbuf-2.0, ExifTool
 
  $ git clone --recursive https://git.janouch.name/p/fastiv.git
  $ meson builddir
