@@ -266,7 +266,7 @@ fiv_io_profile_cmyk(
 }
 
 static void
-fiv_io_profile_xrgb(
+fiv_io_profile_xrgb32(
 	cairo_surface_t *surface, FivIoProfile source, FivIoProfile target)
 {
 #ifndef HAVE_LCMS2
@@ -300,7 +300,7 @@ fiv_io_profile_xrgb(
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 static void
-fiv_io_profile_finalize_page(cairo_surface_t *page, FivIoProfile target)
+fiv_io_profile_xrgb32_page(cairo_surface_t *page, FivIoProfile target)
 {
 	GBytes *bytes = NULL;
 	gsize len = 0;
@@ -313,7 +313,7 @@ fiv_io_profile_finalize_page(cairo_surface_t *page, FivIoProfile target)
 	// TODO(p): Animations need to be composited in a linear colour space.
 	for (cairo_surface_t *frame = page; frame != NULL;
 		frame = cairo_surface_get_user_data(frame, &fiv_io_key_frame_next))
-		fiv_io_profile_xrgb(frame, source, target);
+		fiv_io_profile_xrgb32(frame, source, target);
 
 	if (source)
 		fiv_io_profile_free(source);
@@ -333,15 +333,35 @@ fiv_io_profile_finalize(cairo_surface_t *image, FivIoProfile target)
 		// occurs beforehands, and also for correct alpha compositing.
 		// FIXME: This assumes that if the first frame is opaque, they all are.
 		if (cairo_image_surface_get_format(page) == CAIRO_FORMAT_RGB24)
-			fiv_io_profile_finalize_page(page, target);
+			fiv_io_profile_xrgb32_page(page, target);
 	}
 	return image;
 }
 
-// --- Wuffs -------------------------------------------------------------------
-
 // From libwebp, verified to exactly match [x * a / 255].
 #define PREMULTIPLY8(a, x) (((uint32_t) (x) * (uint32_t) (a) * 32897U) >> 23)
+
+static void
+fiv_io_premultiply_argb32(cairo_surface_t *surface)
+{
+	int w = cairo_image_surface_get_width(surface);
+	int h = cairo_image_surface_get_height(surface);
+	unsigned char *data = cairo_image_surface_get_data(surface);
+	int stride = cairo_image_surface_get_stride(surface);
+
+	for (int y = 0; y < h; y++) {
+		uint32_t *dstp = (uint32_t *) (data + stride * y);
+		for (int x = 0; x < w; x++) {
+			uint32_t argb = dstp[x], a = argb >> 24;
+			dstp[x] = a << 24 |
+				PREMULTIPLY8(a, 0xFF & (argb >> 16)) << 16 |
+				PREMULTIPLY8(a, 0xFF & (argb >>  8)) <<  8 |
+				PREMULTIPLY8(a, 0xFF &  argb);
+		}
+	}
+}
+
+// --- Wuffs -------------------------------------------------------------------
 
 static bool
 pull_passthrough(const wuffs_base__more_information *minfo,
@@ -900,7 +920,7 @@ load_jpeg_finalize(cairo_surface_t *surface, bool cmyk,
 	if (cmyk)
 		fiv_io_profile_cmyk(surface, source, destination);
 	else
-		fiv_io_profile_xrgb(surface, source, destination);
+		fiv_io_profile_xrgb32(surface, source, destination);
 
 	if (source)
 		fiv_io_profile_free(source);
@@ -1660,18 +1680,8 @@ load_libheif_image(struct heif_image_handle *handle, GError **error)
 	}
 
 	// TODO(p): Test real behaviour on real transparent images.
-	if (has_alpha && !heif_image_handle_is_premultiplied_alpha(handle)) {
-		for (int y = 0; y < h; y++) {
-			uint32_t *dstp = (uint32_t *) (dst + dst_stride * y);
-			for (int x = 0; x < w; x++) {
-				uint32_t argb = dstp[x], a = argb >> 24;
-				dstp[x] = a << 24 |
-					PREMULTIPLY8(a, 0xFF & (argb >> 16)) << 16 |
-					PREMULTIPLY8(a, 0xFF & (argb >>  8)) <<  8 |
-					PREMULTIPLY8(a, 0xFF &  argb);
-			}
-		}
-	}
+	if (has_alpha && !heif_image_handle_is_premultiplied_alpha(handle))
+		fiv_io_premultiply_argb32(surface);
 
 	heif_item_id exif_id = 0;
 	if (heif_image_handle_get_list_of_metadata_block_IDs(
@@ -2049,6 +2059,28 @@ fail:
 #ifdef HAVE_GDKPIXBUF  // ------------------------------------------------------
 
 static cairo_surface_t *
+load_gdkpixbuf_argb32_unpremultiplied(GdkPixbuf *pixbuf)
+{
+	int w = gdk_pixbuf_get_width(pixbuf);
+	int h = gdk_pixbuf_get_height(pixbuf);
+	cairo_surface_t *surface =
+		cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+
+	guint length = 0;
+	guchar *src = gdk_pixbuf_get_pixels_with_length(pixbuf, &length);
+	int src_stride = gdk_pixbuf_get_rowstride(pixbuf);
+	uint32_t *dst = (uint32_t *) cairo_image_surface_get_data(surface);
+	for (int y = 0; y < h; y++) {
+		const guchar *p = src + y * src_stride;
+		for (int x = 0; x < w; x++) {
+			*dst++ = (uint32_t) p[3] << 24 | p[0] << 16 | p[1] << 8 | p[2];
+			p += 4;
+		}
+	}
+	return surface;
+}
+
+static cairo_surface_t *
 open_gdkpixbuf(
 	const gchar *data, gsize len, FivIoProfile profile, GError **error)
 {
@@ -2060,8 +2092,24 @@ open_gdkpixbuf(
 	if (!pixbuf)
 		return NULL;
 
-	cairo_surface_t *surface =
-		gdk_cairo_surface_create_from_pixbuf(pixbuf, 1, NULL);
+	bool custom_argb32 = profile && gdk_pixbuf_get_has_alpha(pixbuf) &&
+		gdk_pixbuf_get_colorspace(pixbuf) == GDK_COLORSPACE_RGB &&
+		gdk_pixbuf_get_n_channels(pixbuf) == 4 &&
+		gdk_pixbuf_get_bits_per_sample(pixbuf) == 8;
+
+	cairo_surface_t *surface = NULL;
+	if (custom_argb32)
+		surface = load_gdkpixbuf_argb32_unpremultiplied(pixbuf);
+	else
+		surface = gdk_cairo_surface_create_from_pixbuf(pixbuf, 1, NULL);
+
+	cairo_status_t surface_status = cairo_surface_status(surface);
+	if (surface_status != CAIRO_STATUS_SUCCESS) {
+		set_error(error, cairo_status_to_string(surface_status));
+		cairo_surface_destroy(surface);
+		g_object_unref(pixbuf);
+		return NULL;
+	}
 
 	const char *orientation = gdk_pixbuf_get_option(pixbuf, "orientation");
 	if (orientation && strlen(orientation) == 1) {
@@ -2083,7 +2131,13 @@ open_gdkpixbuf(
 	}
 
 	g_object_unref(pixbuf);
-	return fiv_io_profile_finalize(surface, profile);
+	if (custom_argb32) {
+		fiv_io_profile_xrgb32_page(surface, profile);
+		fiv_io_premultiply_argb32(surface);
+	} else {
+		surface = fiv_io_profile_finalize(surface, profile);
+	}
+	return surface;
 }
 
 #endif  // HAVE_GDKPIXBUF ------------------------------------------------------
