@@ -130,9 +130,15 @@ static struct key_group help_keys_view[] = {
 		{}
 	}},
 	{"Configuration", (struct key[]) {
+#ifdef HAVE_LCMS2
+		{"c", "Toggle color management"},
+#endif
 		{"x", "Toggle scale to fit if larger"},
 		{"i", "Toggle smooth scaling"},
 		{"t", "Toggle transparency highlighting"},
+#ifdef HAVE_JPEG_QS
+		{"e", "Toggle low-quality JPEG enhancement"},
+#endif
 		{}
 	}},
 	{"Control", (struct key[]) {

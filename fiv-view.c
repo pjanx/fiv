@@ -1060,12 +1060,16 @@ fiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 	case GDK_KEY_h:
 		return set_scale_to_fit_height(self);
 
+	case GDK_KEY_c:
+		return command(self, FIV_VIEW_COMMAND_TOGGLE_CMS);
 	case GDK_KEY_x:  // Inspired by gThumb, which has more such modes.
 		return command(self, FIV_VIEW_COMMAND_TOGGLE_SCALE_TO_FIT);
 	case GDK_KEY_i:
 		return command(self, FIV_VIEW_COMMAND_TOGGLE_FILTER);
 	case GDK_KEY_t:
 		return command(self, FIV_VIEW_COMMAND_TOGGLE_CHECKERBOARD);
+	case GDK_KEY_e:
+		return command(self, FIV_VIEW_COMMAND_TOGGLE_ENHANCE);
 
 	case GDK_KEY_less:
 		return command(self, FIV_VIEW_COMMAND_ROTATE_LEFT);
