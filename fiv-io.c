@@ -408,6 +408,14 @@ fiv_io_premultiply_argb32(cairo_surface_t *surface)
 	}
 }
 
+static void
+fiv_io_premultiply_argb32_page(cairo_surface_t *page)
+{
+	for (cairo_surface_t *frame = page; frame != NULL;
+		frame = cairo_surface_get_user_data(frame, &fiv_io_key_frame_next))
+		fiv_io_premultiply_argb32(frame);
+}
+
 // --- Wuffs -------------------------------------------------------------------
 
 static bool
@@ -1489,8 +1497,8 @@ open_xcursor(const gchar *data, gsize len, GError **error)
 #ifdef HAVE_LIBWEBP  //---------------------------------------------------------
 
 static cairo_surface_t *
-load_libwebp_nonanimated(
-	WebPDecoderConfig *config, const WebPData *wd, GError **error)
+load_libwebp_nonanimated(WebPDecoderConfig *config, const WebPData *wd,
+	bool premultiply, GError **error)
 {
 	cairo_surface_t *surface = cairo_image_surface_create(
 		config->input.has_alpha ? CAIRO_FORMAT_ARGB32 : CAIRO_FORMAT_RGB24,
@@ -1511,10 +1519,11 @@ load_libwebp_nonanimated(
 	config->output.u.RGBA.stride = cairo_image_surface_get_stride(surface);
 	config->output.u.RGBA.size =
 		config->output.u.RGBA.stride * cairo_image_surface_get_height(surface);
+
 	if (G_BYTE_ORDER == G_LITTLE_ENDIAN)
-		config->output.colorspace = MODE_bgrA;
+		config->output.colorspace = premultiply ? MODE_bgrA : MODE_BGRA;
 	else
-		config->output.colorspace = MODE_Argb;
+		config->output.colorspace = premultiply ? MODE_Argb : MODE_ARGB;
 
 	VP8StatusCode err = 0;
 	if ((err = WebPDecode(wd->bytes, wd->size, config))) {
@@ -1570,12 +1579,12 @@ load_libwebp_frame(WebPAnimDecoder *dec, const WebPAnimInfo *info,
 }
 
 static cairo_surface_t *
-load_libwebp_animated(const WebPData *wd, GError **error)
+load_libwebp_animated(const WebPData *wd, bool premultiply, GError **error)
 {
 	WebPAnimDecoderOptions options = {};
 	WebPAnimDecoderOptionsInit(&options);
 	options.use_threads = true;
-	options.color_mode = MODE_bgrA;
+	options.color_mode = premultiply ? MODE_bgrA : MODE_BGRA;
 
 	WebPAnimInfo info = {};
 	WebPAnimDecoder *dec = WebPAnimDecoderNew(wd, &options);
@@ -1622,7 +1631,7 @@ fail:
 
 static cairo_surface_t *
 open_libwebp(const gchar *data, gsize len, const gchar *path,
-	FivIoProfile profile, GError **error)
+	FivIoProfile target, GError **error)
 {
 	// It is wholly zero-initialized by libwebp.
 	WebPDecoderConfig config = {};
@@ -1632,6 +1641,7 @@ open_libwebp(const gchar *data, gsize len, const gchar *path,
 	}
 
 	// TODO(p): Differentiate between a bad WebP, and not a WebP.
+	// TODO(p): Make sure partial WebPs load with a non-fatal error.
 	VP8StatusCode err = 0;
 	WebPData wd = {.bytes = (const uint8_t *) data, .size = len};
 	if ((err = WebPGetFeatures(wd.bytes, wd.size, &config.input))) {
@@ -1640,13 +1650,14 @@ open_libwebp(const gchar *data, gsize len, const gchar *path,
 	}
 
 	cairo_surface_t *result = config.input.has_animation
-		? load_libwebp_animated(&wd, error)
-		: load_libwebp_nonanimated(&config, &wd, error);
+		? load_libwebp_animated(&wd, !target, error)
+		: load_libwebp_nonanimated(&config, &wd, !target, error);
 	if (!result)
 		goto fail;
 
 	// Of course everything has to use a different abstraction.
-	WebPDemuxer *demux = WebPDemux(&wd);
+	WebPDemuxState state = WEBP_DEMUX_PARSE_ERROR;
+	WebPDemuxer *demux = WebPDemuxPartial(&wd, &state);
 	if (!demux) {
 		g_warning("%s: %s", path, "demux failure");
 		goto fail;
@@ -1683,10 +1694,14 @@ open_libwebp(const gchar *data, gsize len, const gchar *path,
 	}
 
 	WebPDemuxDelete(demux);
+	if (target) {
+		fiv_io_profile_xrgb32_page(result, target);
+		fiv_io_premultiply_argb32_page(result);
+	}
 
 fail:
 	WebPFreeDecBuffer(&config.output);
-	return fiv_io_profile_finalize(result, profile);
+	return result;
 }
 
 #endif  // HAVE_LIBWEBP --------------------------------------------------------
@@ -2198,7 +2213,7 @@ open_gdkpixbuf(
 	g_object_unref(pixbuf);
 	if (custom_argb32) {
 		fiv_io_profile_xrgb32_page(surface, profile);
-		fiv_io_premultiply_argb32(surface);
+		fiv_io_premultiply_argb32_page(surface);
 	} else {
 		surface = fiv_io_profile_finalize(surface, profile);
 	}
