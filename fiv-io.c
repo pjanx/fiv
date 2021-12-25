@@ -198,6 +198,14 @@ fiv_io_profile_new_sRGB(void)
 #endif
 }
 
+static FivIoProfile
+fiv_io_profile_new_from_bytes(GBytes *bytes)
+{
+	gsize len = 0;
+	gconstpointer p = g_bytes_get_data(bytes, &len);
+	return fiv_io_profile_new(p, len);
+}
+
 void
 fiv_io_profile_free(FivIoProfile self)
 {
@@ -211,8 +219,10 @@ fiv_io_profile_free(FivIoProfile self)
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 // TODO(p): In general, try to use CAIRO_FORMAT_RGB30 or CAIRO_FORMAT_RGBA128F.
-#define FIV_IO_LCMS2_ARGB \
+#define FIV_IO_LCMS2_ARGB32 \
 	(G_BYTE_ORDER == G_LITTLE_ENDIAN ? TYPE_BGRA_8 : TYPE_ARGB_8)
+#define FIV_IO_LCMS2_4X16LE \
+	(G_BYTE_ORDER == G_LITTLE_ENDIAN ? TYPE_BGRA_16 : TYPE_BGRA_16_SE)
 
 // CAIRO_STRIDE_ALIGNMENT is 4 bytes, so there will be no padding with
 // ARGB/BGRA/XRGB/BGRX.
@@ -254,7 +264,7 @@ fiv_io_profile_cmyk(
 	cmsHTRANSFORM transform = NULL;
 	if (source && target) {
 		transform = cmsCreateTransform(source, TYPE_CMYK_8_REV, target,
-			FIV_IO_LCMS2_ARGB, INTENT_PERCEPTUAL, 0);
+			FIV_IO_LCMS2_ARGB32, INTENT_PERCEPTUAL, 0);
 	}
 	if (transform) {
 		cmsDoTransform(transform, data, data, w * h);
@@ -266,18 +276,16 @@ fiv_io_profile_cmyk(
 }
 
 static void
-fiv_io_profile_xrgb32(
-	cairo_surface_t *surface, FivIoProfile source, FivIoProfile target)
+fiv_io_profile_xrgb32_direct(unsigned char *data, int w, int h,
+	FivIoProfile source, FivIoProfile target)
 {
 #ifndef HAVE_LCMS2
-	(void) surface;
+	(void) data;
+	(void) w;
+	(void) h;
 	(void) source;
 	(void) target;
 #else
-	unsigned char *data = cairo_image_surface_get_data(surface);
-	int w = cairo_image_surface_get_width(surface);
-	int h = cairo_image_surface_get_height(surface);
-
 	// TODO(p): We should make this optional.
 	cmsHPROFILE src_fallback = NULL;
 	if (target && !source)
@@ -285,8 +293,48 @@ fiv_io_profile_xrgb32(
 
 	cmsHTRANSFORM transform = NULL;
 	if (source && target) {
-		transform = cmsCreateTransform(source, FIV_IO_LCMS2_ARGB, target,
-			FIV_IO_LCMS2_ARGB, INTENT_PERCEPTUAL, 0);
+		transform = cmsCreateTransform(source, FIV_IO_LCMS2_ARGB32, target,
+			FIV_IO_LCMS2_ARGB32, INTENT_PERCEPTUAL, 0);
+	}
+	if (transform) {
+		cmsDoTransform(transform, data, data, w * h);
+		cmsDeleteTransform(transform);
+	}
+	if (src_fallback)
+		cmsCloseProfile(src_fallback);
+#endif
+}
+
+static void
+fiv_io_profile_xrgb32(
+	cairo_surface_t *surface, FivIoProfile source, FivIoProfile target)
+{
+	unsigned char *data = cairo_image_surface_get_data(surface);
+	int w = cairo_image_surface_get_width(surface);
+	int h = cairo_image_surface_get_height(surface);
+	fiv_io_profile_xrgb32_direct(data, w, h, source, target);
+}
+
+static void
+fiv_io_profile_4x16le_direct(
+	unsigned char *data, int w, int h, FivIoProfile source, FivIoProfile target)
+{
+#ifndef HAVE_LCMS2
+	(void) data;
+	(void) w;
+	(void) h;
+	(void) source;
+	(void) target;
+#else
+	// TODO(p): We should make this optional.
+	cmsHPROFILE src_fallback = NULL;
+	if (target && !source)
+		source = src_fallback = cmsCreate_sRGBProfile();
+
+	cmsHTRANSFORM transform = NULL;
+	if (source && target) {
+		transform = cmsCreateTransform(source, FIV_IO_LCMS2_4X16LE, target,
+			FIV_IO_LCMS2_4X16LE, INTENT_PERCEPTUAL, 0);
 	}
 	if (transform) {
 		cmsDoTransform(transform, data, data, w * h);
@@ -303,14 +351,11 @@ static void
 fiv_io_profile_xrgb32_page(cairo_surface_t *page, FivIoProfile target)
 {
 	GBytes *bytes = NULL;
-	gsize len = 0;
-	gconstpointer p = NULL;
 	FivIoProfile source = NULL;
-	if ((bytes = cairo_surface_get_user_data(page, &fiv_io_key_icc)) &&
-		(p = g_bytes_get_data(bytes, &len)))
-		source = fiv_io_profile_new(p, len);
+	if ((bytes = cairo_surface_get_user_data(page, &fiv_io_key_icc)))
+		source = fiv_io_profile_new_from_bytes(bytes);
 
-	// TODO(p): Animations need to be composited in a linear colour space.
+	// TODO(p): All animations need to be composited in a linear colour space.
 	for (cairo_surface_t *frame = page; frame != NULL;
 		frame = cairo_surface_get_user_data(frame, &fiv_io_key_frame_next))
 		fiv_io_profile_xrgb32(frame, source, target);
@@ -348,6 +393,8 @@ fiv_io_premultiply_argb32(cairo_surface_t *surface)
 	int h = cairo_image_surface_get_height(surface);
 	unsigned char *data = cairo_image_surface_get_data(surface);
 	int stride = cairo_image_surface_get_stride(surface);
+	if (cairo_image_surface_get_format(surface) != CAIRO_FORMAT_ARGB32)
+		return;
 
 	for (int y = 0; y < h; y++) {
 		uint32_t *dstp = (uint32_t *) (data + stride * y);
@@ -454,6 +501,9 @@ struct load_wuffs_frame_context {
 	GBytes *meta_iccp;                  ///< Reference-counted ICC profile
 	GBytes *meta_xmp;                   ///< Reference-counted XMP
 
+	FivIoProfile target;                ///< Target device profile, if any
+	FivIoProfile source;                ///< Source colour profile, if any
+
 	cairo_surface_t *result;            ///< The resulting surface (referenced)
 	cairo_surface_t *result_tail;       ///< The final animation frame
 };
@@ -487,13 +537,8 @@ load_wuffs_frame(struct load_wuffs_frame_context *ctx, GError **error)
 	unsigned char *surface_data = cairo_image_surface_get_data(surface);
 	int surface_stride = cairo_image_surface_get_stride(surface);
 	wuffs_base__pixel_buffer pb = {0};
-	if (ctx->expand_16_float) {
-		uint32_t targetbuf_size = ctx->height * ctx->width * 64;
-		targetbuf = g_malloc(targetbuf_size);
-		status = wuffs_base__pixel_buffer__set_from_slice(&pb, &ctx->cfg.pixcfg,
-			wuffs_base__make_slice_u8(targetbuf, targetbuf_size));
-	} else if (ctx->pack_16_10) {
-		uint32_t targetbuf_size = ctx->height * ctx->width * 16;
+	if (ctx->expand_16_float || ctx->pack_16_10) {
+		uint32_t targetbuf_size = ctx->height * ctx->width * 8;
 		targetbuf = g_malloc(targetbuf_size);
 		status = wuffs_base__pixel_buffer__set_from_slice(&pb, &ctx->cfg.pixcfg,
 			wuffs_base__make_slice_u8(targetbuf, targetbuf_size));
@@ -515,6 +560,18 @@ load_wuffs_frame(struct load_wuffs_frame_context *ctx, GError **error)
 	if (!wuffs_base__status__is_ok(&status)) {
 		set_error(error, wuffs_base__status__message(&status));
 		goto fail;
+	}
+
+	if (ctx->target) {
+		if (ctx->expand_16_float || ctx->pack_16_10) {
+			fiv_io_profile_4x16le_direct(
+				targetbuf, ctx->width, ctx->height, ctx->source, ctx->target);
+			// The first one premultiplies below, the second doesn't need to.
+		} else {
+			fiv_io_profile_xrgb32_direct(surface_data, ctx->width, ctx->height,
+				ctx->source, ctx->target);
+			fiv_io_premultiply_argb32(surface);
+		}
 	}
 
 	if (ctx->expand_16_float) {
@@ -561,6 +618,7 @@ load_wuffs_frame(struct load_wuffs_frame_context *ctx, GError **error)
 		// Apply that frame's disposal method.
 		wuffs_base__rect_ie_u32 bounds =
 			wuffs_base__frame_config__bounds(&ctx->last_fc);
+		// TODO(p): This field needs to be colour-managed.
 		wuffs_base__color_u32_argb_premul bg =
 			wuffs_base__frame_config__background_color(&ctx->last_fc);
 
@@ -650,10 +708,11 @@ fail:
 // is pure C, and a good reference. I can't use the auxiliary libraries,
 // since they depend on C++, which is undesirable.
 static cairo_surface_t *
-open_wuffs(
-	wuffs_base__image_decoder *dec, wuffs_base__io_buffer src, GError **error)
+open_wuffs(wuffs_base__image_decoder *dec, wuffs_base__io_buffer src,
+	FivIoProfile profile, GError **error)
 {
-	struct load_wuffs_frame_context ctx = {.dec = dec, .src = &src};
+	struct load_wuffs_frame_context ctx = {
+		.dec = dec, .src = &src, .target = profile};
 
 	// TODO(p): PNG also has sRGB and gAMA, as well as text chunks (Wuffs #58).
 	// The former two use WUFFS_BASE__MORE_INFORMATION__FLAVOR__METADATA_PARSED.
@@ -720,13 +779,16 @@ open_wuffs(
 		goto fail;
 	}
 
+	if (ctx.target && ctx.meta_iccp)
+		ctx.source = fiv_io_profile_new_from_bytes(ctx.meta_iccp);
+
 	// Wuffs maps tRNS to BGRA in `decoder.decode_trns?`, we should be fine.
 	// wuffs_base__pixel_format__transparency() doesn't reflect the image file.
 	// TODO(p): See if wuffs_base__image_config__first_frame_is_opaque() causes
 	// issues with animations, and eventually ensure an alpha-capable format.
 	bool opaque = wuffs_base__image_config__first_frame_is_opaque(&ctx.cfg);
 
-	// Wuffs' API is kind of awful--we want to catch deep RGB and deep grey.
+	// Wuffs' API is kind of awful--we want to catch wide RGB and wide grey.
 	wuffs_base__pixel_format srcfmt =
 		wuffs_base__pixel_config__pixel_format(&ctx.cfg.pixcfg);
 	uint32_t bpp = wuffs_base__pixel_format__bits_per_pixel(&srcfmt);
@@ -744,7 +806,7 @@ open_wuffs(
 	// XXX: WUFFS_BASE__PIXEL_FORMAT__ARGB_PREMUL is not expressible, only RGBA.
 	// Wuffs doesn't support big-endian architectures at all, we might want to
 	// fall back to spng in such cases, or do a second conversion.
-	uint32_t wuffs_format = WUFFS_BASE__PIXEL_FORMAT__BGRA_PREMUL;
+	uint32_t wuffs_format = WUFFS_BASE__PIXEL_FORMAT__BGRA_NONPREMUL;
 
 	// CAIRO_FORMAT_ARGB32: "The 32-bit quantities are stored native-endian.
 	// Pre-multiplied alpha is used." CAIRO_FORMAT_RGB{24,30} are analogous.
@@ -764,8 +826,9 @@ open_wuffs(
 		ctx.cairo_format = CAIRO_FORMAT_RGB30;
 	} else if (opaque) {
 		// BGRX doesn't have as wide swizzler support, namely in GIF.
-		wuffs_format = WUFFS_BASE__PIXEL_FORMAT__BGRA_NONPREMUL;
 		ctx.cairo_format = CAIRO_FORMAT_RGB24;
+	} else if (!ctx.target) {
+		wuffs_format = WUFFS_BASE__PIXEL_FORMAT__BGRA_PREMUL;
 	}
 
 	wuffs_base__pixel_config__set(&ctx.cfg.pixcfg, wuffs_format,
@@ -794,6 +857,7 @@ fail:
 	g_clear_pointer(&ctx.meta_exif, g_bytes_unref);
 	g_clear_pointer(&ctx.meta_iccp, g_bytes_unref);
 	g_clear_pointer(&ctx.meta_xmp, g_bytes_unref);
+	g_clear_pointer(&ctx.source, fiv_io_profile_free);
 	return ctx.result;
 }
 
@@ -807,10 +871,11 @@ open_wuffs_using(wuffs_base__image_decoder *(*allocate)(),
 		return NULL;
 	}
 
-	cairo_surface_t *surface = open_wuffs(
-		dec, wuffs_base__ptr_u8__reader((uint8_t *) data, len, TRUE), error);
+	cairo_surface_t *surface =
+		open_wuffs(dec, wuffs_base__ptr_u8__reader((uint8_t *) data, len, TRUE),
+			profile, error);
 	free(dec);
-	return fiv_io_profile_finalize(surface, profile);
+	return surface;
 }
 
 // --- JPEG --------------------------------------------------------------------
