@@ -198,6 +198,30 @@ fiv_io_profile_new_sRGB(void)
 #endif
 }
 
+FivIoProfile
+fiv_io_profile_new_sRGB_gamma(double gamma)
+{
+#ifdef HAVE_LCMS2
+	// TODO(p): Make sure to use the library in a thread-safe manner.
+	cmsContext context = NULL;
+
+	static const cmsCIExyY D65 = {0.3127, 0.3290, 1.0};
+	static const cmsCIExyYTRIPLE primaries = {
+		{0.6400, 0.3300, 1.0}, {0.3000, 0.6000, 1.0}, {0.1500, 0.0600, 1.0}};
+	cmsToneCurve *curve = cmsBuildGamma(context, gamma);
+	if (!curve)
+		return NULL;
+
+	cmsHPROFILE profile = cmsCreateRGBProfileTHR(
+		context, &D65, &primaries, (cmsToneCurve *[3]){curve, curve, curve});
+	cmsFreeToneCurve(curve);
+	return profile;
+#else
+	(void) gamma;
+	return NULL;
+#endif
+}
+
 static FivIoProfile
 fiv_io_profile_new_from_bytes(GBytes *bytes)
 {
@@ -740,13 +764,17 @@ open_wuffs(wuffs_base__image_decoder *dec, wuffs_base__io_buffer src,
 	struct load_wuffs_frame_context ctx = {
 		.dec = dec, .src = &src, .target = profile};
 
-	// TODO(p): PNG also has sRGB and gAMA, as well as text chunks (Wuffs #58).
-	// The former two use WUFFS_BASE__MORE_INFORMATION__FLAVOR__METADATA_PARSED.
+	// TODO(p): PNG text chunks (Wuffs #58).
 	wuffs_base__image_decoder__set_report_metadata(
 		ctx.dec, WUFFS_BASE__FOURCC__EXIF, true);
 	wuffs_base__image_decoder__set_report_metadata(
 		ctx.dec, WUFFS_BASE__FOURCC__ICCP, true);
+	wuffs_base__image_decoder__set_report_metadata(
+		ctx.dec, WUFFS_BASE__FOURCC__SRGB, true);
+	wuffs_base__image_decoder__set_report_metadata(
+		ctx.dec, WUFFS_BASE__FOURCC__GAMA, true);
 
+	double gamma = 0;
 	while (true) {
 		wuffs_base__status status =
 			wuffs_base__image_decoder__decode_image_config(
@@ -786,6 +814,14 @@ open_wuffs(wuffs_base__image_decoder *dec, wuffs_base__io_buffer src,
 			}
 			ctx.meta_xmp = bytes;
 			continue;
+
+		case WUFFS_BASE__FOURCC__SRGB:
+			gamma = 2.2;
+			break;
+		case WUFFS_BASE__FOURCC__GAMA:
+			gamma = 1e5 /
+				wuffs_base__more_information__metadata_parsed__gama(&minfo);
+			break;
 		}
 
 		g_bytes_unref(bytes);
@@ -805,8 +841,13 @@ open_wuffs(wuffs_base__image_decoder *dec, wuffs_base__io_buffer src,
 		goto fail;
 	}
 
-	if (ctx.target && ctx.meta_iccp)
-		ctx.source = fiv_io_profile_new_from_bytes(ctx.meta_iccp);
+	// TODO(p): Improve our simplistic PNG handling of: gAMA, cHRM, sRGB.
+	if (ctx.target) {
+		if (ctx.meta_iccp)
+			ctx.source = fiv_io_profile_new_from_bytes(ctx.meta_iccp);
+		else if (isfinite(gamma) && gamma > 0)
+			ctx.source = fiv_io_profile_new_sRGB_gamma(gamma);
+	}
 
 	// Wuffs maps tRNS to BGRA in `decoder.decode_trns?`, we should be fine.
 	// wuffs_base__pixel_format__transparency() doesn't reflect the image file.
