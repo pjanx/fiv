@@ -5,8 +5,8 @@ fastiv
 raw photos, HEIC, AVIF, WebP, SVG, X11 cursors and TIFF, or whatever gdk-pixbuf
 loads.
 
-Its development status can be summarized as '`beta`'.  E.g., colour management
-is a bit incomplete, and certain GIFs animate wrong.
+Its development status can be summarized as '`beta`'.
+E.g., certain GIFs animate wrong.
 
 Non-goals
 ---------

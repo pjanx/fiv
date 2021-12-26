@@ -79,7 +79,7 @@ int fiv_io_filecmp(GFile *f1, GFile *f2);
 /// Requires libwebp.
 /// If no exact frame is specified, this potentially creates an animation.
 gboolean fiv_io_save(cairo_surface_t *page, cairo_surface_t *frame,
-	const gchar *path, GError **error);
+	FivIoProfile target, const gchar *path, GError **error);
 
 // --- Metadata ----------------------------------------------------------------
 

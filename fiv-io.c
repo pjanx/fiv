@@ -206,6 +206,24 @@ fiv_io_profile_new_from_bytes(GBytes *bytes)
 	return fiv_io_profile_new(p, len);
 }
 
+static GBytes *
+fiv_io_profile_to_bytes(FivIoProfile profile)
+{
+#ifdef HAVE_LCMS2
+	cmsUInt32Number len = 0;
+	(void) cmsSaveProfileToMem(profile, NULL, &len);
+	gchar *data = g_malloc0(len);
+	if (!cmsSaveProfileToMem(profile, data, &len)) {
+		g_free(data);
+		return NULL;
+	}
+	return g_bytes_new_take(data, len);
+#else
+	(void) profile;
+	return NULL;
+#endif
+}
+
 void
 fiv_io_profile_free(FivIoProfile self)
 {
@@ -2490,10 +2508,8 @@ encode_webp_animation(WebPMux *mux, cairo_surface_t *page)
 }
 
 static gboolean
-transfer_metadata(WebPMux *mux, const char *fourcc, cairo_surface_t *page,
-	const cairo_user_data_key_t *kind)
+set_metadata(WebPMux *mux, const char *fourcc, GBytes *data)
 {
-	GBytes *data = cairo_surface_get_user_data(page, kind);
 	if (!data)
 		return TRUE;
 
@@ -2504,8 +2520,8 @@ transfer_metadata(WebPMux *mux, const char *fourcc, cairo_surface_t *page,
 }
 
 gboolean
-fiv_io_save(cairo_surface_t *page, cairo_surface_t *frame, const gchar *path,
-	GError **error)
+fiv_io_save(cairo_surface_t *page, cairo_surface_t *frame, FivIoProfile target,
+	const gchar *path, GError **error)
 {
 	g_return_val_if_fail(page != NULL, FALSE);
 	g_return_val_if_fail(path != NULL, FALSE);
@@ -2519,9 +2535,16 @@ fiv_io_save(cairo_surface_t *page, cairo_surface_t *frame, const gchar *path,
 	else
 		ok = encode_webp_animation(mux, page);
 
-	ok = ok && transfer_metadata(mux, "EXIF", page, &fiv_io_key_exif);
-	ok = ok && transfer_metadata(mux, "ICCP", page, &fiv_io_key_icc);
-	ok = ok && transfer_metadata(mux, "XMP ", page, &fiv_io_key_xmp);
+	ok = ok && set_metadata(mux, "EXIF",
+		cairo_surface_get_user_data(page, &fiv_io_key_exif));
+	ok = ok && set_metadata(mux, "ICCP",
+		cairo_surface_get_user_data(page, &fiv_io_key_icc));
+	ok = ok && set_metadata(mux, "XMP ",
+		cairo_surface_get_user_data(page, &fiv_io_key_xmp));
+
+	GBytes *iccp = NULL;
+	if (ok && target && (iccp = fiv_io_profile_to_bytes(target)))
+		ok = set_metadata(mux, "ICCP", iccp);
 
 	WebPData assembled = {};
 	WebPDataInit(&assembled);
@@ -2530,6 +2553,9 @@ fiv_io_save(cairo_surface_t *page, cairo_surface_t *frame, const gchar *path,
 	else
 		ok = g_file_set_contents(
 			path, (const gchar *) assembled.bytes, assembled.size, error);
+
+	if (iccp)
+		g_bytes_unref(iccp);
 
 	WebPMuxDelete(mux);
 	WebPDataClear(&assembled);

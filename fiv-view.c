@@ -779,9 +779,18 @@ print(FivView *self)
 }
 
 static gboolean
-save_as(FivView *self, gboolean frame)
+save_as(FivView *self, cairo_surface_t *frame)
 {
 	GtkWindow *window = get_toplevel(GTK_WIDGET(self));
+	FivIoProfile target = NULL;
+	if (self->enable_cms && (target = self->screen_cms_profile)) {
+		GtkWidget *dialog = gtk_message_dialog_new(window, GTK_DIALOG_MODAL,
+			GTK_MESSAGE_WARNING, GTK_BUTTONS_CLOSE, "%s",
+			"Color management overrides attached color profiles.");
+		gtk_dialog_run(GTK_DIALOG(dialog));
+		gtk_widget_destroy(dialog);
+	}
+
 	GtkWidget *dialog = gtk_file_chooser_dialog_new(
 		frame ? "Save frame as" : "Save page as",
 		window, GTK_FILE_CHOOSER_ACTION_SAVE,
@@ -834,7 +843,7 @@ save_as(FivView *self, gboolean frame)
 		GError *error = NULL;
 #ifdef HAVE_LIBWEBP
 		if (gtk_file_chooser_get_filter(chooser) == webp_filter)
-			fiv_io_save(self->page, frame ? self->frame : NULL, path, &error);
+			fiv_io_save(self->page, frame, target, path, &error);
 		else
 #endif  // HAVE_LIBWEBP
 			fiv_io_save_metadata(self->page, path, &error);
@@ -1027,7 +1036,7 @@ fiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 		case GDK_KEY_s:
 			return command(self, FIV_VIEW_COMMAND_SAVE_PAGE);
 		case GDK_KEY_S:
-			return save_as(self, TRUE);
+			return save_as(self, self->frame);
 		}
 	}
 	if (state == GDK_MOD1_MASK) {
@@ -1320,7 +1329,7 @@ fiv_view_command(FivView *self, FivViewCommand command)
 	break; case FIV_VIEW_COMMAND_PRINT:
 		print(self);
 	break; case FIV_VIEW_COMMAND_SAVE_PAGE:
-		save_as(self, FALSE);
+		save_as(self, NULL);
 	break; case FIV_VIEW_COMMAND_INFO:
 		info(self);
 
