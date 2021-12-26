@@ -1,9 +1,9 @@
 fastiv
 ======
 
-'fastiv' is a fast image viewer, supporting BMP, PNG, GIF, JPEG, and optionally
-raw photos, HEIC, AVIF, WebP, SVG, X11 cursors and TIFF, or whatever gdk-pixbuf
-loads.
+'fastiv' is a fast image viewer, directly supporting BMP, PNG, GIF, JPEG, WebP,
+and optionally raw photos, HEIC, AVIF, SVG, X11 cursors and TIFF,
+or whatever gdk-pixbuf loads.
 
 Its development status can be summarized as '`beta`'.
 E.g., certain GIFs animate wrong.
@@ -25,9 +25,9 @@ Building and Running
 --------------------
 Build dependencies: Meson, pkg-config +
 Runtime dependencies: gtk+-3.0, glib>=2.64, pixman-1, shared-mime-info,
-spng>=0.7.0, libturbojpeg +
-Optional dependencies: lcms2, LibRaw, librsvg-2.0, xcursor, libwebp, libheif,
-libtiff, gdk-pixbuf-2.0, ExifTool
+libturbojpeg, libwebp, spng>=0.7.0 +
+Optional dependencies: lcms2, LibRaw, librsvg-2.0, xcursor, libheif, libtiff,
+gdk-pixbuf-2.0, ExifTool
 
  $ git clone --recursive https://git.janouch.name/p/fastiv.git
  $ meson builddir

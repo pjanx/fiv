@@ -24,6 +24,10 @@
 
 #include <spng.h>
 #include <turbojpeg.h>
+#include <webp/decode.h>
+#include <webp/demux.h>
+#include <webp/encode.h>
+#include <webp/mux.h>
 
 // Colour management must be handled before RGB conversions.
 #ifdef HAVE_LCMS2
@@ -48,12 +52,6 @@
 #ifdef HAVE_XCURSOR
 #include <X11/Xcursor/Xcursor.h>
 #endif  // HAVE_XCURSOR
-#ifdef HAVE_LIBWEBP
-#include <webp/decode.h>
-#include <webp/demux.h>
-#include <webp/encode.h>
-#include <webp/mux.h>
-#endif  // HAVE_LIBWEBP
 #ifdef HAVE_LIBHEIF
 #include <libheif/heif.h>
 #endif  // HAVE_LIBHEIF
@@ -94,6 +92,7 @@ const char *fiv_io_supported_media_types[] = {
 	"image/gif",
 	"image/png",
 	"image/jpeg",
+	"image/webp",
 #ifdef HAVE_LIBRAW
 	"image/x-dcraw",
 #endif  // HAVE_LIBRAW
@@ -103,9 +102,6 @@ const char *fiv_io_supported_media_types[] = {
 #ifdef HAVE_XCURSOR
 	"image/x-xcursor",
 #endif  // HAVE_XCURSOR
-#ifdef HAVE_LIBWEBP
-	"image/webp",
-#endif  // HAVE_LIBWEBP
 #ifdef HAVE_LIBHEIF
 	"image/heic",
 	"image/heif",
@@ -1553,7 +1549,6 @@ open_xcursor(const gchar *data, gsize len, GError **error)
 }
 
 #endif  // HAVE_XCURSOR --------------------------------------------------------
-#ifdef HAVE_LIBWEBP  //---------------------------------------------------------
 
 static cairo_surface_t *
 load_libwebp_nonanimated(WebPDecoderConfig *config, const WebPData *wd,
@@ -1763,7 +1758,6 @@ fail:
 	return result;
 }
 
-#endif  // HAVE_LIBWEBP --------------------------------------------------------
 #ifdef HAVE_LIBHEIF  //---------------------------------------------------------
 
 static cairo_surface_t *
@@ -2355,6 +2349,14 @@ fiv_io_open_from_data(const char *data, size_t len, const gchar *path,
 			: open_libjpeg_turbo(data, len, profile, error);
 		break;
 	default:
+		// TODO(p): https://github.com/google/wuffs/commit/4c04ac1
+		if ((surface = open_libwebp(data, len, path, profile, error)))
+			break;
+		if (error) {
+			g_debug("%s", (*error)->message);
+			g_clear_error(error);
+		}
+
 #ifdef HAVE_LIBRAW  // ---------------------------------------------------------
 		if ((surface = open_libraw(data, len, error)))
 			break;
@@ -2384,15 +2386,6 @@ fiv_io_open_from_data(const char *data, size_t len, const gchar *path,
 			g_clear_error(error);
 		}
 #endif  // HAVE_XCURSOR --------------------------------------------------------
-#ifdef HAVE_LIBWEBP  //---------------------------------------------------------
-		// TODO(p): https://github.com/google/wuffs/commit/4c04ac1
-		if ((surface = open_libwebp(data, len, path, profile, error)))
-			break;
-		if (error) {
-			g_debug("%s", (*error)->message);
-			g_clear_error(error);
-		}
-#endif  // HAVE_LIBWEBP --------------------------------------------------------
 #ifdef HAVE_LIBHEIF  //---------------------------------------------------------
 		if ((surface = open_libheif(data, len, path, profile, error)))
 			break;
@@ -2443,7 +2436,6 @@ fiv_io_open_from_data(const char *data, size_t len, const gchar *path,
 }
 
 // --- Export ------------------------------------------------------------------
-#ifdef HAVE_LIBWEBP
 
 static WebPData
 encode_lossless_webp(cairo_surface_t *surface)
@@ -2603,7 +2595,6 @@ fiv_io_save(cairo_surface_t *page, cairo_surface_t *frame, FivIoProfile target,
 	return ok;
 }
 
-#endif  // HAVE_LIBWEBP
 // --- Metadata ----------------------------------------------------------------
 
 FivIoOrientation
@@ -2744,6 +2735,10 @@ fiv_io_save_metadata(cairo_surface_t *page, const gchar *path, GError **error)
 
 // --- Thumbnails --------------------------------------------------------------
 
+#ifndef __linux__
+#define st_mtim st_mtimespec
+#endif  // ! __linux__
+
 GType
 fiv_io_thumbnail_size_get_type(void)
 {
@@ -2766,11 +2761,143 @@ FivIoThumbnailSizeInfo
 		FIV_IO_THUMBNAIL_SIZES(XX)};
 #undef XX
 
+// TODO(p): Put the constant in a header file, share with fiv-browser.c.
+static const double g_wide_thumbnail_factor = 2;
+
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-#ifndef __linux__
-#define st_mtim st_mtimespec
-#endif  // ! __linux__
+// In principle similar to rescale_thumbnail() from fiv-browser.c.
+static cairo_surface_t *
+rescale_thumbnail(cairo_surface_t *thumbnail, double row_height)
+{
+	int width = cairo_image_surface_get_width(thumbnail);
+	int height = cairo_image_surface_get_height(thumbnail);
+
+	double scale_x = 1;
+	double scale_y = 1;
+	if (width > g_wide_thumbnail_factor * height) {
+		scale_x = g_wide_thumbnail_factor * row_height / width;
+		scale_y = round(scale_x * height) / height;
+	} else {
+		scale_y = row_height / height;
+		scale_x = round(scale_y * width) / width;
+	}
+	if (scale_x == 1 && scale_y == 1)
+		return cairo_surface_reference(thumbnail);
+
+	// TODO(p): Don't always include an alpha channel.
+	cairo_format_t cairo_format = CAIRO_FORMAT_ARGB32;
+
+	int projected_width = round(scale_x * width);
+	int projected_height = round(scale_y * height);
+	cairo_surface_t *scaled = cairo_image_surface_create(
+		cairo_format, projected_width, projected_height);
+
+	cairo_t *cr = cairo_create(scaled);
+	cairo_scale(cr, scale_x, scale_y);
+
+	cairo_set_source_surface(cr, thumbnail, 0, 0);
+	cairo_pattern_t *pattern = cairo_get_source(cr);
+	cairo_pattern_set_filter(pattern, CAIRO_FILTER_BEST);
+	cairo_pattern_set_extend(pattern, CAIRO_EXTEND_PAD);
+
+	cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+	cairo_paint(cr);
+	cairo_destroy(cr);
+	return scaled;
+}
+
+gboolean
+fiv_io_produce_thumbnail(GFile *target, FivIoThumbnailSize size, GError **error)
+{
+	g_return_val_if_fail(size >= FIV_IO_THUMBNAIL_SIZE_MIN &&
+		size <= FIV_IO_THUMBNAIL_SIZE_MAX, FALSE);
+
+	// Local files only, at least for now.
+	gchar *path = g_file_get_path(target);
+	if (!path)
+		return FALSE;
+
+	GMappedFile *mf = g_mapped_file_new(path, FALSE, error);
+	if (!mf) {
+		g_free(path);
+		return FALSE;
+	}
+
+	GStatBuf st = {};
+	if (g_stat(path, &st)) {
+		set_error(error, g_strerror(errno));
+		g_free(path);
+		return FALSE;
+	}
+
+	// TODO(p): Add a flag to avoid loading all pages and frames.
+	FivIoProfile sRGB = fiv_io_profile_new_sRGB();
+	cairo_surface_t *surface =
+		fiv_io_open_from_data(g_mapped_file_get_contents(mf),
+			g_mapped_file_get_length(mf), path, sRGB, FALSE, error);
+
+	g_free(path);
+	g_mapped_file_unref(mf);
+	if (sRGB)
+		fiv_io_profile_free(sRGB);
+	if (!surface)
+		return FALSE;
+
+	// Boilerplate copied from fiv_io_lookup_thumbnail().
+	gchar *uri = g_file_get_uri(target);
+	gchar *sum = g_compute_checksum_for_string(G_CHECKSUM_MD5, uri, -1);
+	gchar *cache_dir = get_xdg_home_dir("XDG_CACHE_HOME", ".cache");
+
+	for (int use = size; use >= FIV_IO_THUMBNAIL_SIZE_MIN; use--) {
+		cairo_surface_t *scaled =
+			rescale_thumbnail(surface, fiv_io_thumbnail_sizes[use].size);
+		gchar *path = g_strdup_printf("%s/thumbnails/wide-%s/%s.webp",
+			cache_dir, fiv_io_thumbnail_sizes[use].thumbnail_spec_name, sum);
+
+		GError *e = NULL;
+		while (!fiv_io_save(scaled, scaled, NULL, path, &e)) {
+			bool missing_parents =
+				e->domain == G_FILE_ERROR && e->code == G_FILE_ERROR_NOENT;
+			g_debug("%s: %s", path, e->message);
+			g_clear_error(&e);
+			if (!missing_parents)
+				break;
+
+			gchar *dirname = g_path_get_dirname(path);
+			int err = g_mkdir_with_parents(dirname, 0755);
+			if (err)
+				g_debug("%s: %s", dirname, g_strerror(errno));
+
+			g_free(dirname);
+			if (err)
+				break;
+		}
+
+		// It would be possible to create square thumbnails as well,
+		// but it seems like wasted effort.
+		cairo_surface_destroy(scaled);
+		g_free(path);
+	}
+
+	g_free(cache_dir);
+	g_free(sum);
+	g_free(uri);
+	cairo_surface_destroy(surface);
+	return TRUE;
+}
+
+static cairo_surface_t *
+read_wide_thumbnail(
+	const gchar *path, const gchar *uri, time_t mtime, GError **error)
+{
+	// TODO(p): Validate.
+	(void) uri;
+	(void) mtime;
+	return fiv_io_open(path, NULL, FALSE, error);
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 static int  // tri-state
 check_spng_thumbnail_texts(struct spng_text *texts, uint32_t texts_len,
@@ -2935,8 +3062,20 @@ fiv_io_lookup_thumbnail(GFile *target, FivIoThumbnailSize size)
 		if (use > FIV_IO_THUMBNAIL_SIZE_MAX)
 			use = FIV_IO_THUMBNAIL_SIZE_MAX - i;
 
-		gchar *path = g_strdup_printf("%s/thumbnails/%s/%s.png", cache_dir,
-			fiv_io_thumbnail_sizes[use].thumbnail_spec_name, sum);
+		const char *name = fiv_io_thumbnail_sizes[use].thumbnail_spec_name;
+		gchar *wide = g_strdup_printf(
+			"%s/thumbnails/wide-%s/%s.webp", cache_dir, name, sum);
+		result = read_wide_thumbnail(wide, uri, st.st_mtim.tv_sec, &error);
+		if (error) {
+			g_debug("%s: %s", wide, error->message);
+			g_clear_error(&error);
+		}
+		g_free(wide);
+		if (result)
+			break;
+
+		gchar *path =
+			g_strdup_printf("%s/thumbnails/%s/%s.png", cache_dir, name, sum);
 		result = read_spng_thumbnail(path, uri, st.st_mtim.tv_sec, &error);
 		if (error) {
 			g_debug("%s: %s", path, error->message);
@@ -2946,6 +3085,9 @@ fiv_io_lookup_thumbnail(GFile *target, FivIoThumbnailSize size)
 		if (result)
 			break;
 	}
+
+	// TODO(p): We can definitely extract embedded thumbnails, but it should be
+	// done as a separate stage--the file may be stored on a slow device.
 
 	g_free(cache_dir);
 	g_free(sum);

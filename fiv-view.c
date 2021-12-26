@@ -797,18 +797,7 @@ save_as(FivView *self, cairo_surface_t *frame)
 		"_Cancel", GTK_RESPONSE_CANCEL, "_Save", GTK_RESPONSE_ACCEPT, NULL);
 
 	GtkFileChooser *chooser = GTK_FILE_CHOOSER(dialog);
-
-	// TODO(p): Consider a hard dependency on libwebp, or clean this up.
-#ifdef HAVE_LIBWEBP
-	// This is the best general format: supports lossless encoding, animations,
-	// alpha channel, and Exif and ICC profile metadata.
-	// PNG is another viable option, but sPNG can't do APNG, Wuffs can't save,
-	// and libpng is a pain in the arse.
-	GtkFileFilter *webp_filter = gtk_file_filter_new();
-	gtk_file_filter_add_mime_type(webp_filter, "image/webp");
-	gtk_file_filter_add_pattern(webp_filter, "*.webp");
-	gtk_file_filter_set_name(webp_filter, "Lossless WebP (*.webp)");
-	gtk_file_chooser_add_filter(chooser, webp_filter);
+	gtk_file_chooser_set_do_overwrite_confirmation(chooser, TRUE);
 
 	// Note that GTK+'s save dialog is too stupid to automatically change
 	// the extension when user changes the filter. Presumably,
@@ -819,13 +808,20 @@ save_as(FivView *self, cairo_surface_t *frame)
 	g_free(basename);
 	gtk_file_chooser_set_current_name(chooser, name);
 	g_free(name);
-#endif  // HAVE_LIBWEBP
-
-	gtk_file_chooser_set_do_overwrite_confirmation(chooser, TRUE);
 
 	gchar *dirname = g_path_get_dirname(self->path);
 	gtk_file_chooser_set_current_folder(chooser, dirname);
 	g_free(dirname);
+
+	// This is the best general format: supports lossless encoding, animations,
+	// alpha channel, and Exif and ICC profile metadata.
+	// PNG is another viable option, but sPNG can't do APNG, Wuffs can't save,
+	// and libpng is a pain in the arse.
+	GtkFileFilter *webp_filter = gtk_file_filter_new();
+	gtk_file_filter_add_mime_type(webp_filter, "image/webp");
+	gtk_file_filter_add_pattern(webp_filter, "*.webp");
+	gtk_file_filter_set_name(webp_filter, "Lossless WebP (*.webp)");
+	gtk_file_chooser_add_filter(chooser, webp_filter);
 
 	// The format is supported by Exiv2 and ExifTool.
 	// This is mostly a developer tool.
@@ -835,22 +831,16 @@ save_as(FivView *self, cairo_surface_t *frame)
 	gtk_file_filter_set_name(exv_filter, "Exiv2 metadata (*.exv)");
 	gtk_file_chooser_add_filter(chooser, exv_filter);
 
+	GError *error = NULL;
 	switch (gtk_dialog_run(GTK_DIALOG(dialog))) {
 		gchar *path;
 	case GTK_RESPONSE_ACCEPT:
 		path = gtk_file_chooser_get_filename(chooser);
-
-		GError *error = NULL;
-#ifdef HAVE_LIBWEBP
-		if (gtk_file_chooser_get_filter(chooser) == webp_filter)
-			fiv_io_save(self->page, frame, target, path, &error);
-		else
-#endif  // HAVE_LIBWEBP
-			fiv_io_save_metadata(self->page, path, &error);
-		if (error)
+		if (!(gtk_file_chooser_get_filter(chooser) == webp_filter
+					? fiv_io_save(self->page, frame, target, path, &error)
+					: fiv_io_save_metadata(self->page, path, &error)))
 			show_error_dialog(window, error);
 		g_free(path);
-
 		// Fall-through.
 	default:
 		gtk_widget_destroy(dialog);

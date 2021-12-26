@@ -76,7 +76,7 @@ int fiv_io_filecmp(GFile *f1, GFile *f2);
 
 // --- Export ------------------------------------------------------------------
 
-/// Requires libwebp.
+/// Saves the page as a lossless WebP still picture or animation.
 /// If no exact frame is specified, this potentially creates an animation.
 gboolean fiv_io_save(cairo_surface_t *page, cairo_surface_t *frame,
 	FivIoProfile target, const gchar *path, GError **error);
@@ -131,5 +131,11 @@ typedef struct _FivIoThumbnailSizeInfo {
 extern FivIoThumbnailSizeInfo
 	fiv_io_thumbnail_sizes[FIV_IO_THUMBNAIL_SIZE_COUNT];
 
+/// Generates wide thumbnails of up to the specified size, saves them in cache.
+gboolean fiv_io_produce_thumbnail(
+	GFile *target, FivIoThumbnailSize size, GError **error);
+
+/// Retrieves a thumbnail of the most appropriate quality and resolution
+/// for the target file.
 cairo_surface_t *fiv_io_lookup_thumbnail(
 	GFile *target, FivIoThumbnailSize size);

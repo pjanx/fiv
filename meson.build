@@ -14,15 +14,11 @@ if get_option('buildtype').startswith('debug')
 	add_project_link_arguments(flags, language : ['c'])
 endif
 
-# TODO(p): Use libraw_r later, when we start parallelizing/preloading.
 lcms2 = dependency('lcms2', required : get_option('lcms2'))
+# Note that only libraw_r is thread-safe, but we'll just run it out-of process.
 libraw = dependency('libraw', required : get_option('libraw'))
 librsvg = dependency('librsvg-2.0', required : get_option('librsvg'))
 xcursor = dependency('xcursor', required : get_option('xcursor'))
-libwebp = dependency('libwebp', required : get_option('libwebp'))
-libwebpdemux = dependency('libwebpdemux', required : get_option('libwebp'))
-libwebpdecoder = dependency('libwebpdecoder', required : get_option('libwebp'))
-libwebpmux = dependency('libwebpmux', required : get_option('libwebp'))
 libheif = dependency('libheif', required : get_option('libheif'))
 libtiff = dependency('libtiff-4', required : get_option('libtiff'))
 gdkpixbuf = dependency('gdk-pixbuf-2.0', required : get_option('gdk-pixbuf'))
@@ -32,6 +28,11 @@ dependencies = [
 
 	dependency('libturbojpeg'),
 	dependency('libjpeg', required : get_option('jpeg-qs')),
+	dependency('libwebp'),
+	dependency('libwebpdemux'),
+	dependency('libwebpdecoder'),
+	dependency('libwebpmux'),
+	# https://github.com/google/wuffs/issues/58
 	dependency('spng', version : '>=0.7.0',
 		default_options: 'default_library=static'),
 
@@ -39,10 +40,6 @@ dependencies = [
 	libraw,
 	librsvg,
 	xcursor,
-	libwebp,
-	libwebpdemux,
-	libwebpdecoder,
-	libwebpmux,
 	libheif,
 	libtiff,
 	gdkpixbuf,
@@ -58,7 +55,6 @@ conf.set('HAVE_LCMS2', lcms2.found())
 conf.set('HAVE_LIBRAW', libraw.found())
 conf.set('HAVE_LIBRSVG', librsvg.found())
 conf.set('HAVE_XCURSOR', xcursor.found())
-conf.set('HAVE_LIBWEBP', libwebp.found())
 conf.set('HAVE_LIBHEIF', libheif.found())
 conf.set('HAVE_LIBTIFF', libtiff.found())
 conf.set('HAVE_GDKPIXBUF', gdkpixbuf.found())

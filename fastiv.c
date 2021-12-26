@@ -1191,7 +1191,7 @@ main(int argc, char *argv[])
 {
 	gboolean show_version = FALSE, show_supported_media_types = FALSE,
 		browse = FALSE;
-	gchar **path_args = NULL;
+	gchar **path_args = NULL, *thumbnail_size = NULL;
 	const GOptionEntry options[] = {
 		{G_OPTION_REMAINING, 0, 0, G_OPTION_ARG_FILENAME_ARRAY, &path_args,
 			NULL, "[FILE | DIRECTORY]"},
@@ -1201,6 +1201,9 @@ main(int argc, char *argv[])
 		{"browse", 0, G_OPTION_FLAG_IN_MAIN,
 			G_OPTION_ARG_NONE, &browse,
 			"Start in filesystem browsing mode", NULL},
+		{"thumbnail", 0, G_OPTION_FLAG_IN_MAIN,
+			G_OPTION_ARG_STRING, &thumbnail_size,
+			"Generate thumbnails for an image, up to the given size", "SIZE"},
 		{"version", 'V', G_OPTION_FLAG_IN_MAIN, G_OPTION_ARG_NONE,
 			&show_version, "Output version information and exit", NULL},
 		{},
@@ -1224,9 +1227,29 @@ main(int argc, char *argv[])
 	// NOTE: Firefox and Eye of GNOME both interpret multiple arguments
 	// in a special way. This is problematic, because one-element lists
 	// are unrepresentable.
+	// TODO(p): Require a command line switch, load a virtual folder.
+	// We may want or need to create a custom GVfs.
 	// TODO(p): Complain to the user if there's more than one argument.
 	// Best show the help message, if we can figure that out.
 	const gchar *path_arg = path_args ? path_args[0] : NULL;
+	if (thumbnail_size) {
+		if (!path_arg)
+			exit_fatal("no path given");
+
+		FivIoThumbnailSize size = 0;
+		for (; size < FIV_IO_THUMBNAIL_SIZE_COUNT; size++)
+			if (!strcmp(fiv_io_thumbnail_sizes[size].thumbnail_spec_name,
+					thumbnail_size))
+				break;
+		if (size >= FIV_IO_THUMBNAIL_SIZE_COUNT)
+			exit_fatal("unknown thumbnail size: %s", thumbnail_size);
+
+		GFile *target = g_file_new_for_path(path_arg);
+		if (!fiv_io_produce_thumbnail(target, size, &error))
+			exit_fatal("%s", error->message);
+		g_object_unref(target);
+		return 0;
+	}
 
 	gtk_window_set_default_icon_name(PROJECT_NAME);
 	gtk_icon_theme_add_resource_path(
@@ -1254,7 +1277,6 @@ main(int argc, char *argv[])
 	gtk_box_pack_start(GTK_BOX(g.view_box),
 		gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(g.view_box), view_scroller, TRUE, TRUE, 0);
-	gtk_widget_show_all(g.view_box);
 
 	g.browser_scroller = gtk_scrolled_window_new(NULL, NULL);
 	g.browser = g_object_new(FIV_TYPE_BROWSER, NULL);
@@ -1320,14 +1342,15 @@ main(int argc, char *argv[])
 	g_signal_connect(g.browser_paned, "button-press-event",
 		G_CALLBACK(on_button_press_browser_paned), NULL);
 
-	// TODO(p): Can we not do it here separately?
-	gtk_widget_show_all(g.browser_paned);
-
 	g.stack = gtk_stack_new();
 	gtk_stack_set_transition_type(
 		GTK_STACK(g.stack), GTK_STACK_TRANSITION_TYPE_NONE);
 	gtk_container_add(GTK_CONTAINER(g.stack), g.view_box);
 	gtk_container_add(GTK_CONTAINER(g.stack), g.browser_paned);
+
+	// TODO(p): Can we not do it here separately?
+	gtk_widget_show_all(g.view_box);
+	gtk_widget_show_all(g.browser_paned);
 
 	g.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	g_signal_connect(g.window, "destroy",
