@@ -134,6 +134,9 @@ typedef struct _FivIoThumbnailSizeInfo {
 extern FivIoThumbnailSizeInfo
 	fiv_io_thumbnail_sizes[FIV_IO_THUMBNAIL_SIZE_COUNT];
 
+/// Returns this user's root thumbnail directory.
+gchar *fiv_io_get_thumbnail_root(void);
+
 /// Generates wide thumbnails of up to the specified size, saves them in cache.
 gboolean fiv_io_produce_thumbnail(
 	GFile *target, FivIoThumbnailSize size, GError **error);

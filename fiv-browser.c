@@ -543,6 +543,17 @@ thumbnailer_start(FivBrowser *self)
 {
 	thumbnailer_abort(self);
 
+	// TODO(p): Leave out all paths containing .cache/thumbnails altogether.
+	gchar *thumbnails_dir = fiv_io_get_thumbnail_root();
+	GFile *thumbnails = g_file_new_for_path(thumbnails_dir);
+	g_free(thumbnails_dir);
+	GFile *current = g_file_new_for_path(self->path);
+	gboolean is_a_thumbnail = g_file_has_prefix(current, thumbnails);
+	g_object_unref(current);
+	g_object_unref(thumbnails);
+	if (is_a_thumbnail)
+		return;
+
 	GList *missing = NULL, *lq = NULL;
 	for (guint i = self->entries->len; i--; ) {
 		Entry *entry = &g_array_index(self->entries, Entry, i);

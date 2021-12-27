@@ -2773,6 +2773,15 @@ mark_thumbnail_lq(cairo_surface_t *surface)
 		surface, &fiv_io_key_thumbnail_lq, (void *) (intptr_t) 1, NULL);
 }
 
+gchar *
+fiv_io_get_thumbnail_root(void)
+{
+	gchar *cache_dir = get_xdg_home_dir("XDG_CACHE_HOME", ".cache");
+	gchar *thumbnails_dir = g_build_filename(cache_dir, "thumbnails", NULL);
+	g_free(cache_dir);
+	return thumbnails_dir;
+}
+
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 // In principle similar to rescale_thumbnail() from fiv-browser.c.
@@ -2857,15 +2866,13 @@ fiv_io_produce_thumbnail(GFile *target, FivIoThumbnailSize size, GError **error)
 	// Boilerplate copied from fiv_io_lookup_thumbnail().
 	gchar *uri = g_file_get_uri(target);
 	gchar *sum = g_compute_checksum_for_string(G_CHECKSUM_MD5, uri, -1);
-	gchar *cache_dir = get_xdg_home_dir("XDG_CACHE_HOME", ".cache");
-
-	// TODO(p): Never produce thumbnails for thumbnail directories.
+	gchar *thumbnails_dir = fiv_io_get_thumbnail_root();
 
 	for (int use = size; use >= FIV_IO_THUMBNAIL_SIZE_MIN; use--) {
 		cairo_surface_t *scaled =
 			rescale_thumbnail(surface, fiv_io_thumbnail_sizes[use].size);
-		gchar *path = g_strdup_printf("%s/thumbnails/wide-%s/%s.webp",
-			cache_dir, fiv_io_thumbnail_sizes[use].thumbnail_spec_name, sum);
+		gchar *path = g_strdup_printf("%s/wide-%s/%s.webp", thumbnails_dir,
+			fiv_io_thumbnail_sizes[use].thumbnail_spec_name, sum);
 
 		GError *e = NULL;
 		while (!fiv_io_save(scaled, scaled, NULL, path, &e)) {
@@ -2892,7 +2899,7 @@ fiv_io_produce_thumbnail(GFile *target, FivIoThumbnailSize size, GError **error)
 		g_free(path);
 	}
 
-	g_free(cache_dir);
+	g_free(thumbnails_dir);
 	g_free(sum);
 	g_free(uri);
 	cairo_surface_destroy(surface);
@@ -3064,7 +3071,7 @@ fiv_io_lookup_thumbnail(GFile *target, FivIoThumbnailSize size)
 
 	gchar *uri = g_file_get_uri(target);
 	gchar *sum = g_compute_checksum_for_string(G_CHECKSUM_MD5, uri, -1);
-	gchar *cache_dir = get_xdg_home_dir("XDG_CACHE_HOME", ".cache");
+	gchar *thumbnails_dir = fiv_io_get_thumbnail_root();
 
 	// The lookup sequence is: nominal..max, then mirroring back to ..min.
 	cairo_surface_t *result = NULL;
@@ -3075,8 +3082,8 @@ fiv_io_lookup_thumbnail(GFile *target, FivIoThumbnailSize size)
 			use = FIV_IO_THUMBNAIL_SIZE_MAX - i;
 
 		const char *name = fiv_io_thumbnail_sizes[use].thumbnail_spec_name;
-		gchar *wide = g_strdup_printf(
-			"%s/thumbnails/wide-%s/%s.webp", cache_dir, name, sum);
+		gchar *wide =
+			g_strdup_printf("%s/wide-%s/%s.webp", thumbnails_dir, name, sum);
 		result = read_wide_thumbnail(wide, uri, st.st_mtim.tv_sec, &error);
 		if (error) {
 			g_debug("%s: %s", wide, error->message);
@@ -3092,7 +3099,7 @@ fiv_io_lookup_thumbnail(GFile *target, FivIoThumbnailSize size)
 		}
 
 		gchar *path =
-			g_strdup_printf("%s/thumbnails/%s/%s.png", cache_dir, name, sum);
+			g_strdup_printf("%s/%s/%s.png", thumbnails_dir, name, sum);
 		result = read_spng_thumbnail(path, uri, st.st_mtim.tv_sec, &error);
 		if (error) {
 			g_debug("%s: %s", path, error->message);
@@ -3109,7 +3116,7 @@ fiv_io_lookup_thumbnail(GFile *target, FivIoThumbnailSize size)
 	// TODO(p): We can definitely extract embedded thumbnails, but it should be
 	// done as a separate stage--the file may be stored on a slow device.
 
-	g_free(cache_dir);
+	g_free(thumbnails_dir);
 	g_free(sum);
 	g_free(uri);
 	return result;
