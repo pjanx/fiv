@@ -48,11 +48,11 @@ struct _FivBrowser {
 	int item_spacing;                   ///< Space between items in pixels
 
 	char *path;                         ///< Current path
-	GArray *entries;                    ///< [Entry]
-	GArray *layouted_rows;              ///< [Row]
+	GArray *entries;                    ///< []Entry
+	GArray *layouted_rows;              ///< []Row
 	int selected;
 
-	GList *thumbnail_queue;             ///< URIs to thumbnail
+	GList *thumbnail_queue;             ///< Entry pointers
 	GSubprocess *thumbnailer;           ///< A slave for the current queue head
 	GCancellable *thumbnail_cancel;     ///< Cancellable handle
 
@@ -448,25 +448,11 @@ reload_thumbnails(FivBrowser *self)
 
 // --- Slave management --------------------------------------------------------
 
-static void thumbnailer_step(FivBrowser *self);
+static void thumbnailer_next(FivBrowser *self);
 
 static void
-thumbnailer_process(FivBrowser *self, const gchar *uri)
+thumbnailer_reprocess_entry(FivBrowser *self, Entry *entry)
 {
-	// TODO(p): Consider using Entry pointers directly.
-	Entry *entry = NULL;
-	for (guint i = 0; i < self->entries->len; i++) {
-		Entry *e = &g_array_index(self->entries, Entry, i);
-		if (!g_strcmp0(e->uri, uri)) {
-			entry = e;
-			break;
-		}
-	}
-	if (!entry) {
-		g_warning("finished thumbnailing an unknown URI");
-		return;
-	}
-
 	entry_add_thumbnail(entry, self);
 	materialize_icon(self, entry);
 	gtk_widget_queue_resize(GTK_WIDGET(self));
@@ -491,26 +477,32 @@ on_thumbnailer_ready(GObject *object, GAsyncResult *res, gpointer user_data)
 		return;
 	}
 
-	gchar *uri = self->thumbnail_queue->data;
+	Entry *entry = self->thumbnail_queue->data;
 	self->thumbnail_queue =
 		g_list_delete_link(self->thumbnail_queue, self->thumbnail_queue);
 	if (succeeded)
-		thumbnailer_process(self, uri);
-	g_free(uri);
+		thumbnailer_reprocess_entry(self, entry);
 
 	// TODO(p): Eliminate high recursion depth with non-paths.
-	thumbnailer_step(self);
+	thumbnailer_next(self);
 }
 
 static void
-thumbnailer_step(FivBrowser *self)
+thumbnailer_next(FivBrowser *self)
 {
-	if (!self->thumbnail_queue)
+	GList *link = self->thumbnail_queue;
+	if (!link)
 		return;
 
-	GFile *file = g_file_new_for_uri(self->thumbnail_queue->data);
+	const Entry *entry = link->data;
+	GFile *file = g_file_new_for_uri(entry->uri);
 	gchar *path = g_file_get_path(file);
 	g_object_unref(file);
+	if (!path) {
+		// TODO(p): Support thumbnailing non-local URIs in some manner.
+		self->thumbnail_queue = g_list_delete_link(self->thumbnail_queue, link);
+		return;
+	}
 
 	GError *error = NULL;
 	self->thumbnailer = g_subprocess_new(G_SUBPROCESS_FLAGS_NONE, &error,
@@ -518,7 +510,6 @@ thumbnailer_step(FivBrowser *self)
 		fiv_io_thumbnail_sizes[self->item_size].thumbnail_spec_name, "--", path,
 		NULL);
 	g_free(path);
-
 	if (error) {
 		g_warning("%s", error->message);
 		g_error_free(error);
@@ -531,28 +522,34 @@ thumbnailer_step(FivBrowser *self)
 }
 
 static void
-thumbnailer_launch(FivBrowser *self)
+thumbnailer_abort(FivBrowser *self)
 {
-	if (self->thumbnailer) {
+	if (self->thumbnail_cancel) {
 		g_cancellable_cancel(self->thumbnail_cancel);
 		g_clear_object(&self->thumbnail_cancel);
-
-		// Just let it exit on its own.
-		g_clear_object(&self->thumbnailer);
-		g_list_free_full(self->thumbnail_queue, g_free);
-		self->thumbnail_queue = NULL;
 	}
+
+	// Just let it exit on its own.
+	g_clear_object(&self->thumbnailer);
+	g_list_free(self->thumbnail_queue);
+	self->thumbnail_queue = NULL;
+}
+
+static void
+thumbnailer_start(FivBrowser *self)
+{
+	thumbnailer_abort(self);
 
 	// TODO(p): Also collect rescaled images.
 	GList *missing = NULL, *rescaled = NULL;
 	for (guint i = self->entries->len; i--; ) {
-		Entry *e = &g_array_index(self->entries, Entry, i);
-		if (e->icon)
-			missing = g_list_prepend(missing, g_strdup(e->uri));
+		Entry *entry = &g_array_index(self->entries, Entry, i);
+		if (entry->icon)
+			missing = g_list_prepend(missing, entry);
 	}
 
 	self->thumbnail_queue = g_list_concat(missing, rescaled);
-	thumbnailer_step(self);
+	thumbnailer_next(self);
 }
 
 // --- Context menu-------------------------------------------------------------
@@ -742,18 +739,12 @@ static void
 fiv_browser_finalize(GObject *gobject)
 {
 	FivBrowser *self = FIV_BROWSER(gobject);
+	thumbnailer_abort(self);
 	g_free(self->path);
 	g_array_free(self->entries, TRUE);
 	g_array_free(self->layouted_rows, TRUE);
 	cairo_surface_destroy(self->glow);
 	g_clear_object(&self->pointer);
-
-	g_list_free_full(self->thumbnail_queue, g_free);
-	g_clear_object(&self->thumbnailer);
-	if (self->thumbnail_cancel) {
-		g_cancellable_cancel(self->thumbnail_cancel);
-		g_clear_object(&self->thumbnail_cancel);
-	}
 
 	G_OBJECT_CLASS(fiv_browser_parent_class)->finalize(gobject);
 }
@@ -1166,6 +1157,9 @@ void
 fiv_browser_load(
 	FivBrowser *self, FivBrowserFilterCallback cb, const char *path)
 {
+	g_return_if_fail(FIV_IS_BROWSER(self));
+
+	thumbnailer_abort(self);
 	g_array_set_size(self->entries, 0);
 	g_array_set_size(self->layouted_rows, 0);
 	g_clear_pointer(&self->path, g_free);
@@ -1198,5 +1192,5 @@ fiv_browser_load(
 	g_array_sort(self->entries, entry_compare);
 
 	reload_thumbnails(self);
-	thumbnailer_launch(self);
+	thumbnailer_start(self);
 }
