@@ -2288,6 +2288,8 @@ cairo_user_data_key_t fiv_io_key_loops;
 cairo_user_data_key_t fiv_io_key_page_next;
 cairo_user_data_key_t fiv_io_key_page_previous;
 
+cairo_user_data_key_t fiv_io_key_thumbnail_lq;
+
 cairo_surface_t *
 fiv_io_open(
 	const gchar *path, FivIoProfile profile, gboolean enhance, GError **error)
@@ -2764,6 +2766,13 @@ FivIoThumbnailSizeInfo
 // TODO(p): Put the constant in a header file, share with fiv-browser.c.
 static const double g_wide_thumbnail_factor = 2;
 
+static void
+mark_thumbnail_lq(cairo_surface_t *surface)
+{
+	cairo_surface_set_user_data(
+		surface, &fiv_io_key_thumbnail_lq, (void *) (intptr_t) 1, NULL);
+}
+
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 // In principle similar to rescale_thumbnail() from fiv-browser.c.
@@ -2804,6 +2813,7 @@ rescale_thumbnail(cairo_surface_t *thumbnail, double row_height)
 	cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
 	cairo_paint(cr);
 	cairo_destroy(cr);
+	mark_thumbnail_lq(scaled);
 	return scaled;
 }
 
@@ -2848,6 +2858,8 @@ fiv_io_produce_thumbnail(GFile *target, FivIoThumbnailSize size, GError **error)
 	gchar *uri = g_file_get_uri(target);
 	gchar *sum = g_compute_checksum_for_string(G_CHECKSUM_MD5, uri, -1);
 	gchar *cache_dir = get_xdg_home_dir("XDG_CACHE_HOME", ".cache");
+
+	// TODO(p): Never produce thumbnails for thumbnail directories.
 
 	for (int use = size; use >= FIV_IO_THUMBNAIL_SIZE_MIN; use--) {
 		cairo_surface_t *scaled =
@@ -3058,7 +3070,7 @@ fiv_io_lookup_thumbnail(GFile *target, FivIoThumbnailSize size)
 	cairo_surface_t *result = NULL;
 	GError *error = NULL;
 	for (int i = 0; i < FIV_IO_THUMBNAIL_SIZE_COUNT; i++) {
-		int use = size + i;
+		FivIoThumbnailSize use = size + i;
 		if (use > FIV_IO_THUMBNAIL_SIZE_MAX)
 			use = FIV_IO_THUMBNAIL_SIZE_MAX - i;
 
@@ -3071,8 +3083,13 @@ fiv_io_lookup_thumbnail(GFile *target, FivIoThumbnailSize size)
 			g_clear_error(&error);
 		}
 		g_free(wide);
-		if (result)
+		if (result) {
+			// Higher up we can't distinguish images smaller than the thumbnail.
+			// Also, try not to rescale the already rescaled.
+			if (use != size)
+				mark_thumbnail_lq(result);
 			break;
+		}
 
 		gchar *path =
 			g_strdup_printf("%s/thumbnails/%s/%s.png", cache_dir, name, sum);
@@ -3082,8 +3099,11 @@ fiv_io_lookup_thumbnail(GFile *target, FivIoThumbnailSize size)
 			g_clear_error(&error);
 		}
 		g_free(path);
-		if (result)
+		if (result) {
+			// Whatever produced it, we may be able to outclass it.
+			mark_thumbnail_lq(result);
 			break;
+		}
 	}
 
 	// TODO(p): We can definitely extract embedded thumbnails, but it should be

@@ -351,6 +351,8 @@ rescale_thumbnail(cairo_surface_t *thumbnail, double row_height)
 	pixman_image_unref(src);
 	pixman_image_unref(dest);
 
+	cairo_surface_set_user_data(
+		scaled, &fiv_io_key_thumbnail_lq, (void *) (intptr_t) 1, NULL);
 	cairo_surface_destroy(thumbnail);
 	cairo_surface_mark_dirty(scaled);
 	return scaled;
@@ -490,6 +492,7 @@ on_thumbnailer_ready(GObject *object, GAsyncResult *res, gpointer user_data)
 static void
 thumbnailer_next(FivBrowser *self)
 {
+	// TODO(p): At least launch multiple thumbnailers in parallel.
 	GList *link = self->thumbnail_queue;
 	if (!link)
 		return;
@@ -540,15 +543,17 @@ thumbnailer_start(FivBrowser *self)
 {
 	thumbnailer_abort(self);
 
-	// TODO(p): Also collect rescaled images.
-	GList *missing = NULL, *rescaled = NULL;
+	GList *missing = NULL, *lq = NULL;
 	for (guint i = self->entries->len; i--; ) {
 		Entry *entry = &g_array_index(self->entries, Entry, i);
 		if (entry->icon)
 			missing = g_list_prepend(missing, entry);
+		else if (cairo_surface_get_user_data(
+			entry->thumbnail, &fiv_io_key_thumbnail_lq))
+			lq = g_list_prepend(lq, entry);
 	}
 
-	self->thumbnail_queue = g_list_concat(missing, rescaled);
+	self->thumbnail_queue = g_list_concat(missing, lq);
 	thumbnailer_next(self);
 }
 

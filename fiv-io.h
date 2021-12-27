@@ -67,6 +67,9 @@ extern cairo_user_data_key_t fiv_io_key_page_next;
 /// There is no wrap-around. This is a weak pointer.
 extern cairo_user_data_key_t fiv_io_key_page_previous;
 
+/// If non-NULL, indicates a thumbnail of insufficient quality.
+extern cairo_user_data_key_t fiv_io_key_thumbnail_lq;
+
 cairo_surface_t *fiv_io_open(
 	const gchar *path, FivIoProfile profile, gboolean enhance, GError **error);
 cairo_surface_t *fiv_io_open_from_data(const char *data, size_t len,
