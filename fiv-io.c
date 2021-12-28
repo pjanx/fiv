@@ -2440,8 +2440,9 @@ fiv_io_open_from_data(const char *data, size_t len, const gchar *path,
 
 // --- Export ------------------------------------------------------------------
 
-static WebPData
-encode_lossless_webp(cairo_surface_t *surface)
+unsigned char *
+fiv_io_encode_webp(
+	cairo_surface_t *surface, const WebPConfig *config, size_t *len)
 {
 	cairo_format_t format = cairo_image_surface_get_format(surface);
 	int w = cairo_image_surface_get_width(surface);
@@ -2460,15 +2461,10 @@ encode_lossless_webp(cairo_surface_t *surface)
 		surface = cairo_surface_reference(surface);
 	}
 
-	WebPConfig config = {};
+	WebPMemoryWriter writer = {};
+	WebPMemoryWriterInit(&writer);
 	WebPPicture picture = {};
-	if (!WebPConfigInit(&config) ||
-		!WebPConfigLosslessPreset(&config, 6) ||
-		!WebPPictureInit(&picture))
-		goto fail;
-
-	config.thread_level = true;
-	if (!WebPValidateConfig(&config))
+	if (!WebPPictureInit(&picture))
 		goto fail;
 
 	picture.use_argb = true;
@@ -2495,18 +2491,33 @@ encode_lossless_webp(cairo_surface_t *surface)
 		for (int i = h * picture.argb_stride; i-- > 0; argb++)
 			*argb |= 0xFF000000;
 
-	WebPMemoryWriter writer = {};
-	WebPMemoryWriterInit(&writer);
 	picture.writer = WebPMemoryWrite;
 	picture.custom_ptr = &writer;
-	if (!WebPEncode(&config, &picture))
+	if (!WebPEncode(config, &picture))
 		g_debug("WebPEncode: %d\n", picture.error_code);
 
 fail_compatibility:
 	WebPPictureFree(&picture);
 fail:
 	cairo_surface_destroy(surface);
-	return (WebPData) {.bytes = writer.mem, .size = writer.size};
+	*len = writer.size;
+	return writer.mem;
+}
+
+static WebPData
+encode_lossless_webp(cairo_surface_t *surface)
+{
+	WebPData bitstream = {};
+	WebPConfig config = {};
+	if (!WebPConfigInit(&config) || !WebPConfigLosslessPreset(&config, 6))
+		return bitstream;
+
+	config.thread_level = true;
+	if (!WebPValidateConfig(&config))
+		return bitstream;
+
+	bitstream.bytes = fiv_io_encode_webp(surface, &config, &bitstream.size);
+	return bitstream;
 }
 
 static gboolean
@@ -2825,6 +2836,68 @@ rescale_thumbnail(cairo_surface_t *thumbnail, double row_height)
 	return scaled;
 }
 
+static WebPData
+encode_thumbnail(cairo_surface_t *surface)
+{
+	WebPData bitstream = {};
+	WebPConfig config = {};
+	if (!WebPConfigInit(&config) || !WebPConfigLosslessPreset(&config, 6))
+		return bitstream;
+
+	config.near_lossless = 95;
+	config.thread_level = true;
+	if (!WebPValidateConfig(&config))
+		return bitstream;
+
+	bitstream.bytes = fiv_io_encode_webp(surface, &config, &bitstream.size);
+	return bitstream;
+}
+
+static void
+save_thumbnail(cairo_surface_t *thumbnail, const char *path, GString *thum)
+{
+	WebPMux *mux = WebPMuxNew();
+	WebPData bitstream = encode_thumbnail(thumbnail);
+	gboolean ok = WebPMuxSetImage(mux, &bitstream, true) == WEBP_MUX_OK;
+	WebPDataClear(&bitstream);
+
+	WebPData data = {.bytes = (const uint8_t *) thum->str, .size = thum->len};
+	ok = ok && WebPMuxSetChunk(mux, "THUM", &data, false) == WEBP_MUX_OK;
+
+	WebPData assembled = {};
+	WebPDataInit(&assembled);
+	ok = ok && WebPMuxAssemble(mux, &assembled) == WEBP_MUX_OK;
+	WebPMuxDelete(mux);
+	if (!ok) {
+		g_warning("thumbnail encoding failed");
+		return;
+	}
+
+	GError *e = NULL;
+	while (!g_file_set_contents(
+		path, (const gchar *) assembled.bytes, assembled.size, &e)) {
+		bool missing_parents =
+			e->domain == G_FILE_ERROR && e->code == G_FILE_ERROR_NOENT;
+		g_debug("%s: %s", path, e->message);
+		g_clear_error(&e);
+		if (!missing_parents)
+			break;
+
+		gchar *dirname = g_path_get_dirname(path);
+		int err = g_mkdir_with_parents(dirname, 0755);
+		if (err)
+			g_debug("%s: %s", dirname, g_strerror(errno));
+
+		g_free(dirname);
+		if (err)
+			break;
+	}
+
+	// It would be possible to create square thumbnails as well,
+	// but it seems like wasted effort.
+	WebPDataClear(&assembled);
+}
+
 gboolean
 fiv_io_produce_thumbnail(GFile *target, FivIoThumbnailSize size, GError **error)
 {
@@ -2851,9 +2924,9 @@ fiv_io_produce_thumbnail(GFile *target, FivIoThumbnailSize size, GError **error)
 
 	// TODO(p): Add a flag to avoid loading all pages and frames.
 	FivIoProfile sRGB = fiv_io_profile_new_sRGB();
-	cairo_surface_t *surface =
-		fiv_io_open_from_data(g_mapped_file_get_contents(mf),
-			g_mapped_file_get_length(mf), path, sRGB, FALSE, error);
+	gsize filesize = g_mapped_file_get_length(mf);
+	cairo_surface_t *surface = fiv_io_open_from_data(
+		g_mapped_file_get_contents(mf), filesize, path, sRGB, FALSE, error);
 
 	g_free(path);
 	g_mapped_file_unref(mf);
@@ -2867,36 +2940,35 @@ fiv_io_produce_thumbnail(GFile *target, FivIoThumbnailSize size, GError **error)
 	gchar *sum = g_compute_checksum_for_string(G_CHECKSUM_MD5, uri, -1);
 	gchar *thumbnails_dir = fiv_io_get_thumbnail_root();
 
+	GString *thum = g_string_new("");
+	g_string_append_printf(
+		thum, "%s%c%s%c", "Thumb::URI", 0, uri, 0);
+	g_string_append_printf(
+		thum, "%s%c%ld%c", "Thumb::Mtime", 0, (long) st.st_mtim.tv_sec, 0);
+	g_string_append_printf(
+		thum, "%s%c%ld%c", "Thumb::Size", 0, (long) filesize, 0);
+	g_string_append_printf(thum, "%s%c%d%c", "Thumb::Image::Width", 0,
+		cairo_image_surface_get_width(surface), 0);
+	g_string_append_printf(thum, "%s%c%d%c", "Thumb::Image::Height", 0,
+		cairo_image_surface_get_height(surface), 0);
+
+	// Without a CMM, no conversion is attempted.
+	if (sRGB) {
+		g_string_append_printf(
+			thum, "%s%c%s%c", "Thumb::ColorSpace", 0, "sRGB", 0);
+	}
+
 	for (int use = size; use >= FIV_IO_THUMBNAIL_SIZE_MIN; use--) {
 		cairo_surface_t *scaled =
 			rescale_thumbnail(surface, fiv_io_thumbnail_sizes[use].size);
 		gchar *path = g_strdup_printf("%s/wide-%s/%s.webp", thumbnails_dir,
 			fiv_io_thumbnail_sizes[use].thumbnail_spec_name, sum);
-
-		GError *e = NULL;
-		while (!fiv_io_save(scaled, scaled, NULL, path, &e)) {
-			bool missing_parents =
-				e->domain == G_FILE_ERROR && e->code == G_FILE_ERROR_NOENT;
-			g_debug("%s: %s", path, e->message);
-			g_clear_error(&e);
-			if (!missing_parents)
-				break;
-
-			gchar *dirname = g_path_get_dirname(path);
-			int err = g_mkdir_with_parents(dirname, 0755);
-			if (err)
-				g_debug("%s: %s", dirname, g_strerror(errno));
-
-			g_free(dirname);
-			if (err)
-				break;
-		}
-
-		// It would be possible to create square thumbnails as well,
-		// but it seems like wasted effort.
+		save_thumbnail(scaled, path, thum);
 		cairo_surface_destroy(scaled);
 		g_free(path);
 	}
+
+	g_string_free(thum, TRUE);
 
 	g_free(thumbnails_dir);
 	g_free(sum);

@@ -79,6 +79,13 @@ int fiv_io_filecmp(GFile *f1, GFile *f2);
 
 // --- Export ------------------------------------------------------------------
 
+typedef struct WebPConfig WebPConfig;
+
+/// Encodes a Cairo surface as a WebP bitstream, following the configuration.
+/// The result needs to be freed using WebPFree/WebPDataClear().
+unsigned char *fiv_io_encode_webp(
+	cairo_surface_t *surface, const WebPConfig *config, size_t *len);
+
 /// Saves the page as a lossless WebP still picture or animation.
 /// If no exact frame is specified, this potentially creates an animation.
 gboolean fiv_io_save(cairo_surface_t *page, cairo_surface_t *frame,
