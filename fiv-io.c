@@ -2210,6 +2210,7 @@ load_gdkpixbuf_argb32_unpremultiplied(GdkPixbuf *pixbuf)
 			p += 4;
 		}
 	}
+	cairo_surface_mark_dirty(surface);
 	return surface;
 }
 
