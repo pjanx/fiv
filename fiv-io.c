@@ -1718,6 +1718,7 @@ open_libwebp(const gchar *data, gsize len, const gchar *path,
 	}
 
 	// Releasing the demux chunk iterator is actually a no-op.
+	// TODO(p): Avoid copy-pasting the chunk transfer code.
 	WebPChunkIterator chunk_iter = {};
 	uint32_t flags = WebPDemuxGetI(demux, WEBP_FF_FORMAT_FLAGS);
 	if ((flags & EXIF_FLAG) &&
@@ -1737,6 +1738,12 @@ open_libwebp(const gchar *data, gsize len, const gchar *path,
 	if ((flags & XMP_FLAG) &&
 		WebPDemuxGetChunk(demux, "XMP ", 1, &chunk_iter)) {
 		cairo_surface_set_user_data(result, &fiv_io_key_xmp,
+			g_bytes_new(chunk_iter.chunk.bytes, chunk_iter.chunk.size),
+			(cairo_destroy_func_t) g_bytes_unref);
+		WebPDemuxReleaseChunkIterator(&chunk_iter);
+	}
+	if (WebPDemuxGetChunk(demux, "THUM", 1, &chunk_iter)) {
+		cairo_surface_set_user_data(result, &fiv_io_key_thum,
 			g_bytes_new(chunk_iter.chunk.bytes, chunk_iter.chunk.size),
 			(cairo_destroy_func_t) g_bytes_unref);
 		WebPDemuxReleaseChunkIterator(&chunk_iter);
@@ -2280,6 +2287,7 @@ cairo_user_data_key_t fiv_io_key_exif;
 cairo_user_data_key_t fiv_io_key_orientation;
 cairo_user_data_key_t fiv_io_key_icc;
 cairo_user_data_key_t fiv_io_key_xmp;
+cairo_user_data_key_t fiv_io_key_thum;
 
 cairo_user_data_key_t fiv_io_key_frame_next;
 cairo_user_data_key_t fiv_io_key_frame_previous;
@@ -2981,7 +2989,7 @@ static cairo_surface_t *
 read_wide_thumbnail(
 	const gchar *path, const gchar *uri, time_t mtime, GError **error)
 {
-	// TODO(p): Validate.
+	// TODO(p): Validate fiv_io_key_thum.
 	(void) uri;
 	(void) mtime;
 	return fiv_io_open(path, NULL, FALSE, error);

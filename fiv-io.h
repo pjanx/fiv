@@ -47,6 +47,8 @@ extern cairo_user_data_key_t fiv_io_key_orientation;
 extern cairo_user_data_key_t fiv_io_key_icc;
 /// GBytes with plain XMP data.
 extern cairo_user_data_key_t fiv_io_key_xmp;
+/// GBytes with a WebP's THUM chunk, used for our thumbnails.
+extern cairo_user_data_key_t fiv_io_key_thum;
 
 /// The next frame in a sequence, as a surface, in a chain, pre-composited.
 /// There is no wrap-around.
