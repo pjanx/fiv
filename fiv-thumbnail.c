@@ -95,26 +95,33 @@ fiv_thumbnail_get_root(void)
 
 // In principle similar to rescale_thumbnail() from fiv-browser.c.
 static cairo_surface_t *
-rescale_thumbnail(cairo_surface_t *thumbnail, double row_height)
+adjust_thumbnail(cairo_surface_t *thumbnail, double row_height)
 {
 	cairo_format_t format = cairo_image_surface_get_format(thumbnail);
-	int width = cairo_image_surface_get_width(thumbnail);
-	int height = cairo_image_surface_get_height(thumbnail);
+	int w = 0, width = cairo_image_surface_get_width(thumbnail);
+	int h = 0, height = cairo_image_surface_get_height(thumbnail);
+
+	// Hardcode orientation.
+	FivIoOrientation orientation = (uintptr_t) cairo_surface_get_user_data(
+		thumbnail, &fiv_io_key_orientation);
+	cairo_matrix_t matrix = fiv_io_orientation_is_sideways(orientation)
+		? fiv_io_orientation_matrix(orientation, (w = height), (h = width))
+		: fiv_io_orientation_matrix(orientation, (w = width), (h = height));
 
 	double scale_x = 1;
 	double scale_y = 1;
-	if (width > FIV_THUMBNAIL_WIDE_COEFFICIENT * height) {
-		scale_x = FIV_THUMBNAIL_WIDE_COEFFICIENT * row_height / width;
-		scale_y = round(scale_x * height) / height;
+	if (w > FIV_THUMBNAIL_WIDE_COEFFICIENT * h) {
+		scale_x = FIV_THUMBNAIL_WIDE_COEFFICIENT * row_height / w;
+		scale_y = round(scale_x * h) / h;
 	} else {
-		scale_y = row_height / height;
-		scale_x = round(scale_y * width) / width;
+		scale_y = row_height / h;
+		scale_x = round(scale_y * w) / w;
 	}
-	if (scale_x == 1 && scale_y == 1)
+	if (orientation <= FivIoOrientation0 && scale_x == 1 && scale_y == 1)
 		return cairo_surface_reference(thumbnail);
 
-	int projected_width = round(scale_x * width);
-	int projected_height = round(scale_y * height);
+	int projected_width = round(scale_x * w);
+	int projected_height = round(scale_y * h);
 	cairo_surface_t *scaled = cairo_image_surface_create(
 		(format == CAIRO_FORMAT_RGB24 || format == CAIRO_FORMAT_RGB30)
 			? CAIRO_FORMAT_RGB24
@@ -126,13 +133,14 @@ rescale_thumbnail(cairo_surface_t *thumbnail, double row_height)
 
 	cairo_set_source_surface(cr, thumbnail, 0, 0);
 	cairo_pattern_t *pattern = cairo_get_source(cr);
-	cairo_pattern_set_filter(pattern, CAIRO_FILTER_BEST);
+	// CAIRO_FILTER_BEST, for some reason, works bad with CAIRO_FORMAT_RGB30.
+	cairo_pattern_set_filter(pattern, CAIRO_FILTER_GOOD);
 	cairo_pattern_set_extend(pattern, CAIRO_EXTEND_PAD);
+	cairo_pattern_set_matrix(pattern, &matrix);
 
 	cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
 	cairo_paint(cr);
 	cairo_destroy(cr);
-	mark_thumbnail_lq(scaled);
 	return scaled;
 }
 
@@ -260,7 +268,7 @@ fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size, GError **error)
 
 	for (int use = max_size; use >= FIV_THUMBNAIL_SIZE_MIN; use--) {
 		cairo_surface_t *scaled =
-			rescale_thumbnail(surface, fiv_thumbnail_sizes[use].size);
+			adjust_thumbnail(surface, fiv_thumbnail_sizes[use].size);
 		gchar *path = g_strdup_printf("%s/wide-%s/%s.webp", thumbnails_dir,
 			fiv_thumbnail_sizes[use].thumbnail_spec_name, sum);
 		save_thumbnail(scaled, path, thum);

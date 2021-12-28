@@ -55,9 +55,9 @@ struct _FivView {
 
 G_DEFINE_TYPE(FivView, fiv_view, GTK_TYPE_WIDGET)
 
-struct size {
+typedef struct _Dimensions {
 	double width, height;
-};
+} Dimensions;
 
 static FivIoOrientation view_left[9] = {
 	[FivIoOrientationUnknown]   = FivIoOrientationUnknown,
@@ -201,11 +201,11 @@ fiv_view_set_property(
 	}
 }
 
-static struct size
+static Dimensions
 get_surface_dimensions(FivView *self)
 {
 	if (!self->image)
-		return (struct size) {};
+		return (Dimensions) {};
 
 	cairo_rectangle_t extents = {};
 	switch (cairo_surface_get_type(self->page)) {
@@ -222,63 +222,18 @@ get_surface_dimensions(FivView *self)
 		g_assert_not_reached();
 	}
 
-	switch (self->orientation) {
-	case FivIoOrientation90:
-	case FivIoOrientationMirror90:
-	case FivIoOrientation270:
-	case FivIoOrientationMirror270:
-		return (struct size) {extents.height, extents.width};
-	default:
-		return (struct size) {extents.width, extents.height};
-	}
+	if (fiv_io_orientation_is_sideways(self->orientation))
+		return (Dimensions) {extents.height, extents.width};
+
+	return (Dimensions) {extents.width, extents.height};
 }
 
 static void
 get_display_dimensions(FivView *self, int *width, int *height)
 {
-	struct size surface_dimensions = get_surface_dimensions(self);
+	Dimensions surface_dimensions = get_surface_dimensions(self);
 	*width = ceil(surface_dimensions.width * self->scale);
 	*height = ceil(surface_dimensions.height * self->scale);
-}
-
-static cairo_matrix_t
-get_orientation_matrix(FivIoOrientation o, double width, double height)
-{
-	cairo_matrix_t matrix = {};
-	cairo_matrix_init_identity(&matrix);
-	switch (o) {
-	case FivIoOrientation90:
-		cairo_matrix_rotate(&matrix, -M_PI_2);
-		cairo_matrix_translate(&matrix, -width, 0);
-		break;
-	case FivIoOrientation180:
-		cairo_matrix_scale(&matrix, -1, -1);
-		cairo_matrix_translate(&matrix, -width, -height);
-		break;
-	case FivIoOrientation270:
-		cairo_matrix_rotate(&matrix, +M_PI_2);
-		cairo_matrix_translate(&matrix, 0, -height);
-		break;
-	case FivIoOrientationMirror0:
-		cairo_matrix_scale(&matrix, -1, +1);
-		cairo_matrix_translate(&matrix, -width, 0);
-		break;
-	case FivIoOrientationMirror90:
-		cairo_matrix_rotate(&matrix, +M_PI_2);
-		cairo_matrix_scale(&matrix, -1, +1);
-		cairo_matrix_translate(&matrix, -width, -height);
-		break;
-	case FivIoOrientationMirror180:
-		cairo_matrix_scale(&matrix, +1, -1);
-		cairo_matrix_translate(&matrix, 0, -height);
-		break;
-	case FivIoOrientationMirror270:
-		cairo_matrix_rotate(&matrix, -M_PI_2);
-		cairo_matrix_scale(&matrix, -1, +1);
-	default:
-		break;
-	}
-	return matrix;
 }
 
 static void
@@ -318,7 +273,7 @@ fiv_view_size_allocate(GtkWidget *widget, GtkAllocation *allocation)
 	if (!self->image || !self->scale_to_fit)
 		return;
 
-	struct size surface_dimensions = get_surface_dimensions(self);
+	Dimensions surface_dimensions = get_surface_dimensions(self);
 	self->scale = 1;
 
 	if (ceil(surface_dimensions.width * self->scale) > allocation->width)
@@ -443,8 +398,8 @@ fiv_view_draw(GtkWidget *widget, cairo_t *cr)
 	if (h < allocation.height)
 		y = round((allocation.height - h) / 2.);
 
-	struct size surface_dimensions = get_surface_dimensions(self);
-	cairo_matrix_t matrix = get_orientation_matrix(
+	Dimensions surface_dimensions = get_surface_dimensions(self);
+	cairo_matrix_t matrix = fiv_io_orientation_matrix(
 		self->orientation, surface_dimensions.width, surface_dimensions.height);
 	cairo_translate(cr, x, y);
 	if (self->checkerboard) {
@@ -731,7 +686,7 @@ on_draw_page(G_GNUC_UNUSED GtkPrintOperation *operation,
 {
 	// Any DPI will be wrong, unless we import that information from the image.
 	double scale = 1 / 96.;
-	struct size surface_dimensions = get_surface_dimensions(self);
+	Dimensions surface_dimensions = get_surface_dimensions(self);
 	double w = surface_dimensions.width * scale;
 	double h = surface_dimensions.height * scale;
 
@@ -743,7 +698,7 @@ on_draw_page(G_GNUC_UNUSED GtkPrintOperation *operation,
 	cairo_t *cr = gtk_print_context_get_cairo_context(context);
 	cairo_scale(cr, scale, scale);
 	cairo_set_source_surface(cr, self->frame, 0, 0);
-	cairo_matrix_t matrix = get_orientation_matrix(
+	cairo_matrix_t matrix = fiv_io_orientation_matrix(
 		self->orientation, surface_dimensions.width, surface_dimensions.height);
 	cairo_pattern_set_matrix(cairo_get_source(cr), &matrix);
 	cairo_paint(cr);
