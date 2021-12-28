@@ -31,6 +31,7 @@
 #include "fiv-browser.h"
 #include "fiv-io.h"
 #include "fiv-sidebar.h"
+#include "fiv-thumbnail.h"
 #include "fiv-view.h"
 #include "xdg.h"
 
@@ -644,12 +645,12 @@ on_open_location(G_GNUC_UNUSED GtkPlacesSidebar *sidebar, GFile *location,
 static void
 on_toolbar_zoom(G_GNUC_UNUSED GtkButton *button, gpointer user_data)
 {
-	FivIoThumbnailSize size = FIV_IO_THUMBNAIL_SIZE_COUNT;
+	FivThumbnailSize size = FIV_THUMBNAIL_SIZE_COUNT;
 	g_object_get(g.browser, "thumbnail-size", &size, NULL);
 
 	size += (gintptr) user_data;
-	g_return_if_fail(size >= FIV_IO_THUMBNAIL_SIZE_MIN &&
-		size <= FIV_IO_THUMBNAIL_SIZE_MAX);
+	g_return_if_fail(size >= FIV_THUMBNAIL_SIZE_MIN &&
+		size <= FIV_THUMBNAIL_SIZE_MAX);
 
 	g_object_set(g.browser, "thumbnail-size", size, NULL);
 }
@@ -658,10 +659,10 @@ static void
 on_notify_thumbnail_size(
 	GObject *object, GParamSpec *param_spec, G_GNUC_UNUSED gpointer user_data)
 {
-	FivIoThumbnailSize size = 0;
+	FivThumbnailSize size = 0;
 	g_object_get(object, g_param_spec_get_name(param_spec), &size, NULL);
-	gtk_widget_set_sensitive(g.plus, size < FIV_IO_THUMBNAIL_SIZE_MAX);
-	gtk_widget_set_sensitive(g.minus, size > FIV_IO_THUMBNAIL_SIZE_MIN);
+	gtk_widget_set_sensitive(g.plus, size < FIV_THUMBNAIL_SIZE_MAX);
+	gtk_widget_set_sensitive(g.minus, size > FIV_THUMBNAIL_SIZE_MIN);
 }
 
 static void
@@ -1236,16 +1237,16 @@ main(int argc, char *argv[])
 		if (!path_arg)
 			exit_fatal("no path given");
 
-		FivIoThumbnailSize size = 0;
-		for (; size < FIV_IO_THUMBNAIL_SIZE_COUNT; size++)
-			if (!strcmp(fiv_io_thumbnail_sizes[size].thumbnail_spec_name,
+		FivThumbnailSize size = 0;
+		for (; size < FIV_THUMBNAIL_SIZE_COUNT; size++)
+			if (!strcmp(fiv_thumbnail_sizes[size].thumbnail_spec_name,
 					thumbnail_size))
 				break;
-		if (size >= FIV_IO_THUMBNAIL_SIZE_COUNT)
+		if (size >= FIV_THUMBNAIL_SIZE_COUNT)
 			exit_fatal("unknown thumbnail size: %s", thumbnail_size);
 
 		GFile *target = g_file_new_for_path(path_arg);
-		if (!fiv_io_produce_thumbnail(target, size, &error))
+		if (!fiv_thumbnail_produce(target, size, &error))
 			exit_fatal("%s", error->message);
 		g_object_unref(target);
 		return 0;

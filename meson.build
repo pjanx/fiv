@@ -71,7 +71,7 @@ resources = gnome.compile_resources('resources',
 )
 
 exe = executable('fastiv', 'fastiv.c', 'fiv-view.c', 'fiv-io.c',
-	'fiv-browser.c', 'fiv-sidebar.c', 'xdg.c', resources,
+	'fiv-browser.c', 'fiv-sidebar.c', 'fiv-thumbnail.c', 'xdg.c', resources,
 	install : true,
 	dependencies : [dependencies])
 

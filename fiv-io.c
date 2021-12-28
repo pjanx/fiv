@@ -20,9 +20,7 @@
 #include <cairo.h>
 #include <errno.h>
 #include <glib.h>
-#include <glib/gstdio.h>
 
-#include <spng.h>
 #include <turbojpeg.h>
 #include <webp/decode.h>
 #include <webp/demux.h>
@@ -78,7 +76,6 @@
 #include "wuffs-mirror-release-c/release/c/wuffs-v0.3.c"
 
 #include "fiv-io.h"
-#include "xdg.h"
 
 #if CAIRO_VERSION >= 11702 && X11_ACTUALLY_SUPPORTS_RGBA128F_OR_WE_USE_OPENGL
 #define FIV_CAIRO_RGBA128F
@@ -133,6 +130,22 @@ fiv_io_all_supported_media_types(void)
 
 	g_ptr_array_add(types, NULL);
 	return (char **) g_ptr_array_free(types, FALSE);
+}
+
+int
+fiv_io_filecmp(GFile *location1, GFile *location2)
+{
+	if (g_file_has_prefix(location1, location2))
+		return +1;
+	if (g_file_has_prefix(location2, location1))
+		return -1;
+
+	gchar *name1 = g_file_get_parse_name(location1);
+	gchar *name2 = g_file_get_parse_name(location2);
+	int result = g_utf8_collate(name1, name2);
+	g_free(name1);
+	g_free(name2);
+	return result;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -420,9 +433,6 @@ fiv_io_profile_finalize(cairo_surface_t *image, FivIoProfile target)
 	}
 	return image;
 }
-
-// From libwebp, verified to exactly match [x * a / 255].
-#define PREMULTIPLY8(a, x) (((uint32_t) (x) * (uint32_t) (a) * 32897U) >> 23)
 
 static void
 fiv_io_premultiply_argb32(cairo_surface_t *surface)
@@ -2297,8 +2307,6 @@ cairo_user_data_key_t fiv_io_key_loops;
 cairo_user_data_key_t fiv_io_key_page_next;
 cairo_user_data_key_t fiv_io_key_page_previous;
 
-cairo_user_data_key_t fiv_io_key_thumbnail_lq;
-
 cairo_surface_t *
 fiv_io_open(
 	const gchar *path, FivIoProfile profile, gboolean enhance, GError **error)
@@ -2753,466 +2761,4 @@ fiv_io_save_metadata(cairo_surface_t *page, const gchar *path, GError **error)
 		return FALSE;
 	}
 	return TRUE;
-}
-
-// --- Thumbnails --------------------------------------------------------------
-
-#ifndef __linux__
-#define st_mtim st_mtimespec
-#endif  // ! __linux__
-
-GType
-fiv_io_thumbnail_size_get_type(void)
-{
-	static gsize guard;
-	if (g_once_init_enter(&guard)) {
-#define XX(name, value, dir) {FIV_IO_THUMBNAIL_SIZE_ ## name, \
-	"FIV_IO_THUMBNAIL_SIZE_" #name, #name},
-		static const GEnumValue values[] = {FIV_IO_THUMBNAIL_SIZES(XX) {}};
-#undef XX
-		GType type = g_enum_register_static(
-			g_intern_static_string("FivIoThumbnailSize"), values);
-		g_once_init_leave(&guard, type);
-	}
-	return guard;
-}
-
-#define XX(name, value, dir) {value, dir},
-FivIoThumbnailSizeInfo
-	fiv_io_thumbnail_sizes[FIV_IO_THUMBNAIL_SIZE_COUNT] = {
-		FIV_IO_THUMBNAIL_SIZES(XX)};
-#undef XX
-
-static void
-mark_thumbnail_lq(cairo_surface_t *surface)
-{
-	cairo_surface_set_user_data(
-		surface, &fiv_io_key_thumbnail_lq, (void *) (intptr_t) 1, NULL);
-}
-
-gchar *
-fiv_io_get_thumbnail_root(void)
-{
-	gchar *cache_dir = get_xdg_home_dir("XDG_CACHE_HOME", ".cache");
-	gchar *thumbnails_dir = g_build_filename(cache_dir, "thumbnails", NULL);
-	g_free(cache_dir);
-	return thumbnails_dir;
-}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-
-// In principle similar to rescale_thumbnail() from fiv-browser.c.
-static cairo_surface_t *
-rescale_thumbnail(cairo_surface_t *thumbnail, double row_height)
-{
-	cairo_format_t format = cairo_image_surface_get_format(thumbnail);
-	int width = cairo_image_surface_get_width(thumbnail);
-	int height = cairo_image_surface_get_height(thumbnail);
-
-	double scale_x = 1;
-	double scale_y = 1;
-	if (width > FIV_IO_WIDE_THUMBNAIL_COEFFICIENT * height) {
-		scale_x = FIV_IO_WIDE_THUMBNAIL_COEFFICIENT * row_height / width;
-		scale_y = round(scale_x * height) / height;
-	} else {
-		scale_y = row_height / height;
-		scale_x = round(scale_y * width) / width;
-	}
-	if (scale_x == 1 && scale_y == 1)
-		return cairo_surface_reference(thumbnail);
-
-	int projected_width = round(scale_x * width);
-	int projected_height = round(scale_y * height);
-	cairo_surface_t *scaled = cairo_image_surface_create(
-		(format == CAIRO_FORMAT_RGB24 || format == CAIRO_FORMAT_RGB30)
-			? CAIRO_FORMAT_RGB24
-			: CAIRO_FORMAT_ARGB32,
-		projected_width, projected_height);
-
-	cairo_t *cr = cairo_create(scaled);
-	cairo_scale(cr, scale_x, scale_y);
-
-	cairo_set_source_surface(cr, thumbnail, 0, 0);
-	cairo_pattern_t *pattern = cairo_get_source(cr);
-	cairo_pattern_set_filter(pattern, CAIRO_FILTER_BEST);
-	cairo_pattern_set_extend(pattern, CAIRO_EXTEND_PAD);
-
-	cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
-	cairo_paint(cr);
-	cairo_destroy(cr);
-	mark_thumbnail_lq(scaled);
-	return scaled;
-}
-
-static WebPData
-encode_thumbnail(cairo_surface_t *surface)
-{
-	WebPData bitstream = {};
-	WebPConfig config = {};
-	if (!WebPConfigInit(&config) || !WebPConfigLosslessPreset(&config, 6))
-		return bitstream;
-
-	config.near_lossless = 95;
-	config.thread_level = true;
-	if (!WebPValidateConfig(&config))
-		return bitstream;
-
-	bitstream.bytes = fiv_io_encode_webp(surface, &config, &bitstream.size);
-	return bitstream;
-}
-
-static void
-save_thumbnail(cairo_surface_t *thumbnail, const char *path, GString *thum)
-{
-	WebPMux *mux = WebPMuxNew();
-	WebPData bitstream = encode_thumbnail(thumbnail);
-	gboolean ok = WebPMuxSetImage(mux, &bitstream, true) == WEBP_MUX_OK;
-	WebPDataClear(&bitstream);
-
-	WebPData data = {.bytes = (const uint8_t *) thum->str, .size = thum->len};
-	ok = ok && WebPMuxSetChunk(mux, "THUM", &data, false) == WEBP_MUX_OK;
-
-	WebPData assembled = {};
-	WebPDataInit(&assembled);
-	ok = ok && WebPMuxAssemble(mux, &assembled) == WEBP_MUX_OK;
-	WebPMuxDelete(mux);
-	if (!ok) {
-		g_warning("thumbnail encoding failed");
-		return;
-	}
-
-	GError *e = NULL;
-	while (!g_file_set_contents(
-		path, (const gchar *) assembled.bytes, assembled.size, &e)) {
-		bool missing_parents =
-			e->domain == G_FILE_ERROR && e->code == G_FILE_ERROR_NOENT;
-		g_debug("%s: %s", path, e->message);
-		g_clear_error(&e);
-		if (!missing_parents)
-			break;
-
-		gchar *dirname = g_path_get_dirname(path);
-		int err = g_mkdir_with_parents(dirname, 0755);
-		if (err)
-			g_debug("%s: %s", dirname, g_strerror(errno));
-
-		g_free(dirname);
-		if (err)
-			break;
-	}
-
-	// It would be possible to create square thumbnails as well,
-	// but it seems like wasted effort.
-	WebPDataClear(&assembled);
-}
-
-gboolean
-fiv_io_produce_thumbnail(GFile *target, FivIoThumbnailSize size, GError **error)
-{
-	g_return_val_if_fail(size >= FIV_IO_THUMBNAIL_SIZE_MIN &&
-		size <= FIV_IO_THUMBNAIL_SIZE_MAX, FALSE);
-
-	// Local files only, at least for now.
-	gchar *path = g_file_get_path(target);
-	if (!path)
-		return FALSE;
-
-	GMappedFile *mf = g_mapped_file_new(path, FALSE, error);
-	if (!mf) {
-		g_free(path);
-		return FALSE;
-	}
-
-	GStatBuf st = {};
-	if (g_stat(path, &st)) {
-		set_error(error, g_strerror(errno));
-		g_free(path);
-		return FALSE;
-	}
-
-	// TODO(p): Add a flag to avoid loading all pages and frames.
-	FivIoProfile sRGB = fiv_io_profile_new_sRGB();
-	gsize filesize = g_mapped_file_get_length(mf);
-	cairo_surface_t *surface = fiv_io_open_from_data(
-		g_mapped_file_get_contents(mf), filesize, path, sRGB, FALSE, error);
-
-	g_free(path);
-	g_mapped_file_unref(mf);
-	if (sRGB)
-		fiv_io_profile_free(sRGB);
-	if (!surface)
-		return FALSE;
-
-	// Boilerplate copied from fiv_io_lookup_thumbnail().
-	gchar *uri = g_file_get_uri(target);
-	gchar *sum = g_compute_checksum_for_string(G_CHECKSUM_MD5, uri, -1);
-	gchar *thumbnails_dir = fiv_io_get_thumbnail_root();
-
-	GString *thum = g_string_new("");
-	g_string_append_printf(
-		thum, "%s%c%s%c", "Thumb::URI", 0, uri, 0);
-	g_string_append_printf(
-		thum, "%s%c%ld%c", "Thumb::Mtime", 0, (long) st.st_mtim.tv_sec, 0);
-	g_string_append_printf(
-		thum, "%s%c%ld%c", "Thumb::Size", 0, (long) filesize, 0);
-	g_string_append_printf(thum, "%s%c%d%c", "Thumb::Image::Width", 0,
-		cairo_image_surface_get_width(surface), 0);
-	g_string_append_printf(thum, "%s%c%d%c", "Thumb::Image::Height", 0,
-		cairo_image_surface_get_height(surface), 0);
-
-	// Without a CMM, no conversion is attempted.
-	if (sRGB) {
-		g_string_append_printf(
-			thum, "%s%c%s%c", "Thumb::ColorSpace", 0, "sRGB", 0);
-	}
-
-	for (int use = size; use >= FIV_IO_THUMBNAIL_SIZE_MIN; use--) {
-		cairo_surface_t *scaled =
-			rescale_thumbnail(surface, fiv_io_thumbnail_sizes[use].size);
-		gchar *path = g_strdup_printf("%s/wide-%s/%s.webp", thumbnails_dir,
-			fiv_io_thumbnail_sizes[use].thumbnail_spec_name, sum);
-		save_thumbnail(scaled, path, thum);
-		cairo_surface_destroy(scaled);
-		g_free(path);
-	}
-
-	g_string_free(thum, TRUE);
-
-	g_free(thumbnails_dir);
-	g_free(sum);
-	g_free(uri);
-	cairo_surface_destroy(surface);
-	return TRUE;
-}
-
-static cairo_surface_t *
-read_wide_thumbnail(
-	const gchar *path, const gchar *uri, time_t mtime, GError **error)
-{
-	// TODO(p): Validate fiv_io_key_thum.
-	(void) uri;
-	(void) mtime;
-	return fiv_io_open(path, NULL, FALSE, error);
-}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-
-static int  // tri-state
-check_spng_thumbnail_texts(struct spng_text *texts, uint32_t texts_len,
-	const gchar *target, time_t mtime)
-{
-	// May contain Thumb::Image::Width Thumb::Image::Height,
-	// but those aren't interesting currently (would be for fast previews).
-	bool need_uri = true, need_mtime = true;
-	for (uint32_t i = 0; i < texts_len; i++) {
-		struct spng_text *text = texts + i;
-		if (!strcmp(text->keyword, "Thumb::URI")) {
-			need_uri = false;
-			if (strcmp(target, text->text))
-				return false;
-		}
-		if (!strcmp(text->keyword, "Thumb::MTime")) {
-			need_mtime = false;
-			if (atol(text->text) != mtime)
-				return false;
-		}
-	}
-	return need_uri || need_mtime ? -1 : true;
-}
-
-static int  // tri-state
-check_spng_thumbnail(spng_ctx *ctx, const gchar *target, time_t mtime, int *err)
-{
-	uint32_t texts_len = 0;
-	if ((*err = spng_get_text(ctx, NULL, &texts_len)))
-		return false;
-
-	int result = false;
-	struct spng_text *texts = g_malloc0_n(texts_len, sizeof *texts);
-	if (!(*err = spng_get_text(ctx, texts, &texts_len)))
-		result = check_spng_thumbnail_texts(texts, texts_len, target, mtime);
-	g_free(texts);
-	return result;
-}
-
-static cairo_surface_t *
-read_spng_thumbnail(
-	const gchar *path, const gchar *uri, time_t mtime, GError **error)
-{
-	FILE *fp;
-	cairo_surface_t *result = NULL;
-	if (!(fp = fopen(path, "rb"))) {
-		set_error(error, g_strerror(errno));
-		return NULL;
-	}
-
-	errno = 0;
-	spng_ctx *ctx = spng_ctx_new(0);
-	if (!ctx) {
-		set_error(error, g_strerror(errno));
-		goto fail_init;
-	}
-
-	int err;
-	size_t size = 0;
-	if ((err = spng_set_png_file(ctx, fp)) ||
-		(err = spng_set_image_limits(ctx, INT16_MAX, INT16_MAX)) ||
-		(err = spng_decoded_image_size(ctx, SPNG_FMT_RGBA8, &size))) {
-		set_error(error, spng_strerror(err));
-		goto fail;
-	}
-	if (check_spng_thumbnail(ctx, uri, mtime, &err) == false) {
-		set_error(error, err ? spng_strerror(err) : "mismatch");
-		goto fail;
-	}
-
-	struct spng_ihdr ihdr = {};
-	struct spng_trns trns = {};
-	spng_get_ihdr(ctx, &ihdr);
-	bool may_be_translucent = !spng_get_trns(ctx, &trns) ||
-		ihdr.color_type == SPNG_COLOR_TYPE_GRAYSCALE_ALPHA ||
-		ihdr.color_type == SPNG_COLOR_TYPE_TRUECOLOR_ALPHA;
-
-	cairo_surface_t *surface = cairo_image_surface_create(
-		may_be_translucent ? CAIRO_FORMAT_ARGB32 : CAIRO_FORMAT_RGB24,
-		ihdr.width, ihdr.height);
-
-	cairo_status_t surface_status = cairo_surface_status(surface);
-	if (surface_status != CAIRO_STATUS_SUCCESS) {
-		set_error(error, cairo_status_to_string(surface_status));
-		goto fail_data;
-	}
-
-	uint32_t *data = (uint32_t *) cairo_image_surface_get_data(surface);
-	g_assert((size_t) cairo_image_surface_get_stride(surface) *
-		cairo_image_surface_get_height(surface) == size);
-
-	cairo_surface_flush(surface);
-	if ((err = spng_decode_image(ctx, data, size, SPNG_FMT_RGBA8,
-		SPNG_DECODE_TRNS | SPNG_DECODE_GAMMA))) {
-		set_error(error, spng_strerror(err));
-		goto fail_data;
-	}
-
-	// The specification does not say where the required metadata should be,
-	// it could very well be broken up into two parts.
-	if (check_spng_thumbnail(ctx, uri, mtime, &err) != true) {
-		set_error(
-			error, err ? spng_strerror(err) : "mismatch or not a thumbnail");
-		goto fail_data;
-	}
-
-	// pixman can be mildly abused to do this operation, but it won't be faster.
-	if (may_be_translucent) {
-		for (size_t i = size / sizeof *data; i--; ) {
-			const uint8_t *unit = (const uint8_t *) &data[i];
-			uint32_t a = unit[3],
-				b = PREMULTIPLY8(a, unit[2]),
-				g = PREMULTIPLY8(a, unit[1]),
-				r = PREMULTIPLY8(a, unit[0]);
-			data[i] = a << 24 | r << 16 | g << 8 | b;
-		}
-	} else {
-		for (size_t i = size / sizeof *data; i--; ) {
-			uint32_t rgba = g_ntohl(data[i]);
-			data[i] = rgba << 24 | rgba >> 8;
-		}
-	}
-
-	cairo_surface_mark_dirty((result = surface));
-
-fail_data:
-	if (!result)
-		cairo_surface_destroy(surface);
-fail:
-	spng_ctx_free(ctx);
-fail_init:
-	fclose(fp);
-	return result;
-}
-
-cairo_surface_t *
-fiv_io_lookup_thumbnail(GFile *target, FivIoThumbnailSize size)
-{
-	g_return_val_if_fail(size >= FIV_IO_THUMBNAIL_SIZE_MIN &&
-		size <= FIV_IO_THUMBNAIL_SIZE_MAX, NULL);
-
-	// Local files only, at least for now.
-	gchar *path = g_file_get_path(target);
-	if (!path)
-		return NULL;
-
-	GStatBuf st = {};
-	int err = g_stat(path, &st);
-	g_free(path);
-	if (err)
-		return NULL;
-
-	gchar *uri = g_file_get_uri(target);
-	gchar *sum = g_compute_checksum_for_string(G_CHECKSUM_MD5, uri, -1);
-	gchar *thumbnails_dir = fiv_io_get_thumbnail_root();
-
-	// The lookup sequence is: nominal..max, then mirroring back to ..min.
-	cairo_surface_t *result = NULL;
-	GError *error = NULL;
-	for (int i = 0; i < FIV_IO_THUMBNAIL_SIZE_COUNT; i++) {
-		FivIoThumbnailSize use = size + i;
-		if (use > FIV_IO_THUMBNAIL_SIZE_MAX)
-			use = FIV_IO_THUMBNAIL_SIZE_MAX - i;
-
-		const char *name = fiv_io_thumbnail_sizes[use].thumbnail_spec_name;
-		gchar *wide =
-			g_strdup_printf("%s/wide-%s/%s.webp", thumbnails_dir, name, sum);
-		result = read_wide_thumbnail(wide, uri, st.st_mtim.tv_sec, &error);
-		if (error) {
-			g_debug("%s: %s", wide, error->message);
-			g_clear_error(&error);
-		}
-		g_free(wide);
-		if (result) {
-			// Higher up we can't distinguish images smaller than the thumbnail.
-			// Also, try not to rescale the already rescaled.
-			if (use != size)
-				mark_thumbnail_lq(result);
-			break;
-		}
-
-		gchar *path =
-			g_strdup_printf("%s/%s/%s.png", thumbnails_dir, name, sum);
-		result = read_spng_thumbnail(path, uri, st.st_mtim.tv_sec, &error);
-		if (error) {
-			g_debug("%s: %s", path, error->message);
-			g_clear_error(&error);
-		}
-		g_free(path);
-		if (result) {
-			// Whatever produced it, we may be able to outclass it.
-			mark_thumbnail_lq(result);
-			break;
-		}
-	}
-
-	// TODO(p): We can definitely extract embedded thumbnails, but it should be
-	// done as a separate stage--the file may be stored on a slow device.
-
-	g_free(thumbnails_dir);
-	g_free(sum);
-	g_free(uri);
-	return result;
-}
-
-int
-fiv_io_filecmp(GFile *location1, GFile *location2)
-{
-	if (g_file_has_prefix(location1, location2))
-		return +1;
-	if (g_file_has_prefix(location2, location1))
-		return -1;
-
-	gchar *name1 = g_file_get_parse_name(location1);
-	gchar *name2 = g_file_get_parse_name(location2);
-	int result = g_utf8_collate(name1, name2);
-	g_free(name1);
-	g_free(name2);
-	return result;
 }

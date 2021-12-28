@@ -31,6 +31,9 @@ FivIoProfile fiv_io_profile_new(const void *data, size_t len);
 FivIoProfile fiv_io_profile_new_sRGB(void);
 void fiv_io_profile_free(FivIoProfile self);
 
+// From libwebp, verified to exactly match [x * a / 255].
+#define PREMULTIPLY8(a, x) (((uint32_t) (x) * (uint32_t) (a) * 32897U) >> 23)
+
 // --- Loading -----------------------------------------------------------------
 
 extern const char *fiv_io_supported_media_types[];
@@ -68,9 +71,6 @@ extern cairo_user_data_key_t fiv_io_key_page_next;
 /// The first frame of the previous page, as a surface, in a chain.
 /// There is no wrap-around. This is a weak pointer.
 extern cairo_user_data_key_t fiv_io_key_page_previous;
-
-/// If non-NULL, indicates a thumbnail of insufficient quality.
-extern cairo_user_data_key_t fiv_io_key_thumbnail_lq;
 
 cairo_surface_t *fiv_io_open(
 	const gchar *path, FivIoProfile profile, gboolean enhance, GError **error);
@@ -113,48 +113,3 @@ FivIoOrientation fiv_io_exif_orientation(const guint8 *exif, gsize len);
 /// Save metadata attached by this module in Exiv2 format.
 gboolean fiv_io_save_metadata(
 	cairo_surface_t *page, const gchar *path, GError **error);
-
-// --- Thumbnails --------------------------------------------------------------
-
-// And this is how you avoid glib-mkenums.
-typedef enum _FivIoThumbnailSize {
-#define FIV_IO_THUMBNAIL_SIZES(XX) \
-	XX(SMALL,  128, "normal") \
-	XX(NORMAL, 256, "large") \
-	XX(LARGE,  512, "x-large") \
-	XX(HUGE,  1024, "xx-large")
-#define XX(name, value, dir) FIV_IO_THUMBNAIL_SIZE_ ## name,
-	FIV_IO_THUMBNAIL_SIZES(XX)
-#undef XX
-	FIV_IO_THUMBNAIL_SIZE_COUNT,
-
-	FIV_IO_THUMBNAIL_SIZE_MIN = 0,
-	FIV_IO_THUMBNAIL_SIZE_MAX = FIV_IO_THUMBNAIL_SIZE_COUNT - 1
-} FivIoThumbnailSize;
-
-GType fiv_io_thumbnail_size_get_type(void) G_GNUC_CONST;
-#define FIV_TYPE_IO_THUMBNAIL_SIZE (fiv_io_thumbnail_size_get_type())
-
-typedef struct _FivIoThumbnailSizeInfo {
-	int size;                           ///< Nominal size in pixels
-	const char *thumbnail_spec_name;    ///< thumbnail-spec directory name
-} FivIoThumbnailSizeInfo;
-
-extern FivIoThumbnailSizeInfo
-	fiv_io_thumbnail_sizes[FIV_IO_THUMBNAIL_SIZE_COUNT];
-
-enum {
-	FIV_IO_WIDE_THUMBNAIL_COEFFICIENT = 2
-};
-
-/// Returns this user's root thumbnail directory.
-gchar *fiv_io_get_thumbnail_root(void);
-
-/// Generates wide thumbnails of up to the specified size, saves them in cache.
-gboolean fiv_io_produce_thumbnail(
-	GFile *target, FivIoThumbnailSize size, GError **error);
-
-/// Retrieves a thumbnail of the most appropriate quality and resolution
-/// for the target file.
-cairo_surface_t *fiv_io_lookup_thumbnail(
-	GFile *target, FivIoThumbnailSize size);

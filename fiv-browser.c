@@ -22,6 +22,7 @@
 
 #include "fiv-browser.h"
 #include "fiv-io.h"
+#include "fiv-thumbnail.h"
 #include "fiv-view.h"
 
 // --- Widget ------------------------------------------------------------------
@@ -43,7 +44,7 @@
 struct _FivBrowser {
 	GtkWidget parent_instance;
 
-	FivIoThumbnailSize item_size;       ///< Thumbnail size
+	FivThumbnailSize item_size;         ///< Thumbnail size
 	int item_height;                    ///< Thumbnail height in pixels
 	int item_spacing;                   ///< Space between items in pixels
 
@@ -303,8 +304,8 @@ rescale_thumbnail(cairo_surface_t *thumbnail, double row_height)
 
 	double scale_x = 1;
 	double scale_y = 1;
-	if (width > FIV_IO_WIDE_THUMBNAIL_COEFFICIENT * height) {
-		scale_x = FIV_IO_WIDE_THUMBNAIL_COEFFICIENT * row_height / width;
+	if (width > FIV_THUMBNAIL_WIDE_COEFFICIENT * height) {
+		scale_x = FIV_THUMBNAIL_WIDE_COEFFICIENT * row_height / width;
 		scale_y = round(scale_x * height) / height;
 	} else {
 		scale_y = row_height / height;
@@ -350,7 +351,7 @@ rescale_thumbnail(cairo_surface_t *thumbnail, double row_height)
 	pixman_image_unref(dest);
 
 	cairo_surface_set_user_data(
-		scaled, &fiv_io_key_thumbnail_lq, (void *) (intptr_t) 1, NULL);
+		scaled, &fiv_thumbnail_key_lq, (void *) (intptr_t) 1, NULL);
 	cairo_surface_destroy(thumbnail);
 	cairo_surface_mark_dirty(scaled);
 	return scaled;
@@ -366,8 +367,7 @@ entry_add_thumbnail(gpointer data, gpointer user_data)
 	FivBrowser *browser = FIV_BROWSER(user_data);
 	GFile *file = g_file_new_for_uri(self->uri);
 	self->thumbnail = rescale_thumbnail(
-		fiv_io_lookup_thumbnail(file, browser->item_size),
-		browser->item_height);
+		fiv_thumbnail_lookup(file, browser->item_size), browser->item_height);
 	if (self->thumbnail)
 		goto out;
 
@@ -508,7 +508,7 @@ thumbnailer_next(FivBrowser *self)
 	GError *error = NULL;
 	self->thumbnailer = g_subprocess_new(G_SUBPROCESS_FLAGS_NONE, &error,
 		PROJECT_NAME, "--thumbnail",
-		fiv_io_thumbnail_sizes[self->item_size].thumbnail_spec_name, "--", path,
+		fiv_thumbnail_sizes[self->item_size].thumbnail_spec_name, "--", path,
 		NULL);
 	g_free(path);
 	if (error) {
@@ -542,7 +542,7 @@ thumbnailer_start(FivBrowser *self)
 	thumbnailer_abort(self);
 
 	// TODO(p): Leave out all paths containing .cache/thumbnails altogether.
-	gchar *thumbnails_dir = fiv_io_get_thumbnail_root();
+	gchar *thumbnails_dir = fiv_thumbnail_get_root();
 	GFile *thumbnails = g_file_new_for_path(thumbnails_dir);
 	g_free(thumbnails_dir);
 	GFile *current = g_file_new_for_path(self->path);
@@ -558,7 +558,7 @@ thumbnailer_start(FivBrowser *self)
 		if (entry->icon)
 			missing = g_list_prepend(missing, entry);
 		else if (cairo_surface_get_user_data(
-			entry->thumbnail, &fiv_io_key_thumbnail_lq))
+			entry->thumbnail, &fiv_thumbnail_key_lq))
 			lq = g_list_prepend(lq, entry);
 	}
 
@@ -778,14 +778,14 @@ fiv_browser_get_property(
 }
 
 static void
-set_item_size(FivBrowser *self, FivIoThumbnailSize size)
+set_item_size(FivBrowser *self, FivThumbnailSize size)
 {
-	if (size < FIV_IO_THUMBNAIL_SIZE_MIN || size > FIV_IO_THUMBNAIL_SIZE_MAX)
+	if (size < FIV_THUMBNAIL_SIZE_MIN || size > FIV_THUMBNAIL_SIZE_MAX)
 		return;
 
 	if (size != self->item_size) {
 		self->item_size = size;
-		self->item_height = fiv_io_thumbnail_sizes[self->item_size].size;
+		self->item_height = fiv_thumbnail_sizes[self->item_size].size;
 		reload_thumbnails(self);
 
 		g_object_notify_by_pspec(
@@ -822,7 +822,7 @@ fiv_browser_get_preferred_width(GtkWidget *widget, gint *minimum, gint *natural)
 	GtkBorder padding = {};
 	gtk_style_context_get_padding(style, GTK_STATE_FLAG_NORMAL, &padding);
 	*minimum = *natural =
-		FIV_IO_WIDE_THUMBNAIL_COEFFICIENT * self->item_height + padding.left +
+		FIV_THUMBNAIL_WIDE_COEFFICIENT * self->item_height + padding.left +
 		2 * self->item_border_x + padding.right;
 }
 
@@ -1100,7 +1100,7 @@ fiv_browser_class_init(FivBrowserClass *klass)
 
 	browser_properties[PROP_THUMBNAIL_SIZE] = g_param_spec_enum(
 		"thumbnail-size", "Thumbnail size", "The thumbnail height to use",
-		FIV_TYPE_IO_THUMBNAIL_SIZE, FIV_IO_THUMBNAIL_SIZE_NORMAL,
+		FIV_TYPE_THUMBNAIL_SIZE, FIV_THUMBNAIL_SIZE_NORMAL,
 		G_PARAM_READWRITE);
 	g_object_class_install_properties(
 		object_class, N_PROPERTIES, browser_properties);
@@ -1145,7 +1145,7 @@ fiv_browser_init(FivBrowser *self)
 	self->layouted_rows = g_array_new(FALSE, TRUE, sizeof(Row));
 	g_array_set_clear_func(self->layouted_rows, (GDestroyNotify) row_free);
 
-	set_item_size(self, FIV_IO_THUMBNAIL_SIZE_NORMAL);
+	set_item_size(self, FIV_THUMBNAIL_SIZE_NORMAL);
 	self->selected = -1;
 	self->glow = cairo_image_surface_create(CAIRO_FORMAT_A1, 0, 0);
 
