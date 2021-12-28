@@ -134,6 +134,10 @@ typedef struct _FivIoThumbnailSizeInfo {
 extern FivIoThumbnailSizeInfo
 	fiv_io_thumbnail_sizes[FIV_IO_THUMBNAIL_SIZE_COUNT];
 
+enum {
+	FIV_IO_WIDE_THUMBNAIL_COEFFICIENT = 2
+};
+
 /// Returns this user's root thumbnail directory.
 gchar *fiv_io_get_thumbnail_root(void);
 

@@ -66,8 +66,6 @@ typedef struct entry Entry;
 typedef struct item Item;
 typedef struct row Row;
 
-static const double g_permitted_width_multiplier = 2;
-
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 struct entry {
@@ -305,8 +303,8 @@ rescale_thumbnail(cairo_surface_t *thumbnail, double row_height)
 
 	double scale_x = 1;
 	double scale_y = 1;
-	if (width > g_permitted_width_multiplier * height) {
-		scale_x = g_permitted_width_multiplier * row_height / width;
+	if (width > FIV_IO_WIDE_THUMBNAIL_COEFFICIENT * height) {
+		scale_x = FIV_IO_WIDE_THUMBNAIL_COEFFICIENT * row_height / width;
 		scale_y = round(scale_x * height) / height;
 	} else {
 		scale_y = row_height / height;
@@ -823,8 +821,9 @@ fiv_browser_get_preferred_width(GtkWidget *widget, gint *minimum, gint *natural)
 
 	GtkBorder padding = {};
 	gtk_style_context_get_padding(style, GTK_STATE_FLAG_NORMAL, &padding);
-	*minimum = *natural = g_permitted_width_multiplier * self->item_height +
-		padding.left + 2 * self->item_border_x + padding.right;
+	*minimum = *natural =
+		FIV_IO_WIDE_THUMBNAIL_COEFFICIENT * self->item_height + padding.left +
+		2 * self->item_border_x + padding.right;
 }
 
 static void

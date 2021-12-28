@@ -2763,9 +2763,6 @@ FivIoThumbnailSizeInfo
 		FIV_IO_THUMBNAIL_SIZES(XX)};
 #undef XX
 
-// TODO(p): Put the constant in a header file, share with fiv-browser.c.
-static const double g_wide_thumbnail_factor = 2;
-
 static void
 mark_thumbnail_lq(cairo_surface_t *surface)
 {
@@ -2793,8 +2790,8 @@ rescale_thumbnail(cairo_surface_t *thumbnail, double row_height)
 
 	double scale_x = 1;
 	double scale_y = 1;
-	if (width > g_wide_thumbnail_factor * height) {
-		scale_x = g_wide_thumbnail_factor * row_height / width;
+	if (width > FIV_IO_WIDE_THUMBNAIL_COEFFICIENT * height) {
+		scale_x = FIV_IO_WIDE_THUMBNAIL_COEFFICIENT * row_height / width;
 		scale_y = round(scale_x * height) / height;
 	} else {
 		scale_y = row_height / height;
