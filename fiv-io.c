@@ -2785,6 +2785,7 @@ fiv_io_get_thumbnail_root(void)
 static cairo_surface_t *
 rescale_thumbnail(cairo_surface_t *thumbnail, double row_height)
 {
+	cairo_format_t format = cairo_image_surface_get_format(thumbnail);
 	int width = cairo_image_surface_get_width(thumbnail);
 	int height = cairo_image_surface_get_height(thumbnail);
 
@@ -2800,13 +2801,13 @@ rescale_thumbnail(cairo_surface_t *thumbnail, double row_height)
 	if (scale_x == 1 && scale_y == 1)
 		return cairo_surface_reference(thumbnail);
 
-	// TODO(p): Don't always include an alpha channel.
-	cairo_format_t cairo_format = CAIRO_FORMAT_ARGB32;
-
 	int projected_width = round(scale_x * width);
 	int projected_height = round(scale_y * height);
 	cairo_surface_t *scaled = cairo_image_surface_create(
-		cairo_format, projected_width, projected_height);
+		(format == CAIRO_FORMAT_RGB24 || format == CAIRO_FORMAT_RGB30)
+			? CAIRO_FORMAT_RGB24
+			: CAIRO_FORMAT_ARGB32,
+		projected_width, projected_height);
 
 	cairo_t *cr = cairo_create(scaled);
 	cairo_scale(cr, scale_x, scale_y);
