@@ -465,6 +465,11 @@ on_thumbnailer_ready(GObject *object, GAsyncResult *res, gpointer user_data)
 	FivBrowser *self = FIV_BROWSER(user_data);
 	GError *error = NULL;
 	if (!g_subprocess_wait_check_finish(subprocess, res, &error)) {
+		if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
+			g_error_free(error);
+			return;
+		}
+
 		g_warning("%s", error->message);
 		g_error_free(error);
 	}
