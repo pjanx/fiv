@@ -15,6 +15,8 @@
 // CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 //
 
+#include "config.h"
+
 #include <spng.h>
 #include <webp/encode.h>
 #include <webp/mux.h>
@@ -72,6 +74,14 @@ FivThumbnailSizeInfo
 #undef XX
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+#define THUMB_URI             "Thumb::URI"
+#define THUMB_MTIME           "Thumb::MTime"
+#define THUMB_SIZE            "Thumb::Size"
+#define THUMB_IMAGE_WIDTH     "Thumb::Image::Width"
+#define THUMB_IMAGE_HEIGHT    "Thumb::Image::Height"
+#define THUMB_COLORSPACE      "Thumb::ColorSpace"
+#define THUMB_COLORSPACE_SRGB "sRGB"
 
 cairo_user_data_key_t fiv_thumbnail_key_lq;
 
@@ -250,20 +260,20 @@ fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size, GError **error)
 
 	GString *thum = g_string_new("");
 	g_string_append_printf(
-		thum, "%s%c%s%c", "Thumb::URI", 0, uri, 0);
+		thum, "%s%c%s%c", THUMB_URI, 0, uri, 0);
 	g_string_append_printf(
-		thum, "%s%c%ld%c", "Thumb::Mtime", 0, (long) st.st_mtim.tv_sec, 0);
+		thum, "%s%c%ld%c", THUMB_MTIME, 0, (long) st.st_mtim.tv_sec, 0);
 	g_string_append_printf(
-		thum, "%s%c%ld%c", "Thumb::Size", 0, (long) filesize, 0);
-	g_string_append_printf(thum, "%s%c%d%c", "Thumb::Image::Width", 0,
+		thum, "%s%c%ld%c", THUMB_SIZE, 0, (long) filesize, 0);
+	g_string_append_printf(thum, "%s%c%d%c", THUMB_IMAGE_WIDTH, 0,
 		cairo_image_surface_get_width(surface), 0);
-	g_string_append_printf(thum, "%s%c%d%c", "Thumb::Image::Height", 0,
+	g_string_append_printf(thum, "%s%c%d%c", THUMB_IMAGE_HEIGHT, 0,
 		cairo_image_surface_get_height(surface), 0);
 
 	// Without a CMM, no conversion is attempted.
 	if (sRGB) {
 		g_string_append_printf(
-			thum, "%s%c%s%c", "Thumb::ColorSpace", 0, "sRGB", 0);
+			thum, "%s%c%s%c", THUMB_COLORSPACE, 0, THUMB_COLORSPACE_SRGB, 0);
 	}
 
 	for (int use = max_size; use >= FIV_THUMBNAIL_SIZE_MIN; use--) {
@@ -285,14 +295,62 @@ fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size, GError **error)
 	return TRUE;
 }
 
+static bool
+check_wide_thumbnail_texts(GBytes *thum, const gchar *target, time_t mtime,
+	bool *sRGB)
+{
+	gsize len = 0;
+	const gchar *s = g_bytes_get_data(thum, &len), *end = s + len;
+
+	// Similar to PNG below, but we're following our own specification.
+	const gchar *key = NULL, *nul = NULL;
+	bool have_uri = false, have_mtime = false;
+	for (; (nul = memchr(s, '\0', end - s)); s = ++nul) {
+		if (!key) {
+			key = s;
+			continue;
+		} else if (!strcmp(key, THUMB_URI)) {
+			have_uri = true;
+			if (strcmp(target, s))
+				return false;
+		} else if (!strcmp(key, THUMB_MTIME)) {
+			have_mtime = true;
+			if (atol(s) != mtime)
+				return false;
+		} else if (!strcmp(key, THUMB_COLORSPACE))
+			*sRGB = !strcmp(s, THUMB_COLORSPACE_SRGB);
+
+		key = NULL;
+	}
+	return have_uri && have_mtime;
+}
+
 static cairo_surface_t *
 read_wide_thumbnail(
 	const gchar *path, const gchar *uri, time_t mtime, GError **error)
 {
-	// TODO(p): Validate fiv_io_key_thum.
-	(void) uri;
-	(void) mtime;
-	return fiv_io_open(path, NULL, FALSE, error);
+	cairo_surface_t *surface = fiv_io_open(path, NULL, FALSE, error);
+	if (!surface)
+		return NULL;
+
+	bool sRGB = false;
+	GBytes *thum = cairo_surface_get_user_data(surface, &fiv_io_key_thum);
+	if (!thum) {
+		set_error(error, "not a thumbnail");
+	} else if (!check_wide_thumbnail_texts(thum, uri, mtime, &sRGB)) {
+		set_error(error, "mismatch");
+	} else {
+		// TODO(p): Add a function or a non-valueless define to check
+		// for CMM presence, then remove this ifdef.
+#ifdef HAVE_LCMS2
+		if (!sRGB)
+			mark_thumbnail_lq(surface);
+#endif  // HAVE_LCMS2
+		return surface;
+	}
+
+	cairo_surface_destroy(surface);
+	return NULL;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -306,12 +364,12 @@ check_spng_thumbnail_texts(struct spng_text *texts, uint32_t texts_len,
 	bool need_uri = true, need_mtime = true;
 	for (uint32_t i = 0; i < texts_len; i++) {
 		struct spng_text *text = texts + i;
-		if (!strcmp(text->keyword, "Thumb::URI")) {
+		if (!strcmp(text->keyword, THUMB_URI)) {
 			need_uri = false;
 			if (strcmp(target, text->text))
 				return false;
 		}
-		if (!strcmp(text->keyword, "Thumb::MTime")) {
+		if (!strcmp(text->keyword, THUMB_MTIME)) {
 			need_mtime = false;
 			if (atol(text->text) != mtime)
 				return false;
