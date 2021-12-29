@@ -2082,8 +2082,10 @@ load_libtiff_directory(TIFF *tiff, GError **error)
 		goto fail;
 	}
 
-	surface = cairo_image_surface_create(
-		CAIRO_FORMAT_ARGB32, image.width, image.height);
+	surface = cairo_image_surface_create(image.alpha != EXTRASAMPLE_UNSPECIFIED
+			? CAIRO_FORMAT_ARGB32
+			: CAIRO_FORMAT_RGB24,
+		image.width, image.height);
 
 	image.req_orientation = ORIENTATION_LEFTTOP;
 	uint32_t *raster = (uint32_t *) cairo_image_surface_get_data(surface);
@@ -2092,15 +2094,15 @@ load_libtiff_directory(TIFF *tiff, GError **error)
 		goto fail;
 	}
 
-	// Needs to be converted from ABGR to alpha-premultiplied ARGB for Cairo.
-	for (uint32_t i = image.width * image.height; i--;) {
-		uint32_t pixel = raster[i],
-			a = TIFFGetA(pixel),
-			b = TIFFGetB(pixel) * a / 255,
-			g = TIFFGetG(pixel) * a / 255,
-			r = TIFFGetR(pixel) * a / 255;
-		raster[i] = a << 24 | r << 16 | g << 8 | b;
+	// Needs to be byte-swapped from ABGR to alpha-premultiplied ARGB for Cairo.
+	for (uint64_t i = image.width * image.height; i--; ) {
+		uint32_t pixel = raster[i];
+		raster[i] = TIFFGetA(pixel) << 24 | TIFFGetR(pixel) << 16 |
+			TIFFGetG(pixel) << 8 | TIFFGetB(pixel);
 	}
+	// It seems that neither GIMP nor Photoshop use unassociated alpha.
+	if (image.alpha == EXTRASAMPLE_UNASSALPHA)
+		fiv_io_premultiply_argb32(surface);
 
 	cairo_surface_mark_dirty(surface);
 	// XXX: The whole file is essentially an Exif, any ideas?
@@ -2134,7 +2136,8 @@ fail:
 }
 
 static cairo_surface_t *
-open_libtiff(const gchar *data, gsize len, const gchar *path, GError **error)
+open_libtiff(const gchar *data, gsize len, const gchar *path,
+	FivIoProfile target, GError **error)
 {
 	// Both kinds of handlers are called, redirect everything.
 	TIFFErrorHandler eh = TIFFSetErrorHandler(NULL);
@@ -2202,7 +2205,11 @@ fail:
 	TIFFSetWarningHandlerExt(whe);
 	TIFFSetErrorHandler(eh);
 	TIFFSetWarningHandler(wh);
-	return result;
+
+	// TODO(p): Colour management even for un/associated alpha channels.
+	// Note that TIFF has a number of fields that an ICC profile can be
+	// constructed from--it's not a good idea to blindly assume sRGB.
+	return fiv_io_profile_finalize(result, target);
 }
 
 #endif  // HAVE_LIBTIFF --------------------------------------------------------
@@ -2415,7 +2422,7 @@ fiv_io_open_from_data(const char *data, size_t len, const gchar *path,
 #endif  // HAVE_LIBHEIF --------------------------------------------------------
 #ifdef HAVE_LIBTIFF  //---------------------------------------------------------
 		// This needs to be positioned after LibRaw.
-		if ((surface = open_libtiff(data, len, path, error)))
+		if ((surface = open_libtiff(data, len, path, profile, error)))
 			break;
 		if (error) {
 			g_debug("%s", (*error)->message);
