@@ -85,11 +85,15 @@ static GtkWidget *
 create_row(GFile *file, const char *icon_name)
 {
 	// TODO(p): Handle errors better.
+	GError *error = NULL;
 	GFileInfo *info =
 		g_file_query_info(file, G_FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME,
-			G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, NULL, NULL);
-	if (!info)
+			G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, NULL, &error);
+	if (!info) {
+		g_debug("%s", error->message);
+		g_error_free(error);
 		return NULL;
+	}
 
 	const char *name = g_file_info_get_display_name(info);
 	GtkWidget *rowbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
@@ -147,20 +151,21 @@ update_location(FivSidebar *self, GFile *location)
 	g_return_if_fail(self->location != NULL);
 
 	GFile *iter = g_object_ref(self->location);
+	GtkWidget *row = NULL;
 	while (TRUE) {
 		GFile *parent = g_file_get_parent(iter);
 		g_object_unref(iter);
 		if (!(iter = parent))
 			break;
 
-		gtk_list_box_prepend(GTK_LIST_BOX(self->listbox),
-			create_row(parent, "go-up-symbolic"));
+		if ((row = create_row(parent, "go-up-symbolic")))
+			gtk_list_box_prepend(GTK_LIST_BOX(self->listbox), row);
 	}
 
 	// Other options are "folder-{visiting,open}-symbolic", though the former
 	// is mildly inappropriate (means: open in another window).
-	gtk_container_add(GTK_CONTAINER(self->listbox),
-		create_row(self->location, "circle-filled-symbolic"));
+	if ((row = create_row(self->location, "circle-filled-symbolic")))
+		gtk_container_add(GTK_CONTAINER(self->listbox), row);
 
 	GFileEnumerator *enumerator = g_file_enumerate_children(self->location,
 		G_FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME
@@ -181,9 +186,9 @@ update_location(FivSidebar *self, GFile *location)
 			break;
 
 		if (g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY &&
-			!g_file_info_get_is_hidden(info))
-			gtk_container_add(GTK_CONTAINER(self->listbox),
-				create_row(child, "go-down-symbolic"));
+			!g_file_info_get_is_hidden(info) &&
+			(row = create_row(child, "go-down-symbolic")))
+				gtk_container_add(GTK_CONTAINER(self->listbox), row);
 	}
 	g_object_unref(enumerator);
 }

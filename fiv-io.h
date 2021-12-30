@@ -73,9 +73,9 @@ extern cairo_user_data_key_t fiv_io_key_page_next;
 extern cairo_user_data_key_t fiv_io_key_page_previous;
 
 cairo_surface_t *fiv_io_open(
-	const gchar *path, FivIoProfile profile, gboolean enhance, GError **error);
+	const gchar *uri, FivIoProfile profile, gboolean enhance, GError **error);
 cairo_surface_t *fiv_io_open_from_data(const char *data, size_t len,
-	const gchar *path, FivIoProfile profile, gboolean enhance, GError **error);
+	const gchar *uri, FivIoProfile profile, gboolean enhance, GError **error);
 
 int fiv_io_filecmp(GFile *f1, GFile *f2);
 

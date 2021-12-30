@@ -263,13 +263,12 @@ struct {
 	gchar **supported_globs;
 	gboolean filtering;
 
-	gchar *directory;          ///< Full path to the currently browsed directory
+	gchar *uri;                ///< Current image URI
+	gchar *directory;          ///< URI of the currently browsed directory
 	GList *directory_back;     ///< History paths going backwards
 	GList *directory_forward;  ///< History paths going forwards
-	GPtrArray *files;
-	gint files_index;
-
-	gchar *path;
+	GPtrArray *files;          ///< "directory" contents
+	gint files_index;          ///< Where "uri" is within "files"
 
 	GtkWidget *window;
 	GtkWidget *stack;
@@ -322,15 +321,25 @@ show_error_dialog(GError *error)
 static void
 switch_to_browser(void)
 {
-	gtk_window_set_title(GTK_WINDOW(g.window), g.directory);
+	// TODO(p): Use g_file_get_parse_name() or something.
+	GFile *file = g_file_new_for_uri(g.directory);
+	const char *path = g_file_peek_path(file);
+	gtk_window_set_title(GTK_WINDOW(g.window), path ? path : g.directory);
+	g_object_unref(file);
+
 	gtk_stack_set_visible_child(GTK_STACK(g.stack), g.browser_paned);
 	gtk_widget_grab_focus(g.browser_scroller);
 }
 
 static void
-switch_to_view(const char *path)
+switch_to_view(const char *uri)
 {
-	gtk_window_set_title(GTK_WINDOW(g.window), path);
+	// TODO(p): Use g_file_get_parse_name() or something.
+	GFile *file = g_file_new_for_uri(uri);
+	const char *path = g_file_peek_path(file);
+	gtk_window_set_title(GTK_WINDOW(g.window), path ? path : uri);
+	g_object_unref(file);
+
 	gtk_stack_set_visible_child(GTK_STACK(g.stack), g.view_box);
 	gtk_widget_grab_focus(g.view);
 }
@@ -338,38 +347,37 @@ switch_to_view(const char *path)
 static gint
 files_compare(gconstpointer a, gconstpointer b)
 {
-	gchar *path1 = g_canonicalize_filename(*(gchar **) a, g.directory);
-	gchar *path2 = g_canonicalize_filename(*(gchar **) b, g.directory);
-	GFile *location1 = g_file_new_for_path(path1);
-	GFile *location2 = g_file_new_for_path(path2);
-	g_free(path1);
-	g_free(path2);
-	gint result = fiv_io_filecmp(location1, location2);
-	g_object_unref(location1);
-	g_object_unref(location2);
+	GFile *file1 = g_file_new_for_uri(*(gchar **) a);
+	GFile *file2 = g_file_new_for_uri(*(gchar **) b);
+	gint result = fiv_io_filecmp(file1, file2);
+	g_object_unref(file1);
+	g_object_unref(file2);
 	return result;
+}
+
+static gchar *
+parent_uri(GFile *child_file)
+{
+	GFile *parent = g_file_get_parent(child_file);
+	gchar *parent_uri = g_file_get_uri(parent);
+	g_object_unref(parent);
+	return parent_uri;
 }
 
 static void
 update_files_index(void)
 {
 	g.files_index = -1;
-
-	// FIXME: We presume that this basename is from the same directory.
-	gchar *basename = g.path ? g_path_get_basename(g.path) : NULL;
-	for (guint i = 0; i < g.files->len; i++) {
-		if (!g_strcmp0(basename, g_ptr_array_index(g.files, i)))
+	for (guint i = 0; i < g.files->len; i++)
+		if (!g_strcmp0(g.uri, g_ptr_array_index(g.files, i)))
 			g.files_index = i;
-	}
-	g_free(basename);
 }
 
 static void
-load_directory_without_reload(const gchar *dirname)
+load_directory_without_reload(const gchar *uri)
 {
-	gchar *dirname_duplicated = g_strdup(dirname);
-	if (g.directory_back &&
-			!strcmp(dirname, g.directory_back->data)) {
+	gchar *uri_duplicated = g_strdup(uri);
+	if (g.directory_back && !strcmp(uri, g.directory_back->data)) {
 		// We're going back in history.
 		if (g.directory) {
 			g.directory_forward =
@@ -380,8 +388,7 @@ load_directory_without_reload(const gchar *dirname)
 		GList *link = g.directory_back;
 		g.directory_back = g_list_remove_link(g.directory_back, link);
 		g_list_free_full(link, g_free);
-	} else if (g.directory_forward &&
-			!strcmp(dirname, g.directory_forward->data)) {
+	} else if (g.directory_forward && !strcmp(uri, g.directory_forward->data)) {
 		// We're going forward in history.
 		if (g.directory) {
 			g.directory_back =
@@ -392,7 +399,7 @@ load_directory_without_reload(const gchar *dirname)
 		GList *link = g.directory_forward;
 		g.directory_forward = g_list_remove_link(g.directory_forward, link);
 		g_list_free_full(link, g_free);
-	} else if (g.directory && strcmp(dirname, g.directory)) {
+	} else if (g.directory && strcmp(uri, g.directory)) {
 		// We're on a new subpath.
 		g_list_free_full(g.directory_forward, g_free);
 		g.directory_forward = NULL;
@@ -402,14 +409,14 @@ load_directory_without_reload(const gchar *dirname)
 	}
 
 	g_free(g.directory);
-	g.directory = dirname_duplicated;
+	g.directory = uri_duplicated;
 }
 
 static void
-load_directory(const gchar *dirname)
+load_directory(const gchar *uri)
 {
-	if (dirname) {
-		load_directory_without_reload(dirname);
+	if (uri) {
+		load_directory_without_reload(uri);
 
 		GtkAdjustment *vadjustment = gtk_scrolled_window_get_vadjustment(
 			GTK_SCROLLED_WINDOW(g.browser_scroller));
@@ -420,30 +427,35 @@ load_directory(const gchar *dirname)
 	g_ptr_array_set_size(g.files, 0);
 	g.files_index = -1;
 
-	GFile *file = g_file_new_for_path(g.directory);
+	GFile *file = g_file_new_for_uri(g.directory);
 	fiv_sidebar_set_location(FIV_SIDEBAR(g.browser_sidebar), file);
-	g_object_unref(file);
 	fiv_browser_load(
 		FIV_BROWSER(g.browser), g.filtering ? is_supported : NULL, g.directory);
 
 	GError *error = NULL;
-	GDir *dir = g_dir_open(g.directory, 0, &error);
-	if (dir) {
-		for (const gchar *name = NULL; (name = g_dir_read_name(dir)); ) {
-			// This really wants to make you use readdir() directly.
-			char *absolute = g_canonicalize_filename(name, g.directory);
-			gboolean is_dir = g_file_test(absolute, G_FILE_TEST_IS_DIR);
-			g_free(absolute);
-			if (!is_dir && is_supported(name))
-				g_ptr_array_add(g.files, g_strdup(name));
+	GFileEnumerator *enumerator = g_file_enumerate_children(file,
+		G_FILE_ATTRIBUTE_STANDARD_NAME "," G_FILE_ATTRIBUTE_STANDARD_TYPE,
+		G_FILE_QUERY_INFO_NONE, NULL, &error);
+	if (enumerator) {
+		GFileInfo *info = NULL;
+		GFile *child = NULL;
+		while (
+			g_file_enumerator_iterate(enumerator, &info, &child, NULL, NULL) &&
+			info) {
+			// TODO(p): What encoding does g_file_info_get_name() return?
+			if (g_file_info_get_file_type(info) != G_FILE_TYPE_DIRECTORY &&
+				is_supported(g_file_info_get_name(info)))
+				g_ptr_array_add(g.files, g_file_get_uri(child));
 		}
-		g_dir_close(dir);
+		g_object_unref(enumerator);
 
 		g_ptr_array_sort(g.files, files_compare);
 		update_files_index();
 	} else {
+		// TODO(p): Handle "Operation not supported" silently.
 		show_error_dialog(error);
 	}
+	g_object_unref(file);
 
 	gtk_widget_set_sensitive(
 		g.toolbar[TOOLBAR_FILE_PREVIOUS], g.files->len > 1);
@@ -454,7 +466,7 @@ load_directory(const gchar *dirname)
 	// XXX: When something outside the filtered entries is open, the index is
 	// kept at -1, and browsing doesn't work. How to behave here?
 	// Should we add it to the pointer array as an exception?
-	if (dirname)
+	if (uri)
 		switch_to_browser();
 }
 
@@ -467,41 +479,40 @@ on_filtering_toggled(GtkToggleButton *button, G_GNUC_UNUSED gpointer user_data)
 }
 
 static void
-open(const gchar *path)
+open(const gchar *uri)
 {
-	g_return_if_fail(g_path_is_absolute(path));
+	GFile *file = g_file_new_for_uri(uri);
 
 	GError *error = NULL;
-	if (!fiv_view_open(FIV_VIEW(g.view), path, &error)) {
-		char *base = g_filename_display_basename(path);
+	if (!fiv_view_open(FIV_VIEW(g.view), uri, &error)) {
+		const char *path = g_file_peek_path(file);
+		// TODO(p): Use g_file_info_get_display_name().
+		gchar *base = g_filename_display_basename(path ? path : uri);
+		g_object_unref(file);
+
 		g_prefix_error(&error, "%s: ", base);
 		show_error_dialog(error);
 		g_free(base);
 		return;
 	}
 
-	gchar *uri = g_filename_to_uri(path, NULL, NULL);
-	if (uri) {
-		gtk_recent_manager_add_item(gtk_recent_manager_get_default(), uri);
-		g_free(uri);
-	}
-
+	gtk_recent_manager_add_item(gtk_recent_manager_get_default(), uri);
 	g_list_free_full(g.directory_forward, g_free);
 	g.directory_forward = NULL;
 
-	g_free(g.path);
-	g.path = g_strdup(path);
+	g_free(g.uri);
+	g.uri = g_strdup(uri);
 
 	// So that load_directory() itself can be used for reloading.
-	gchar *dirname = g_path_get_dirname(path);
+	gchar *parent = parent_uri(file);
 	if (!g.files->len /* hack to always load the directory after launch */ ||
-		!g.directory || strcmp(dirname, g.directory))
-		load_directory(dirname);
+		!g.directory || strcmp(parent, g.directory))
+		load_directory(parent);
 	else
 		update_files_index();
-	g_free(dirname);
+	g_free(parent);
 
-	switch_to_view(path);
+	switch_to_view(uri);
 }
 
 static GtkWidget *
@@ -511,6 +522,7 @@ create_open_dialog(void)
 		GTK_WINDOW(g.window), GTK_FILE_CHOOSER_ACTION_OPEN,
 		"_Cancel", GTK_RESPONSE_CANCEL,
 		"_Open", GTK_RESPONSE_ACCEPT, NULL);
+	gtk_file_chooser_set_local_only(GTK_FILE_CHOOSER(dialog), FALSE);
 
 	GtkFileFilter *filter = gtk_file_filter_new();
 	for (const char **p = fiv_io_supported_media_types; *p; p++)
@@ -539,13 +551,13 @@ on_open(void)
 	// that it will remember its last location.
 	gtk_file_chooser_set_current_folder(GTK_FILE_CHOOSER(dialog), g.directory);
 
-	// The default is local-only, single item. Paths are returned absolute.
+	// The default is local-only, single item.
 	switch (gtk_dialog_run(GTK_DIALOG(dialog))) {
-		gchar *path;
+		gchar *uri;
 	case GTK_RESPONSE_ACCEPT:
-		path = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
-		open(path);
-		g_free(path);
+		uri = gtk_file_chooser_get_uri(GTK_FILE_CHOOSER(dialog));
+		open(uri);
+		g_free(uri);
 		break;
 	case GTK_RESPONSE_NONE:
 		dialog = NULL;
@@ -561,10 +573,7 @@ on_previous(void)
 	if (g.files_index >= 0) {
 		int previous =
 			(g.files->len - 1 + g.files_index - 1) % (g.files->len - 1);
-		char *absolute = g_canonicalize_filename(
-			g_ptr_array_index(g.files, previous), g.directory);
-		open(absolute);
-		g_free(absolute);
+		open(g_ptr_array_index(g.files, previous));
 	}
 }
 
@@ -573,17 +582,14 @@ on_next(void)
 {
 	if (g.files_index >= 0) {
 		int next = (g.files_index + 1) % (g.files->len - 1);
-		char *absolute = g_canonicalize_filename(
-			g_ptr_array_index(g.files, next), g.directory);
-		open(absolute);
-		g_free(absolute);
+		open(g_ptr_array_index(g.files, next));
 	}
 }
 
 static void
-spawn_path(const char *path)
+spawn_uri(const char *uri)
 {
-	char *argv[] = {PROJECT_NAME, (char *) path, NULL};
+	char *argv[] = {PROJECT_NAME, (char *) uri, NULL};
 	GError *error = NULL;
 	g_spawn_async(
 		NULL, argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, &error);
@@ -594,37 +600,35 @@ static void
 on_item_activated(G_GNUC_UNUSED FivBrowser *browser, GFile *location,
 	GtkPlacesOpenFlags flags, G_GNUC_UNUSED gpointer data)
 {
-	gchar *path = g_file_get_path(location);
-	if (path) {
-		if (flags == GTK_PLACES_OPEN_NEW_WINDOW)
-			spawn_path(path);
-		else
-			open(path);
-		g_free(path);
-	}
+	gchar *uri = g_file_get_uri(location);
+	if (flags == GTK_PLACES_OPEN_NEW_WINDOW)
+		spawn_uri(uri);
+	else
+		open(uri);
+	g_free(uri);
 }
 
 static gboolean
-open_any_path(const char *path, gboolean force_browser)
+open_any_uri(const char *uri, gboolean force_browser)
 {
-	GStatBuf st;
-	gchar *canonical = g_canonicalize_filename(path, g.directory);
-	gboolean success = !g_stat(canonical, &st);
+	GFile *file = g_file_new_for_uri(uri);
+	GFileType type = g_file_query_file_type(file, G_FILE_QUERY_INFO_NONE, NULL);
+	gboolean success = type != G_FILE_TYPE_UNKNOWN;
 	if (!success) {
 		show_error_dialog(g_error_new(G_FILE_ERROR,
-			g_file_error_from_errno(errno), "%s: %s", path, g_strerror(errno)));
-	} else if (S_ISDIR(st.st_mode)) {
-		load_directory(canonical);
+			g_file_error_from_errno(errno), "%s: %s", uri, g_strerror(ENOENT)));
+	} else if (type == G_FILE_TYPE_DIRECTORY) {
+		load_directory(uri);
 	} else if (force_browser) {
 		// GNOME, e.g., invokes this as a hint to focus the particular file,
 		// which we can't currently do yet.
-		gchar *directory = g_path_get_dirname(canonical);
-		load_directory(directory);
-		g_free(directory);
+		gchar *parent = parent_uri(file);
+		load_directory(parent);
+		g_free(parent);
 	} else {
-		open(canonical);
+		open(uri);
 	}
-	g_free(canonical);
+	g_object_unref(file);
 	return success;
 }
 
@@ -632,14 +636,12 @@ static void
 on_open_location(G_GNUC_UNUSED GtkPlacesSidebar *sidebar, GFile *location,
 	GtkPlacesOpenFlags flags, G_GNUC_UNUSED gpointer user_data)
 {
-	gchar *path = g_file_get_path(location);
-	if (path) {
-		if (flags & GTK_PLACES_OPEN_NEW_WINDOW)
-			spawn_path(path);
-		else
-			open_any_path(path, FALSE);
-		g_free(path);
-	}
+	gchar *uri = g_file_get_uri(location);
+	if (flags & GTK_PLACES_OPEN_NEW_WINDOW)
+		spawn_uri(uri);
+	else
+		open_any_uri(uri, FALSE);
+	g_free(uri);
 }
 
 static void
@@ -750,7 +752,7 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 			fiv_sidebar_show_enter_location(FIV_SIDEBAR(g.browser_sidebar));
 			return TRUE;
 		case GDK_KEY_n:
-			spawn_path(g.directory);
+			spawn_uri(g.directory);
 			return TRUE;
 		case GDK_KEY_r:
 			// TODO(p): Reload the image instead, if it's currently visible.
@@ -778,12 +780,13 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 			if (g.directory_forward)
 				load_directory(g.directory_forward->data);
 			else
-				switch_to_view(g.path);
+				switch_to_view(g.uri);
 			return TRUE;
 		case GDK_KEY_Up:
 			if (gtk_stack_get_visible_child(GTK_STACK(g.stack)) != g.view_box) {
-				// This isn't exact, trailing slashes should be ignored.
-				gchar *parent = g_path_get_dirname(g.directory);
+				GFile *directory = g_file_new_for_uri(g.directory);
+				gchar *parent = parent_uri(directory);
+				g_object_unref(directory);
 				load_directory(parent);
 				g_free(parent);
 			}
@@ -896,7 +899,7 @@ on_button_press_browser_paned(
 		if (g.directory_forward)
 			load_directory(g.directory_forward->data);
 		else
-			switch_to_view(g.path);
+			switch_to_view(g.uri);
 		return TRUE;
 	default:
 		return FALSE;
@@ -1245,7 +1248,7 @@ main(int argc, char *argv[])
 		if (size >= FIV_THUMBNAIL_SIZE_COUNT)
 			exit_fatal("unknown thumbnail size: %s", thumbnail_size);
 
-		GFile *target = g_file_new_for_path(path_arg);
+		GFile *target = g_file_new_for_commandline_arg(path_arg);
 		if (!fiv_thumbnail_produce(target, size, &error))
 			exit_fatal("%s", error->message);
 		g_object_unref(target);
@@ -1389,12 +1392,21 @@ main(int argc, char *argv[])
 	gtk_window_set_default_size(GTK_WINDOW(g.window), 4 * unit, 3 * unit);
 
 	g.files = g_ptr_array_new_full(16, g_free);
-	g.directory = g_get_current_dir();
+	gchar *cwd = g_get_current_dir();
+	g.directory = g_filename_to_uri(cwd, NULL, NULL /* error */);
+	g_free(cwd);
 
 	// XXX: The widget wants to read the display's profile. The realize is ugly.
 	gtk_widget_realize(g.view);
-	if (!path_arg || !open_any_path(path_arg, browse))
-		open_any_path(g.directory, FALSE);
+
+	gchar *uri = NULL;
+	if (path_arg) {
+		GFile *file = g_file_new_for_commandline_arg(path_arg);
+		uri = g_file_get_uri(file);
+		g_object_unref(file);
+	}
+	if (!uri || !open_any_uri(uri, browse))
+		open_any_uri(g.directory, FALSE);
 
 	gtk_widget_show_all(g.window);
 	gtk_main();

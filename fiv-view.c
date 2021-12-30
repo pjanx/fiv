@@ -33,7 +33,7 @@
 
 struct _FivView {
 	GtkWidget parent_instance;
-	gchar *path;                        ///< Path to the current image (if any)
+	gchar *uri;                         ///< Path to the current image (if any)
 	cairo_surface_t *image;             ///< The loaded image (sequence)
 	cairo_surface_t *page;              ///< Current page within image, weak
 	cairo_surface_t *frame;             ///< Current frame within page, weak
@@ -119,7 +119,7 @@ fiv_view_finalize(GObject *gobject)
 	g_clear_pointer(&self->screen_cms_profile, fiv_io_profile_free);
 	g_clear_pointer(&self->enhance_swap, cairo_surface_destroy);
 	g_clear_pointer(&self->image, cairo_surface_destroy);
-	g_free(self->path);
+	g_free(self->uri);
 
 	G_OBJECT_CLASS(fiv_view_parent_class)->finalize(gobject);
 }
@@ -754,19 +754,25 @@ save_as(FivView *self, cairo_surface_t *frame)
 	GtkFileChooser *chooser = GTK_FILE_CHOOSER(dialog);
 	gtk_file_chooser_set_do_overwrite_confirmation(chooser, TRUE);
 
+	GFile *file = g_file_new_for_uri(self->uri);
+	const gchar *path = g_file_peek_path(file);
+	// TODO(p): Use g_file_info_get_display_name().
+	gchar *basename = g_filename_display_basename(path ? path : self->uri);
+
 	// Note that GTK+'s save dialog is too stupid to automatically change
 	// the extension when user changes the filter. Presumably,
 	// gtk_file_chooser_set_extra_widget() can be used to circumvent this.
-	gchar *basename = g_filename_display_basename(self->path);
 	gchar *name =
 		g_strdup_printf(frame ? "%s.frame.webp" : "%s.webp", basename);
-	g_free(basename);
 	gtk_file_chooser_set_current_name(chooser, name);
 	g_free(name);
-
-	gchar *dirname = g_path_get_dirname(self->path);
-	gtk_file_chooser_set_current_folder(chooser, dirname);
-	g_free(dirname);
+	if (path) {
+		gchar *dirname = g_path_get_dirname(path);
+		gtk_file_chooser_set_current_folder(chooser, dirname);
+		g_free(dirname);
+	}
+	g_free(basename);
+	g_object_unref(file);
 
 	// This is the best general format: supports lossless encoding, animations,
 	// alpha channel, and Exif and ICC profile metadata.
@@ -892,9 +898,16 @@ info(FivView *self)
 	int flags = G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_PIPE;
 
 	GError *error = NULL;
+	gchar *path = g_filename_from_uri(self->uri, NULL, &error);
+	if (!path) {
+		show_error_dialog(window, error);
+		return;
+	}
+
 	GSubprocess *subprocess = g_subprocess_new(flags, &error, "exiftool",
 		"-tab", "-groupNames", "-duplicates", "-extractEmbedded", "--binary",
-		"-quiet", "--", self->path, NULL);
+		"-quiet", "--", path, NULL);
+	g_free(path);
 	if (error) {
 		show_error_dialog(window, error);
 		return;
@@ -1123,10 +1136,10 @@ fiv_view_init(FivView *self)
 
 // TODO(p): Progressive picture loading, or at least async/cancellable.
 gboolean
-fiv_view_open(FivView *self, const gchar *path, GError **error)
+fiv_view_open(FivView *self, const gchar *uri, GError **error)
 {
 	cairo_surface_t *surface = fiv_io_open(
-		path, self->enable_cms ? self->screen_cms_profile : NULL, FALSE, error);
+		uri, self->enable_cms ? self->screen_cms_profile : NULL, FALSE, error);
 	if (!surface)
 		return FALSE;
 	if (self->image)
@@ -1145,8 +1158,8 @@ fiv_view_open(FivView *self, const gchar *path, GError **error)
 	switch_page(self, self->image);
 	set_scale_to_fit(self, true);
 
-	g_free(self->path);
-	self->path = g_strdup(path);
+	g_free(self->uri);
+	self->uri = g_strdup(uri);
 
 	g_object_notify_by_pspec(G_OBJECT(self), view_properties[PROP_HAS_IMAGE]);
 	return TRUE;
@@ -1177,7 +1190,7 @@ static gboolean
 reload(FivView *self)
 {
 	GError *error = NULL;
-	cairo_surface_t *surface = fiv_io_open(self->path,
+	cairo_surface_t *surface = fiv_io_open(self->uri,
 		self->enable_cms ? self->screen_cms_profile : NULL, self->enhance,
 		&error);
 	if (!surface) {

@@ -48,7 +48,7 @@ struct _FivBrowser {
 	int item_height;                    ///< Thumbnail height in pixels
 	int item_spacing;                   ///< Space between items in pixels
 
-	char *path;                         ///< Current path
+	char *uri;                          ///< Current URI
 	GArray *entries;                    ///< []Entry
 	GArray *layouted_rows;              ///< []Row
 	int selected;
@@ -502,9 +502,9 @@ thumbnailer_next(FivBrowser *self)
 
 	const Entry *entry = link->data;
 	GFile *file = g_file_new_for_uri(entry->uri);
-	gchar *path = g_file_get_path(file);
+	gchar *uri = g_file_get_uri(file);
 	g_object_unref(file);
-	if (!path) {
+	if (!uri) {
 		// TODO(p): Support thumbnailing non-local URIs in some manner.
 		self->thumbnail_queue = g_list_delete_link(self->thumbnail_queue, link);
 		return;
@@ -513,9 +513,9 @@ thumbnailer_next(FivBrowser *self)
 	GError *error = NULL;
 	self->thumbnailer = g_subprocess_new(G_SUBPROCESS_FLAGS_NONE, &error,
 		PROJECT_NAME, "--thumbnail",
-		fiv_thumbnail_sizes[self->item_size].thumbnail_spec_name, "--", path,
+		fiv_thumbnail_sizes[self->item_size].thumbnail_spec_name, "--", uri,
 		NULL);
-	g_free(path);
+	g_free(uri);
 	if (error) {
 		g_warning("%s", error->message);
 		g_error_free(error);
@@ -550,7 +550,7 @@ thumbnailer_start(FivBrowser *self)
 	gchar *thumbnails_dir = fiv_thumbnail_get_root();
 	GFile *thumbnails = g_file_new_for_path(thumbnails_dir);
 	g_free(thumbnails_dir);
-	GFile *current = g_file_new_for_path(self->path);
+	GFile *current = g_file_new_for_uri(self->uri);
 	gboolean is_a_thumbnail = g_file_has_prefix(current, thumbnails);
 	g_object_unref(current);
 	g_object_unref(thumbnails);
@@ -759,7 +759,7 @@ fiv_browser_finalize(GObject *gobject)
 {
 	FivBrowser *self = FIV_BROWSER(gobject);
 	thumbnailer_abort(self);
-	g_free(self->path);
+	g_free(self->uri);
 	g_array_free(self->entries, TRUE);
 	g_array_free(self->layouted_rows, TRUE);
 	cairo_surface_destroy(self->glow);
@@ -940,9 +940,7 @@ fiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 
 	const Entry *entry = entry_at(self, event->x, event->y);
 	if (!entry && event->button == GDK_BUTTON_SECONDARY) {
-		gchar *uri = g_filename_to_uri(self->path, NULL, NULL);
-		show_context_menu(widget, uri);
-		g_free(uri);
+		show_context_menu(widget, self->uri);
 		return TRUE;
 	}
 	if (!entry)
@@ -1175,22 +1173,27 @@ entry_compare(gconstpointer a, gconstpointer b)
 
 void
 fiv_browser_load(
-	FivBrowser *self, FivBrowserFilterCallback cb, const char *path)
+	FivBrowser *self, FivBrowserFilterCallback cb, const char *uri)
 {
 	g_return_if_fail(FIV_IS_BROWSER(self));
 
 	thumbnailer_abort(self);
 	g_array_set_size(self->entries, 0);
 	g_array_set_size(self->layouted_rows, 0);
-	g_clear_pointer(&self->path, g_free);
+	g_clear_pointer(&self->uri, g_free);
 
-	GFile *file = g_file_new_for_path((self->path = g_strdup(path)));
+	GFile *file = g_file_new_for_uri((self->uri = g_strdup(uri)));
+
+	GError *error = NULL;
 	GFileEnumerator *enumerator = g_file_enumerate_children(file,
 		G_FILE_ATTRIBUTE_STANDARD_NAME "," G_FILE_ATTRIBUTE_STANDARD_TYPE,
-		G_FILE_QUERY_INFO_NONE, NULL, NULL);
+		G_FILE_QUERY_INFO_NONE, NULL, &error);
 	g_object_unref(file);
-	if (!enumerator)
+	if (!enumerator) {
+		// Note that this has had a side-effect of clearing all entries.
+		g_error_free(error);
 		return;
+	}
 
 	while (TRUE) {
 		GFileInfo *info = NULL;

@@ -223,20 +223,17 @@ fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size, GError **error)
 		max_size <= FIV_THUMBNAIL_SIZE_MAX, FALSE);
 
 	// Local files only, at least for now.
-	gchar *path = g_file_get_path(target);
+	const gchar *path = g_file_peek_path(target);
 	if (!path)
 		return FALSE;
 
 	GMappedFile *mf = g_mapped_file_new(path, FALSE, error);
-	if (!mf) {
-		g_free(path);
+	if (!mf)
 		return FALSE;
-	}
 
 	GStatBuf st = {};
 	if (g_stat(path, &st)) {
 		set_error(error, g_strerror(errno));
-		g_free(path);
 		return FALSE;
 	}
 
@@ -246,7 +243,6 @@ fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size, GError **error)
 	cairo_surface_t *surface = fiv_io_open_from_data(
 		g_mapped_file_get_contents(mf), filesize, path, sRGB, FALSE, error);
 
-	g_free(path);
 	g_mapped_file_unref(mf);
 	if (sRGB)
 		fiv_io_profile_free(sRGB);
@@ -329,7 +325,12 @@ static cairo_surface_t *
 read_wide_thumbnail(
 	const gchar *path, const gchar *uri, time_t mtime, GError **error)
 {
-	cairo_surface_t *surface = fiv_io_open(path, NULL, FALSE, error);
+	gchar *thumbnail_uri = g_filename_to_uri(path, NULL, error);
+	if (!thumbnail_uri)
+		return NULL;
+
+	cairo_surface_t *surface = fiv_io_open(thumbnail_uri, NULL, FALSE, error);
+	g_free(thumbnail_uri);
 	if (!surface)
 		return NULL;
 
@@ -496,14 +497,9 @@ fiv_thumbnail_lookup(GFile *target, FivThumbnailSize size)
 		size <= FIV_THUMBNAIL_SIZE_MAX, NULL);
 
 	// Local files only, at least for now.
-	gchar *path = g_file_get_path(target);
-	if (!path)
-		return NULL;
-
 	GStatBuf st = {};
-	int err = g_stat(path, &st);
-	g_free(path);
-	if (err)
+	const gchar *path = g_file_peek_path(target);
+	if (!path || g_stat(path, &st))
 		return NULL;
 
 	gchar *uri = g_file_get_uri(target);

@@ -1329,9 +1329,9 @@ open_libraw(const gchar *data, gsize len, GError **error)
 
 // FIXME: librsvg rasterizes filters, so this method isn't fully appropriate.
 static cairo_surface_t *
-open_librsvg(const gchar *data, gsize len, const gchar *path, GError **error)
+open_librsvg(const gchar *data, gsize len, const gchar *uri, GError **error)
 {
-	GFile *base_file = g_file_new_for_path(path);
+	GFile *base_file = g_file_new_for_uri(uri);
 	GInputStream *is = g_memory_input_stream_new_from_data(data, len, NULL);
 	RsvgHandle *handle = rsvg_handle_new_from_stream_sync(
 		is, base_file, RSVG_HANDLE_FLAG_KEEP_IMAGE_DATA, NULL, error);
@@ -1694,7 +1694,7 @@ fail:
 }
 
 static cairo_surface_t *
-open_libwebp(const gchar *data, gsize len, const gchar *path,
+open_libwebp(const gchar *data, gsize len, const gchar *uri,
 	FivIoProfile target, GError **error)
 {
 	// It is wholly zero-initialized by libwebp.
@@ -1723,7 +1723,7 @@ open_libwebp(const gchar *data, gsize len, const gchar *path,
 	WebPDemuxState state = WEBP_DEMUX_PARSE_ERROR;
 	WebPDemuxer *demux = WebPDemuxPartial(&wd, &state);
 	if (!demux) {
-		g_warning("%s: %s", path, "demux failure");
+		g_warning("%s: %s", uri, "demux failure");
 		goto fail;
 	}
 
@@ -1876,7 +1876,7 @@ fail:
 }
 
 static void
-load_libheif_aux_images(const gchar *path, struct heif_image_handle *top,
+load_libheif_aux_images(const gchar *uri, struct heif_image_handle *top,
 	cairo_surface_t **result, cairo_surface_t **result_tail)
 {
 	// Include the depth image, we have no special processing for it now.
@@ -1890,14 +1890,14 @@ load_libheif_aux_images(const gchar *path, struct heif_image_handle *top,
 		struct heif_error err =
 			heif_image_handle_get_auxiliary_image_handle(top, ids[i], &handle);
 		if (err.code != heif_error_Ok) {
-			g_warning("%s: %s", path, err.message);
+			g_warning("%s: %s", uri, err.message);
 			continue;
 		}
 
 		GError *e = NULL;
 		if (!try_append_page(
 				load_libheif_image(handle, &e), result, result_tail)) {
-			g_warning("%s: %s", path, e->message);
+			g_warning("%s: %s", uri, e->message);
 			g_error_free(e);
 		}
 
@@ -1908,7 +1908,7 @@ load_libheif_aux_images(const gchar *path, struct heif_image_handle *top,
 }
 
 static cairo_surface_t *
-open_libheif(const gchar *data, gsize len, const gchar *path,
+open_libheif(const gchar *data, gsize len, const gchar *uri,
 	FivIoProfile profile, GError **error)
 {
 	// libheif will throw C++ exceptions on allocation failures.
@@ -1930,19 +1930,19 @@ open_libheif(const gchar *data, gsize len, const gchar *path,
 		struct heif_image_handle *handle = NULL;
 		err = heif_context_get_image_handle(ctx, ids[i], &handle);
 		if (err.code != heif_error_Ok) {
-			g_warning("%s: %s", path, err.message);
+			g_warning("%s: %s", uri, err.message);
 			continue;
 		}
 
 		GError *e = NULL;
 		if (!try_append_page(
 				load_libheif_image(handle, &e), &result, &result_tail)) {
-			g_warning("%s: %s", path, e->message);
+			g_warning("%s: %s", uri, e->message);
 			g_error_free(e);
 		}
 
 		// TODO(p): Possibly add thumbnail images as well.
-		load_libheif_aux_images(path, handle, &result, &result_tail);
+		load_libheif_aux_images(uri, handle, &result, &result_tail);
 		heif_image_handle_release(handle);
 	}
 	if (!result) {
@@ -2136,7 +2136,7 @@ fail:
 }
 
 static cairo_surface_t *
-open_libtiff(const gchar *data, gsize len, const gchar *path,
+open_libtiff(const gchar *data, gsize len, const gchar *uri,
 	FivIoProfile target, GError **error)
 {
 	// Both kinds of handlers are called, redirect everything.
@@ -2151,7 +2151,7 @@ open_libtiff(const gchar *data, gsize len, const gchar *path,
 	};
 
 	cairo_surface_t *result = NULL, *result_tail = NULL;
-	TIFF *tiff = TIFFClientOpen(path, "rm" /* Avoid mmap. */, &h,
+	TIFF *tiff = TIFFClientOpen(uri, "rm" /* Avoid mmap. */, &h,
 		fiv_io_tiff_read, fiv_io_tiff_write, fiv_io_tiff_seek,
 		fiv_io_tiff_close, fiv_io_tiff_size, NULL, NULL);
 	if (!tiff)
@@ -2186,7 +2186,7 @@ open_libtiff(const gchar *data, gsize len, const gchar *path,
 		GError *err = NULL;
 		if (!try_append_page(
 				load_libtiff_directory(tiff, &err), &result, &result_tail)) {
-			g_warning("%s: %s", path, err->message);
+			g_warning("%s: %s", uri, err->message);
 			g_error_free(err);
 		}
 	} while (TIFFReadDirectory(tiff));
@@ -2316,7 +2316,7 @@ cairo_user_data_key_t fiv_io_key_page_previous;
 
 cairo_surface_t *
 fiv_io_open(
-	const gchar *path, FivIoProfile profile, gboolean enhance, GError **error)
+	const gchar *uri, FivIoProfile profile, gboolean enhance, GError **error)
 {
 	// TODO(p): Don't always load everything into memory, test type first,
 	// so that we can reject non-pictures early.  Wuffs only needs the first
@@ -2332,19 +2332,21 @@ fiv_io_open(
 	//
 	// gdk-pixbuf exposes its detection data through gdk_pixbuf_get_formats().
 	// This may also be unbounded, as per format_check().
+	GFile *file = g_file_new_for_uri(uri);
+
 	gchar *data = NULL;
 	gsize len = 0;
-	if (!g_file_get_contents(path, &data, &len, error))
+	if (!g_file_load_contents(file, NULL, &data, &len, NULL, error))
 		return NULL;
 
 	cairo_surface_t *surface =
-		fiv_io_open_from_data(data, len, path, profile, enhance, error);
+		fiv_io_open_from_data(data, len, uri, profile, enhance, error);
 	free(data);
 	return surface;
 }
 
 cairo_surface_t *
-fiv_io_open_from_data(const char *data, size_t len, const gchar *path,
+fiv_io_open_from_data(const char *data, size_t len, const gchar *uri,
 	FivIoProfile profile, gboolean enhance, GError **error)
 {
 	wuffs_base__slice_u8 prefix =
@@ -2376,7 +2378,7 @@ fiv_io_open_from_data(const char *data, size_t len, const gchar *path,
 		break;
 	default:
 		// TODO(p): https://github.com/google/wuffs/commit/4c04ac1
-		if ((surface = open_libwebp(data, len, path, profile, error)))
+		if ((surface = open_libwebp(data, len, uri, profile, error)))
 			break;
 		if (error) {
 			g_debug("%s", (*error)->message);
@@ -2395,7 +2397,7 @@ fiv_io_open_from_data(const char *data, size_t len, const gchar *path,
 		}
 #endif  // HAVE_LIBRAW ---------------------------------------------------------
 #ifdef HAVE_LIBRSVG  // --------------------------------------------------------
-		if ((surface = open_librsvg(data, len, path, error)))
+		if ((surface = open_librsvg(data, len, uri, error)))
 			break;
 
 		// XXX: It doesn't look like librsvg can return sensible errors.
@@ -2413,7 +2415,7 @@ fiv_io_open_from_data(const char *data, size_t len, const gchar *path,
 		}
 #endif  // HAVE_XCURSOR --------------------------------------------------------
 #ifdef HAVE_LIBHEIF  //---------------------------------------------------------
-		if ((surface = open_libheif(data, len, path, profile, error)))
+		if ((surface = open_libheif(data, len, uri, profile, error)))
 			break;
 		if (error) {
 			g_debug("%s", (*error)->message);
@@ -2422,7 +2424,7 @@ fiv_io_open_from_data(const char *data, size_t len, const gchar *path,
 #endif  // HAVE_LIBHEIF --------------------------------------------------------
 #ifdef HAVE_LIBTIFF  //---------------------------------------------------------
 		// This needs to be positioned after LibRaw.
-		if ((surface = open_libtiff(data, len, path, profile, error)))
+		if ((surface = open_libtiff(data, len, uri, profile, error)))
 			break;
 		if (error) {
 			g_debug("%s", (*error)->message);

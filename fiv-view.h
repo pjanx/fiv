@@ -23,7 +23,7 @@
 G_DECLARE_FINAL_TYPE(FivView, fiv_view, FIV, VIEW, GtkWidget)
 
 /// Try to open the given file, synchronously, to be displayed by the widget.
-gboolean fiv_view_open(FivView *self, const gchar *path, GError **error);
+gboolean fiv_view_open(FivView *self, const gchar *uri, GError **error);
 
 typedef enum _FivViewCommand {
 	FIV_VIEW_COMMAND_ROTATE_LEFT = 1,

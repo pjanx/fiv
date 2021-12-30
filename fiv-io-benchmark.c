@@ -33,7 +33,9 @@ static void
 one_file(const char *filename)
 {
 	double since_us = timestamp();
-	cairo_surface_t *loaded_by_us = fiv_io_open(filename, NULL);
+	gchar *uri = g_filename_to_uri(filename, NULL, NULL);
+	cairo_surface_t *loaded_by_us = fiv_io_open(uri, NULL, FALSE, NULL);
+	g_free(uri);
 	if (!loaded_by_us)
 		return;
 
