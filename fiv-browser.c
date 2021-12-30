@@ -488,7 +488,6 @@ on_thumbnailer_ready(GObject *object, GAsyncResult *res, gpointer user_data)
 	if (succeeded)
 		thumbnailer_reprocess_entry(self, entry);
 
-	// TODO(p): Eliminate high recursion depth with non-paths.
 	thumbnailer_next(self);
 }
 
@@ -496,26 +495,17 @@ static void
 thumbnailer_next(FivBrowser *self)
 {
 	// TODO(p): At least launch multiple thumbnailers in parallel.
+	// Ideally, try to keep them alive.
 	GList *link = self->thumbnail_queue;
 	if (!link)
 		return;
 
 	const Entry *entry = link->data;
-	GFile *file = g_file_new_for_uri(entry->uri);
-	gchar *uri = g_file_get_uri(file);
-	g_object_unref(file);
-	if (!uri) {
-		// TODO(p): Support thumbnailing non-local URIs in some manner.
-		self->thumbnail_queue = g_list_delete_link(self->thumbnail_queue, link);
-		return;
-	}
-
 	GError *error = NULL;
 	self->thumbnailer = g_subprocess_new(G_SUBPROCESS_FLAGS_NONE, &error,
 		PROJECT_NAME, "--thumbnail",
-		fiv_thumbnail_sizes[self->item_size].thumbnail_spec_name, "--", uri,
-		NULL);
-	g_free(uri);
+		fiv_thumbnail_sizes[self->item_size].thumbnail_spec_name, "--",
+		entry->uri, NULL);
 	if (error) {
 		g_warning("%s", error->message);
 		g_error_free(error);

@@ -220,6 +220,7 @@ complete_path(GFile *location, GtkListStore *model)
 {
 	// TODO(p): Do not enter directories unless followed by '/'.
 	// This information has already been stripped from `location`.
+	// TODO(p): Try out GFileCompleter.
 	GFile *parent = G_FILE_TYPE_DIRECTORY ==
 			g_file_query_file_type(location, G_FILE_QUERY_INFO_NONE, NULL)
 		? g_object_ref(location)

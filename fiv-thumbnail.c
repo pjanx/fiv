@@ -223,9 +223,12 @@ fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size, GError **error)
 		max_size <= FIV_THUMBNAIL_SIZE_MAX, FALSE);
 
 	// Local files only, at least for now.
+	// TODO(p): Support thumbnailing the trash scheme.
 	const gchar *path = g_file_peek_path(target);
-	if (!path)
+	if (!path) {
+		set_error(error, "only local files are supported");
 		return FALSE;
+	}
 
 	GMappedFile *mf = g_mapped_file_new(path, FALSE, error);
 	if (!mf)

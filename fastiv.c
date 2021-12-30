@@ -319,14 +319,19 @@ show_error_dialog(GError *error)
 }
 
 static void
+set_window_title(const char *uri)
+{
+	GFile *file = g_file_new_for_uri(uri);
+	gchar *name = g_file_get_parse_name(file);
+	gtk_window_set_title(GTK_WINDOW(g.window), name);
+	g_free(name);
+	g_object_unref(file);
+}
+
+static void
 switch_to_browser(void)
 {
-	// TODO(p): Use g_file_get_parse_name() or something.
-	GFile *file = g_file_new_for_uri(g.directory);
-	const char *path = g_file_peek_path(file);
-	gtk_window_set_title(GTK_WINDOW(g.window), path ? path : g.directory);
-	g_object_unref(file);
-
+	set_window_title(g.directory);
 	gtk_stack_set_visible_child(GTK_STACK(g.stack), g.browser_paned);
 	gtk_widget_grab_focus(g.browser_scroller);
 }
@@ -334,12 +339,7 @@ switch_to_browser(void)
 static void
 switch_to_view(const char *uri)
 {
-	// TODO(p): Use g_file_get_parse_name() or something.
-	GFile *file = g_file_new_for_uri(uri);
-	const char *path = g_file_peek_path(file);
-	gtk_window_set_title(GTK_WINDOW(g.window), path ? path : uri);
-	g_object_unref(file);
-
+	set_window_title(uri);
 	gtk_stack_set_visible_child(GTK_STACK(g.stack), g.view_box);
 	gtk_widget_grab_focus(g.view);
 }
@@ -451,8 +451,9 @@ load_directory(const gchar *uri)
 
 		g_ptr_array_sort(g.files, files_compare);
 		update_files_index();
+	} else if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED)) {
+		g_error_free(error);
 	} else {
-		// TODO(p): Handle "Operation not supported" silently.
 		show_error_dialog(error);
 	}
 	g_object_unref(file);
