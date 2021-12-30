@@ -1004,7 +1004,7 @@ parse_jpeg_metadata(cairo_surface_t *surface, const gchar *data, gsize len)
 		// Do not bother validating the structure.
 		guint16 length = p[0] << 8 | p[1];
 		const guint8 *payload = p + 2;
-		if ((p += length) > end)
+		if (G_UNLIKELY((p += length) > end))
 			break;
 
 		// https://www.cipa.jp/std/documents/e/DC-008-2012_E.pdf 4.7.2
@@ -2726,8 +2726,8 @@ fiv_io_exif_orientation(const guint8 *tiff, gsize len)
 	for (const guint8 *p = ifd0 + 2; fields-- && p + 12 <= end; p += 12) {
 		uint16_t tag = u16(p), type = u16(p + 2), value16 = u16(p + 8);
 		uint32_t count = u32(p + 4);
-		if (tag == Orientation && type == SHORT && count == 1 &&
-			value16 >= 1 && value16 <= 8)
+		if (G_UNLIKELY(tag == Orientation && type == SHORT && count == 1 &&
+			value16 >= 1 && value16 <= 8))
 			return value16;
 	}
 	return FivIoOrientationUnknown;
