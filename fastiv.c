@@ -263,11 +263,11 @@ struct {
 	gchar **supported_globs;
 	gboolean filtering;
 
-	gchar *uri;                ///< Current image URI
+	gchar *uri;                ///< Current image URI, if any
 	gchar *directory;          ///< URI of the currently browsed directory
 	GList *directory_back;     ///< History paths going backwards
 	GList *directory_forward;  ///< History paths going forwards
-	GPtrArray *files;          ///< "directory" contents
+	GPtrArray *files;          ///< "directory" contents as URIs
 	gint files_index;          ///< Where "uri" is within "files"
 
 	GtkWidget *window;
@@ -337,9 +337,11 @@ switch_to_browser(void)
 }
 
 static void
-switch_to_view(const char *uri)
+switch_to_view(void)
 {
-	set_window_title(uri);
+	g_return_if_fail(g.uri != NULL);
+
+	set_window_title(g.uri);
 	gtk_stack_set_visible_child(GTK_STACK(g.stack), g.view_box);
 	gtk_widget_grab_focus(g.view);
 }
@@ -467,8 +469,12 @@ load_directory(const gchar *uri)
 	// XXX: When something outside the filtered entries is open, the index is
 	// kept at -1, and browsing doesn't work. How to behave here?
 	// Should we add it to the pointer array as an exception?
-	if (uri)
+	if (uri) {
 		switch_to_browser();
+
+		// TODO(p): Rather place it in history.
+		g_clear_pointer(&g.uri, g_free);
+	}
 }
 
 static void
@@ -513,7 +519,7 @@ open(const gchar *uri)
 		update_files_index();
 	g_free(parent);
 
-	switch_to_view(uri);
+	switch_to_view();
 }
 
 static GtkWidget *
@@ -550,7 +556,8 @@ on_open(void)
 
 	// Apparently, just keeping the dialog around doesn't mean
 	// that it will remember its last location.
-	gtk_file_chooser_set_current_folder(GTK_FILE_CHOOSER(dialog), g.directory);
+	(void) gtk_file_chooser_set_current_folder_uri(
+		GTK_FILE_CHOOSER(dialog), g.directory);
 
 	// The default is local-only, single item.
 	switch (gtk_dialog_run(GTK_DIALOG(dialog))) {
@@ -780,8 +787,8 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 		case GDK_KEY_Right:
 			if (g.directory_forward)
 				load_directory(g.directory_forward->data);
-			else
-				switch_to_view(g.uri);
+			else if (g.uri)
+				switch_to_view();
 			return TRUE;
 		case GDK_KEY_Up:
 			if (gtk_stack_get_visible_child(GTK_STACK(g.stack)) != g.view_box) {
@@ -895,12 +902,10 @@ on_button_press_browser_paned(
 			load_directory(g.directory_back->data);
 		return TRUE;
 	case 9:  // forward
-		// FIXME: It may be inappropriate to go to the picture,
-		// which may be left over from a different directory.
 		if (g.directory_forward)
 			load_directory(g.directory_forward->data);
-		else
-			switch_to_view(g.uri);
+		else if (g.uri)
+			switch_to_view();
 		return TRUE;
 	default:
 		return FALSE;
@@ -951,14 +956,18 @@ on_view_actions_changed(void)
 	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_PLAY_PAUSE], can_animate);
 	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_SEEK_FORWARD], can_animate);
 
+	// Note that none of the following should be visible with no image.
 	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_PLUS], has_image);
 	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_SCALE], has_image);
 	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_MINUS], has_image);
 	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_ONE], has_image);
 	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_FIT], has_image);
 
+	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_COLOR], has_image);
 	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_SMOOTH], has_image);
 	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_CHECKERBOARD], has_image);
+	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_ENHANCE], has_image);
+
 	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_SAVE], has_image);
 	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_PRINT], has_image);
 	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_INFO], has_image);

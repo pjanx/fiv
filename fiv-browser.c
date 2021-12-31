@@ -469,13 +469,14 @@ on_thumbnailer_ready(GObject *object, GAsyncResult *res, gpointer user_data)
 			g_error_free(error);
 			return;
 		}
-
-		g_warning("%s", error->message);
+		if (!g_subprocess_get_if_exited(subprocess) ||
+			g_subprocess_get_exit_status(subprocess) != EXIT_FAILURE)
+			g_warning("%s", error->message);
 		g_error_free(error);
 	}
 
-	gboolean succeeded = g_subprocess_get_if_exited(self->thumbnailer) &&
-		g_subprocess_get_exit_status(self->thumbnailer) == EXIT_SUCCESS;
+	gboolean succeeded = g_subprocess_get_if_exited(subprocess) &&
+		g_subprocess_get_exit_status(subprocess) == EXIT_SUCCESS;
 	g_clear_object(&self->thumbnailer);
 	if (!self->thumbnail_queue) {
 		g_warning("finished thumbnailing an unknown image");
