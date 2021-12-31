@@ -1,7 +1,7 @@
 //
 // fiv-sidebar.c: molesting GtkPlacesSidebar
 //
-// Copyright (c) 2021, Přemysl Eric Janouch <p@janouch.name>
+// Copyright (c) 2021 - 2022, Přemysl Eric Janouch <p@janouch.name>
 //
 // Permission to use, copy, modify, and/or distribute this software for any
 // purpose with or without fee is hereby granted.
@@ -17,7 +17,7 @@
 
 #include <gtk/gtk.h>
 
-#include "fiv-io.h"  // fiv_io_filecmp
+#include "fiv-io.h"
 #include "fiv-sidebar.h"
 
 struct _FivSidebar {
@@ -25,7 +25,7 @@ struct _FivSidebar {
 	GtkPlacesSidebar *places;
 	GtkWidget *toolbar;
 	GtkWidget *listbox;
-	GFile *location;
+	FivIoModel *model;
 };
 
 G_DEFINE_TYPE(FivSidebar, fiv_sidebar, GTK_TYPE_SCROLLED_WINDOW)
@@ -44,7 +44,10 @@ static void
 fiv_sidebar_dispose(GObject *gobject)
 {
 	FivSidebar *self = FIV_SIDEBAR(gobject);
-	g_clear_object(&self->location);
+	if (self->model) {
+		g_signal_handlers_disconnect_by_data(self->model, self);
+		g_clear_object(&self->model);
+	}
 
 	G_OBJECT_CLASS(fiv_sidebar_parent_class)->dispose(gobject);
 }
@@ -128,29 +131,18 @@ create_row(GFile *file, const char *icon_name)
 	return row;
 }
 
-static gint
-listbox_compare(
-	GtkListBoxRow *row1, GtkListBoxRow *row2, G_GNUC_UNUSED gpointer user_data)
-{
-	return fiv_io_filecmp(
-		g_object_get_qdata(G_OBJECT(row1), fiv_sidebar_location_quark()),
-		g_object_get_qdata(G_OBJECT(row2), fiv_sidebar_location_quark()));
-}
-
 static void
-update_location(FivSidebar *self, GFile *location)
+update_location(FivSidebar *self)
 {
-	if (location) {
-		g_clear_object(&self->location);
-		self->location = g_object_ref(location);
-	}
+	GFile *location = fiv_io_model_get_location(self->model);
+	if (!location)
+		return;
 
-	gtk_places_sidebar_set_location(self->places, self->location);
+	gtk_places_sidebar_set_location(self->places, location);
 	gtk_container_foreach(GTK_CONTAINER(self->listbox),
 		(GtkCallback) gtk_widget_destroy, NULL);
-	g_return_if_fail(self->location != NULL);
 
-	GFile *iter = g_object_ref(self->location);
+	GFile *iter = g_object_ref(location);
 	GtkWidget *row = NULL;
 	while (TRUE) {
 		GFile *parent = g_file_get_parent(iter);
@@ -164,33 +156,17 @@ update_location(FivSidebar *self, GFile *location)
 
 	// Other options are "folder-{visiting,open}-symbolic", though the former
 	// is mildly inappropriate (means: open in another window).
-	if ((row = create_row(self->location, "circle-filled-symbolic")))
+	if ((row = create_row(location, "circle-filled-symbolic")))
 		gtk_container_add(GTK_CONTAINER(self->listbox), row);
 
-	GFileEnumerator *enumerator = g_file_enumerate_children(self->location,
-		G_FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME
-		"," G_FILE_ATTRIBUTE_STANDARD_NAME
-		"," G_FILE_ATTRIBUTE_STANDARD_TYPE
-		"," G_FILE_ATTRIBUTE_STANDARD_IS_HIDDEN,
-		G_FILE_QUERY_INFO_NONE, NULL, NULL);
-	if (!enumerator)
-		return;
-
-	// TODO(p): gtk_list_box_set_filter_func(), or even use a model,
-	// which could be shared with FivBrowser.
-	while (TRUE) {
-		GFileInfo *info = NULL;
-		GFile *child = NULL;
-		if (!g_file_enumerator_iterate(enumerator, &info, &child, NULL, NULL) ||
-			!info)
-			break;
-
-		if (g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY &&
-			!g_file_info_get_is_hidden(info) &&
-			(row = create_row(child, "go-down-symbolic")))
-				gtk_container_add(GTK_CONTAINER(self->listbox), row);
+	GPtrArray *subdirs = fiv_io_model_get_subdirectories(self->model);
+	for (guint i = 0; i < subdirs->len; i++) {
+		GFile *file = g_file_new_for_uri(subdirs->pdata[i]);
+		if ((row = create_row(file, "go-down-symbolic")))
+			gtk_container_add(GTK_CONTAINER(self->listbox), row);
+		g_object_unref(file);
 	}
-	g_object_unref(enumerator);
+	g_ptr_array_free(subdirs, TRUE);
 }
 
 static void
@@ -212,7 +188,7 @@ on_open_location(G_GNUC_UNUSED GtkPlacesSidebar *sidebar, GFile *location,
 	g_signal_emit(self, sidebar_signals[OPEN_LOCATION], 0, location, flags);
 
 	// Deselect the item in GtkPlacesSidebar, if unsuccessful.
-	update_location(self, NULL);
+	update_location(self);
 }
 
 static void
@@ -272,8 +248,8 @@ resolve_location(FivSidebar *self, const char *text)
 		g_file_peek_path(file))
 		return file;
 
-	GFile *absolute =
-		g_file_get_child_for_display_name(self->location, text, NULL);
+	GFile *absolute = g_file_get_child_for_display_name(
+		fiv_io_model_get_location(self->model), text, NULL);
 	if (!absolute)
 		return file;
 
@@ -355,7 +331,7 @@ on_show_enter_location(
 	g_object_unref(completion);
 
 	// Deselect the item in GtkPlacesSidebar, if unsuccessful.
-	update_location(self, NULL);
+	update_location(self);
 }
 
 static void
@@ -389,8 +365,6 @@ fiv_sidebar_init(FivSidebar *self)
 		GTK_LIST_BOX(self->listbox), GTK_SELECTION_NONE);
 	g_signal_connect(self->listbox, "row-activated",
 		G_CALLBACK(on_open_breadcrumb), self);
-	gtk_list_box_set_sort_func(
-		GTK_LIST_BOX(self->listbox), listbox_compare, self, NULL);
 
 	// Fill up what would otherwise be wasted space,
 	// as it is in the examples of Nautilus and Thunar.
@@ -417,11 +391,19 @@ fiv_sidebar_init(FivSidebar *self)
 
 // --- Public interface --------------------------------------------------------
 
-void
-fiv_sidebar_set_location(FivSidebar *self, GFile *location)
+GtkWidget *
+fiv_sidebar_new(FivIoModel *model)
 {
-	g_return_if_fail(FIV_IS_SIDEBAR(self));
-	update_location(self, location);
+	g_return_val_if_fail(FIV_IS_IO_MODEL(model), NULL);
+
+	FivSidebar *self = g_object_new(FIV_TYPE_SIDEBAR, NULL);
+	self->model = g_object_ref(model);
+
+	// TODO(p): There should be an extra signal to watch location changes only.
+	g_signal_connect_swapped(self->model, "subdirectories-changed",
+		G_CALLBACK(update_location), self);
+
+	return GTK_WIDGET(self);
 }
 
 void

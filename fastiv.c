@@ -1,7 +1,7 @@
 //
 // fastiv.c: fast image viewer
 //
-// Copyright (c) 2021, Přemysl Eric Janouch <p@janouch.name>
+// Copyright (c) 2021 - 2022, Přemysl Eric Janouch <p@janouch.name>
 //
 // Permission to use, copy, modify, and/or distribute this software for any
 // purpose with or without fee is hereby granted.
@@ -25,15 +25,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include <fnmatch.h>
-
 #include "config.h"
 #include "fiv-browser.h"
 #include "fiv-io.h"
 #include "fiv-sidebar.h"
 #include "fiv-thumbnail.h"
 #include "fiv-view.h"
-#include "xdg.h"
 
 // --- Utilities ---------------------------------------------------------------
 
@@ -260,14 +257,13 @@ enum {
 };
 
 struct {
-	gchar **supported_globs;
-	gboolean filtering;
+	FivIoModel *model;         ///< "directory" contents
+	gchar *directory;          ///< URI of the currently browsed directory
+	GList *directory_back;     ///< History paths as URIs going backwards
+	GList *directory_forward;  ///< History paths as URIs going forwards
+	GPtrArray *files;          ///< "directory" contents as URIs
 
 	gchar *uri;                ///< Current image URI, if any
-	gchar *directory;          ///< URI of the currently browsed directory
-	GList *directory_back;     ///< History paths going backwards
-	GList *directory_forward;  ///< History paths going forwards
-	GPtrArray *files;          ///< "directory" contents as URIs
 	gint files_index;          ///< Where "uri" is within "files"
 
 	GtkWidget *window;
@@ -285,27 +281,6 @@ struct {
 	GtkWidget *toolbar[TOOLBAR_COUNT];
 	GtkWidget *view;
 } g;
-
-static gboolean
-is_supported(const gchar *filename)
-{
-	gchar *utf8 = g_filename_to_utf8(filename, -1, NULL, NULL, NULL);
-	if (!utf8)
-		return FALSE;
-
-	gchar *lowercased = g_utf8_strdown(utf8, -1);
-	g_free(utf8);
-
-	// XXX: fnmatch() uses the /locale/ encoding, but who cares nowadays.
-	for (gchar **p = g.supported_globs; *p; p++)
-		if (!fnmatch(*p, lowercased, 0)) {
-			g_free(lowercased);
-			return TRUE;
-		}
-
-	g_free(lowercased);
-	return FALSE;
-}
 
 static void
 show_error_dialog(GError *error)
@@ -344,17 +319,6 @@ switch_to_view(void)
 	set_window_title(g.uri);
 	gtk_stack_set_visible_child(GTK_STACK(g.stack), g.view_box);
 	gtk_widget_grab_focus(g.view);
-}
-
-static gint
-files_compare(gconstpointer a, gconstpointer b)
-{
-	GFile *file1 = g_file_new_for_uri(*(gchar **) a);
-	GFile *file2 = g_file_new_for_uri(*(gchar **) b);
-	gint result = fiv_io_filecmp(file1, file2);
-	g_object_unref(file1);
-	g_object_unref(file2);
-	return result;
 }
 
 static gchar *
@@ -415,7 +379,7 @@ load_directory_without_reload(const gchar *uri)
 }
 
 static void
-load_directory(const gchar *uri)
+load_directory_without_switching(const gchar *uri)
 {
 	if (uri) {
 		load_directory_without_reload(uri);
@@ -429,42 +393,30 @@ load_directory(const gchar *uri)
 	g_ptr_array_set_size(g.files, 0);
 	g.files_index = -1;
 
-	GFile *file = g_file_new_for_uri(g.directory);
-	fiv_sidebar_set_location(FIV_SIDEBAR(g.browser_sidebar), file);
-	fiv_browser_load(
-		FIV_BROWSER(g.browser), g.filtering ? is_supported : NULL, g.directory);
-
 	GError *error = NULL;
-	GFileEnumerator *enumerator = g_file_enumerate_children(file,
-		G_FILE_ATTRIBUTE_STANDARD_NAME "," G_FILE_ATTRIBUTE_STANDARD_TYPE,
-		G_FILE_QUERY_INFO_NONE, NULL, &error);
-	if (enumerator) {
-		GFileInfo *info = NULL;
-		GFile *child = NULL;
-		while (
-			g_file_enumerator_iterate(enumerator, &info, &child, NULL, NULL) &&
-			info) {
-			// TODO(p): What encoding does g_file_info_get_name() return?
-			if (g_file_info_get_file_type(info) != G_FILE_TYPE_DIRECTORY &&
-				is_supported(g_file_info_get_name(info)))
-				g_ptr_array_add(g.files, g_file_get_uri(child));
-		}
-		g_object_unref(enumerator);
-
-		g_ptr_array_sort(g.files, files_compare);
+	GFile *file = g_file_new_for_uri(g.directory);
+	if (fiv_io_model_open(g.model, file, &error)) {
+		g_ptr_array_free(g.files, TRUE);
+		g.files = fiv_io_model_get_files(g.model);
 		update_files_index();
 	} else if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED)) {
 		g_error_free(error);
 	} else {
 		show_error_dialog(error);
 	}
+
 	g_object_unref(file);
 
 	gtk_widget_set_sensitive(
 		g.toolbar[TOOLBAR_FILE_PREVIOUS], g.files->len > 1);
 	gtk_widget_set_sensitive(
 		g.toolbar[TOOLBAR_FILE_NEXT], g.files->len > 1);
-	g_ptr_array_add(g.files, NULL);
+}
+
+static void
+load_directory(const gchar *uri)
+{
+	load_directory_without_switching(uri);
 
 	// XXX: When something outside the filtered entries is open, the index is
 	// kept at -1, and browsing doesn't work. How to behave here?
@@ -480,9 +432,8 @@ load_directory(const gchar *uri)
 static void
 on_filtering_toggled(GtkToggleButton *button, G_GNUC_UNUSED gpointer user_data)
 {
-	g.filtering = gtk_toggle_button_get_active(button);
-	if (g.directory)
-		load_directory(NULL);
+	g_object_set(
+		g.model, "filtering", gtk_toggle_button_get_active(button), NULL);
 }
 
 static void
@@ -514,7 +465,7 @@ open(const gchar *uri)
 	gchar *parent = parent_uri(file);
 	if (!g.files->len /* hack to always load the directory after launch */ ||
 		!g.directory || strcmp(parent, g.directory))
-		load_directory(parent);
+		load_directory_without_switching(parent);
 	else
 		update_files_index();
 	g_free(parent);
@@ -579,8 +530,7 @@ static void
 on_previous(void)
 {
 	if (g.files_index >= 0) {
-		int previous =
-			(g.files->len - 1 + g.files_index - 1) % (g.files->len - 1);
+		int previous = (g.files->len + g.files_index - 1) % g.files->len;
 		open(g_ptr_array_index(g.files, previous));
 	}
 }
@@ -589,7 +539,7 @@ static void
 on_next(void)
 {
 	if (g.files_index >= 0) {
-		int next = (g.files_index + 1) % (g.files->len - 1);
+		int next = (g.files_index + 1) % g.files->len;
 		open(g_ptr_array_index(g.files, next));
 	}
 }
@@ -616,15 +566,15 @@ on_item_activated(G_GNUC_UNUSED FivBrowser *browser, GFile *location,
 	g_free(uri);
 }
 
-static gboolean
-open_any_uri(const char *uri, gboolean force_browser)
+static void
+open_any_file(GFile *file, gboolean force_browser)
 {
-	GFile *file = g_file_new_for_uri(uri);
+	gchar *uri = g_file_get_uri(file);
 	GFileType type = g_file_query_file_type(file, G_FILE_QUERY_INFO_NONE, NULL);
-	gboolean success = type != G_FILE_TYPE_UNKNOWN;
-	if (!success) {
+	if (type == G_FILE_TYPE_UNKNOWN) {
+		errno = ENOENT;
 		show_error_dialog(g_error_new(G_FILE_ERROR,
-			g_file_error_from_errno(errno), "%s: %s", uri, g_strerror(ENOENT)));
+			g_file_error_from_errno(errno), "%s: %s", uri, g_strerror(errno)));
 	} else if (type == G_FILE_TYPE_DIRECTORY) {
 		load_directory(uri);
 	} else if (force_browser) {
@@ -636,8 +586,7 @@ open_any_uri(const char *uri, gboolean force_browser)
 	} else {
 		open(uri);
 	}
-	g_object_unref(file);
-	return success;
+	g_free(uri);
 }
 
 static void
@@ -648,7 +597,7 @@ on_open_location(G_GNUC_UNUSED GtkPlacesSidebar *sidebar, GFile *location,
 	if (flags & GTK_PLACES_OPEN_NEW_WINDOW)
 		spawn_uri(uri);
 	else
-		open_any_uri(uri, FALSE);
+		open_any_file(location, FALSE);
 	g_free(uri);
 }
 
@@ -673,6 +622,15 @@ on_notify_thumbnail_size(
 	g_object_get(object, g_param_spec_get_name(param_spec), &size, NULL);
 	gtk_widget_set_sensitive(g.plus, size < FIV_THUMBNAIL_SIZE_MAX);
 	gtk_widget_set_sensitive(g.minus, size > FIV_THUMBNAIL_SIZE_MIN);
+}
+
+static void
+on_notify_filtering(
+	GObject *object, GParamSpec *param_spec, gpointer user_data)
+{
+	gboolean b = FALSE;
+	g_object_get(object, g_param_spec_get_name(param_spec), &b, NULL);
+	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(user_data), b);
 }
 
 static void
@@ -800,7 +758,11 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 			}
 			return TRUE;
 		case GDK_KEY_Home:
-			load_directory(g_get_home_dir());
+			if (gtk_stack_get_visible_child(GTK_STACK(g.stack)) != g.view_box) {
+				gchar *uri = g_filename_to_uri(g_get_home_dir(), NULL, NULL);
+				load_directory(uri);
+				g_free(uri);
+			}
 			return TRUE;
 		}
 		break;
@@ -1265,6 +1227,8 @@ main(int argc, char *argv[])
 		return 0;
 	}
 
+	g.model = g_object_new(FIV_TYPE_IO_MODEL, NULL);
+
 	gtk_window_set_default_icon_name(PROJECT_NAME);
 	gtk_icon_theme_add_resource_path(
 		gtk_icon_theme_get_default(), "/org/gnome/design/IconLibrary/");
@@ -1293,7 +1257,7 @@ main(int argc, char *argv[])
 	gtk_box_pack_start(GTK_BOX(g.view_box), view_scroller, TRUE, TRUE, 0);
 
 	g.browser_scroller = gtk_scrolled_window_new(NULL, NULL);
-	g.browser = g_object_new(FIV_TYPE_BROWSER, NULL);
+	g.browser = fiv_browser_new(g.model);
 	gtk_widget_set_vexpand(g.browser, TRUE);
 	gtk_widget_set_hexpand(g.browser, TRUE);
 	g_signal_connect(g.browser, "item-activated",
@@ -1307,7 +1271,7 @@ main(int argc, char *argv[])
 
 	// TODO(p): As with GtkFileChooserWidget, bind C-h to filtering,
 	// and mayhaps forward the rest to the sidebar, somehow.
-	g.browser_sidebar = g_object_new(FIV_TYPE_SIDEBAR, NULL);
+	g.browser_sidebar = fiv_sidebar_new(g.model);
 	g_signal_connect(g.browser_sidebar, "open-location",
 		G_CALLBACK(on_open_location), NULL);
 
@@ -1375,13 +1339,11 @@ main(int argc, char *argv[])
 		G_CALLBACK(on_window_state_event), NULL);
 	gtk_container_add(GTK_CONTAINER(g.window), g.stack);
 
-	char **types = fiv_io_all_supported_media_types();
-	g.supported_globs = extract_mime_globs((const char **) types);
-	g_strfreev(types);
-
 	g_signal_connect(g.browser, "notify::thumbnail-size",
 		G_CALLBACK(on_notify_thumbnail_size), NULL);
 	on_toolbar_zoom(NULL, (gpointer) 0);
+	g_signal_connect(g.model, "notify::filtering",
+		G_CALLBACK(on_notify_filtering), funnel);
 	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(funnel), TRUE);
 
 	// Try to get half of the screen vertically, in 4:3 aspect ratio.
@@ -1401,22 +1363,20 @@ main(int argc, char *argv[])
 	unit = MAX(200, unit);
 	gtk_window_set_default_size(GTK_WINDOW(g.window), 4 * unit, 3 * unit);
 
-	g.files = g_ptr_array_new_full(16, g_free);
-	gchar *cwd = g_get_current_dir();
-	g.directory = g_filename_to_uri(cwd, NULL, NULL /* error */);
-	g_free(cwd);
-
 	// XXX: The widget wants to read the display's profile. The realize is ugly.
 	gtk_widget_realize(g.view);
 
-	gchar *uri = NULL;
+	g.files = g_ptr_array_new_full(0, g_free);
 	if (path_arg) {
 		GFile *file = g_file_new_for_commandline_arg(path_arg);
-		uri = g_file_get_uri(file);
+		open_any_file(file, browse);
 		g_object_unref(file);
 	}
-	if (!uri || !open_any_uri(uri, browse))
-		open_any_uri(g.directory, FALSE);
+	if (!g.directory) {
+		GFile *file = g_file_new_for_path(".");
+		open_any_file(file, FALSE);
+		g_object_unref(file);
+	}
 
 	gtk_widget_show_all(g.window);
 	gtk_main();

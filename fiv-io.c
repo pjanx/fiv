@@ -1,7 +1,7 @@
 //
 // fiv-io.c: image operations
 //
-// Copyright (c) 2021, Přemysl Eric Janouch <p@janouch.name>
+// Copyright (c) 2021 - 2022, Přemysl Eric Janouch <p@janouch.name>
 //
 // Permission to use, copy, modify, and/or distribute this software for any
 // purpose with or without fee is hereby granted.
@@ -130,22 +130,6 @@ fiv_io_all_supported_media_types(void)
 
 	g_ptr_array_add(types, NULL);
 	return (char **) g_ptr_array_free(types, FALSE);
-}
-
-int
-fiv_io_filecmp(GFile *location1, GFile *location2)
-{
-	if (g_file_has_prefix(location1, location2))
-		return +1;
-	if (g_file_has_prefix(location2, location1))
-		return -1;
-
-	gchar *name1 = g_file_get_parse_name(location1);
-	gchar *name2 = g_file_get_parse_name(location2);
-	int result = g_utf8_collate(name1, name2);
-	g_free(name1);
-	g_free(name2);
-	return result;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -2461,6 +2445,312 @@ fiv_io_open_from_data(const char *data, size_t len, const gchar *uri,
 			NULL);
 	}
 	return surface;
+}
+
+// --- Filesystem --------------------------------------------------------------
+
+#include "xdg.h"
+
+#include <fnmatch.h>
+
+typedef struct _ModelEntry {
+	gchar *uri;                         ///< GIO URI
+	gint64 mtime_msec;                  ///< Modification time in milliseconds
+} ModelEntry;
+
+static void
+model_entry_finalize(ModelEntry *entry)
+{
+	g_free(entry->uri);
+}
+
+typedef enum _FivIoModelSort {
+	FIV_IO_MODEL_SORT_NAME,
+	FIV_IO_MODEL_SORT_MTIME,
+} FivIoModelSort;
+
+struct _FivIoModel {
+	GObject parent_instance;
+	gchar **supported_globs;
+
+	GFile *directory;                   ///< Currently loaded directory
+	GFileMonitor *monitor;              ///< "directory" monitoring
+	GArray *subdirs;                    ///< "directory" contents
+	GArray *files;                      ///< "directory" contents
+
+	FivIoModelSort sort;                ///< How to sort
+	gboolean sort_descending;           ///< Whether to sort in reverse
+	gboolean filtering;                 ///< Only show non-hidden, supported
+};
+
+G_DEFINE_TYPE(FivIoModel, fiv_io_model, G_TYPE_OBJECT)
+
+enum {
+	PROP_FILTERING = 1,
+	N_PROPERTIES
+};
+
+static GParamSpec *model_properties[N_PROPERTIES];
+
+enum {
+	FILES_CHANGED,
+	SUBDIRECTORIES_CHANGED,
+	LAST_SIGNAL,
+};
+
+// Globals are, sadly, the canonical way of storing signal numbers.
+static guint model_signals[LAST_SIGNAL];
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+static gboolean
+model_supports(FivIoModel *self, const gchar *filename)
+{
+	gchar *utf8 = g_filename_to_utf8(filename, -1, NULL, NULL, NULL);
+	if (!utf8)
+		return FALSE;
+
+	gchar *lowercased = g_utf8_strdown(utf8, -1);
+	g_free(utf8);
+
+	// XXX: fnmatch() uses the /locale/ encoding, but who cares nowadays.
+	// TODO(p): Use GPatternSpec and g_file_info_get_display_name().
+	for (gchar **p = self->supported_globs; *p; p++)
+		if (!fnmatch(*p, lowercased, 0)) {
+			g_free(lowercased);
+			return TRUE;
+		}
+
+	g_free(lowercased);
+	return FALSE;
+}
+
+static inline int
+model_compare_name(GFile *location1, GFile *location2)
+{
+	gchar *name1 = g_file_get_parse_name(location1);
+	gchar *name2 = g_file_get_parse_name(location2);
+	int result = g_utf8_collate(name1, name2);
+	g_free(name1);
+	g_free(name2);
+	return result;
+}
+
+static inline int
+model_compare_entries(FivIoModel *self, const ModelEntry *entry1, GFile *file1,
+	const ModelEntry *entry2, GFile *file2)
+{
+	if (g_file_has_prefix(file1, file2))
+		return +1;
+	if (g_file_has_prefix(file2, file1))
+		return -1;
+
+	int result = 0;
+	switch (self->sort) {
+	case FIV_IO_MODEL_SORT_NAME:
+		result = model_compare_name(file1, file2);
+		break;
+	case FIV_IO_MODEL_SORT_MTIME:
+		result -= entry1->mtime_msec < entry2->mtime_msec;
+		result += entry1->mtime_msec > entry2->mtime_msec;
+	}
+	return self->sort_descending ? -result : +result;
+}
+
+static gint
+model_compare(gconstpointer a, gconstpointer b, gpointer user_data)
+{
+	const ModelEntry *entry1 = a;
+	const ModelEntry *entry2 = b;
+	GFile *file1 = g_file_new_for_uri(entry1->uri);
+	GFile *file2 = g_file_new_for_uri(entry2->uri);
+	int result = model_compare_entries(user_data, entry1, file1, entry2, file2);
+	g_object_unref(file1);
+	g_object_unref(file2);
+	return result;
+}
+
+static gboolean
+model_reload(FivIoModel *self, GError **error)
+{
+	g_array_set_size(self->subdirs, 0);
+	g_array_set_size(self->files, 0);
+
+	GFileEnumerator *enumerator = g_file_enumerate_children(self->directory,
+		G_FILE_ATTRIBUTE_STANDARD_NAME "," G_FILE_ATTRIBUTE_STANDARD_TYPE ","
+		G_FILE_ATTRIBUTE_STANDARD_IS_HIDDEN ","
+		G_FILE_ATTRIBUTE_TIME_MODIFIED "," G_FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
+		G_FILE_QUERY_INFO_NONE, NULL, error);
+	if (!enumerator) {
+		// Note that this has had a side-effect of clearing all entries.
+		g_signal_emit(self, model_signals[FILES_CHANGED], 0);
+		g_signal_emit(self, model_signals[SUBDIRECTORIES_CHANGED], 0);
+		return FALSE;
+	}
+
+	GFileInfo *info = NULL;
+	GFile *child = NULL;
+	while (g_file_enumerator_iterate(enumerator, &info, &child, NULL, NULL) &&
+		info) {
+		if (self->filtering && g_file_info_get_is_hidden(info))
+			continue;
+
+		ModelEntry entry = {};
+		GDateTime *mtime = g_file_info_get_modification_date_time(info);
+		if (mtime) {
+			entry.mtime_msec = g_date_time_to_unix(mtime) * 1000 +
+				g_date_time_get_microsecond(mtime) / 1000;
+			g_date_time_unref(mtime);
+		}
+
+		const char *name = g_file_info_get_name(info);
+		if (g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY) {
+			entry.uri = g_file_get_uri(child);
+			g_array_append_val(self->subdirs, entry);
+		} else if (!self->filtering || model_supports(self, name)) {
+			entry.uri = g_file_get_uri(child);
+			g_array_append_val(self->files, entry);
+		}
+	}
+	g_object_unref(enumerator);
+	g_array_sort_with_data(self->subdirs, model_compare, self);
+	g_array_sort_with_data(self->files, model_compare, self);
+
+	g_signal_emit(self, model_signals[FILES_CHANGED], 0);
+	g_signal_emit(self, model_signals[SUBDIRECTORIES_CHANGED], 0);
+	return TRUE;
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+static void
+fiv_io_model_finalize(GObject *gobject)
+{
+	FivIoModel *self = FIV_IO_MODEL(gobject);
+	g_clear_object(&self->directory);
+	g_clear_object(&self->monitor);
+	g_array_free(self->subdirs, TRUE);
+	g_array_free(self->files, TRUE);
+
+	G_OBJECT_CLASS(fiv_io_model_parent_class)->finalize(gobject);
+}
+
+static void
+fiv_io_model_get_property(
+	GObject *object, guint property_id, GValue *value, GParamSpec *pspec)
+{
+	FivIoModel *self = FIV_IO_MODEL(object);
+	switch (property_id) {
+	case PROP_FILTERING:
+		g_value_set_boolean(value, self->filtering);
+		break;
+	default:
+		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
+	}
+}
+
+static void
+fiv_io_model_set_property(
+	GObject *object, guint property_id, const GValue *value, GParamSpec *pspec)
+{
+	FivIoModel *self = FIV_IO_MODEL(object);
+	switch (property_id) {
+	case PROP_FILTERING:
+		if (self->filtering == g_value_get_boolean(value))
+			return;
+
+		self->filtering = !self->filtering;
+		g_object_notify_by_pspec(object, model_properties[PROP_FILTERING]);
+		(void) model_reload(self, NULL /* error */);
+		break;
+	default:
+		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
+	}
+}
+
+static void
+fiv_io_model_class_init(FivIoModelClass *klass)
+{
+	GObjectClass *object_class = G_OBJECT_CLASS(klass);
+	object_class->get_property = fiv_io_model_get_property;
+	object_class->set_property = fiv_io_model_set_property;
+	object_class->finalize = fiv_io_model_finalize;
+
+	model_properties[PROP_FILTERING] = g_param_spec_boolean(
+		"filtering", "Filtering", "Only show non-hidden, supported entries",
+		TRUE, G_PARAM_READWRITE);
+	g_object_class_install_properties(
+		object_class, N_PROPERTIES, model_properties);
+
+	// TODO(p): Arguments something like: index, added, removed.
+	model_signals[FILES_CHANGED] =
+		g_signal_new("files-changed", G_TYPE_FROM_CLASS(klass), 0, 0,
+			NULL, NULL, NULL, G_TYPE_NONE, 0);
+	model_signals[SUBDIRECTORIES_CHANGED] =
+		g_signal_new("subdirectories-changed", G_TYPE_FROM_CLASS(klass), 0, 0,
+			NULL, NULL, NULL, G_TYPE_NONE, 0);
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+static void
+fiv_io_model_init(FivIoModel *self)
+{
+	self->filtering = TRUE;
+
+	char **types = fiv_io_all_supported_media_types();
+	self->supported_globs = extract_mime_globs((const char **) types);
+	g_strfreev(types);
+
+	self->files = g_array_new(FALSE, TRUE, sizeof(ModelEntry));
+	self->subdirs = g_array_new(FALSE, TRUE, sizeof(ModelEntry));
+	g_array_set_clear_func(
+		self->subdirs, (GDestroyNotify) model_entry_finalize);
+	g_array_set_clear_func(
+		self->files, (GDestroyNotify) model_entry_finalize);
+}
+
+gboolean
+fiv_io_model_open(FivIoModel *self, GFile *directory, GError **error)
+{
+	g_return_val_if_fail(FIV_IS_IO_MODEL(self), FALSE);
+	g_return_val_if_fail(G_IS_FILE(directory), FALSE);
+
+	g_clear_object(&self->directory);
+	g_clear_object(&self->monitor);
+	self->directory = g_object_ref(directory);
+
+	// TODO(p): Process the ::changed signal.
+	self->monitor = g_file_monitor_directory(
+		directory, G_FILE_MONITOR_WATCH_MOVES, NULL, NULL /* error */);
+	return model_reload(self, error);
+}
+
+GFile *
+fiv_io_model_get_location(FivIoModel *self)
+{
+	g_return_val_if_fail(FIV_IS_IO_MODEL(self), NULL);
+	return self->directory;
+}
+
+GPtrArray *
+fiv_io_model_get_files(FivIoModel *self)
+{
+	GPtrArray *a = g_ptr_array_new_full(self->files->len, g_free);
+	for (guint i = 0; i < self->files->len; i++)
+		g_ptr_array_add(
+			a, g_strdup(g_array_index(self->files, ModelEntry, i).uri));
+	return a;
+}
+
+GPtrArray *
+fiv_io_model_get_subdirectories(FivIoModel *self)
+{
+	GPtrArray *a = g_ptr_array_new_full(self->subdirs->len, g_free);
+	for (guint i = 0; i < self->subdirs->len; i++)
+		g_ptr_array_add(
+			a, g_strdup(g_array_index(self->subdirs, ModelEntry, i).uri));
+	return a;
 }
 
 // --- Export ------------------------------------------------------------------

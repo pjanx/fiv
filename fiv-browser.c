@@ -1,7 +1,7 @@
 //
 // fiv-browser.c: fast image viewer - filesystem browser widget
 //
-// Copyright (c) 2021, Přemysl Eric Janouch <p@janouch.name>
+// Copyright (c) 2021 - 2022, Přemysl Eric Janouch <p@janouch.name>
 //
 // Permission to use, copy, modify, and/or distribute this software for any
 // purpose with or without fee is hereby granted.
@@ -48,7 +48,7 @@ struct _FivBrowser {
 	int item_height;                    ///< Thumbnail height in pixels
 	int item_spacing;                   ///< Space between items in pixels
 
-	char *uri;                          ///< Current URI
+	FivIoModel *model;                  ///< Filesystem model
 	GArray *entries;                    ///< []Entry
 	GArray *layouted_rows;              ///< []Row
 	int selected;
@@ -541,9 +541,9 @@ thumbnailer_start(FivBrowser *self)
 	gchar *thumbnails_dir = fiv_thumbnail_get_root();
 	GFile *thumbnails = g_file_new_for_path(thumbnails_dir);
 	g_free(thumbnails_dir);
-	GFile *current = g_file_new_for_uri(self->uri);
-	gboolean is_a_thumbnail = g_file_has_prefix(current, thumbnails);
-	g_object_unref(current);
+
+	GFile *current = fiv_io_model_get_location(self->model);
+	gboolean is_a_thumbnail = current && g_file_has_prefix(current, thumbnails);
 	g_object_unref(thumbnails);
 	if (is_a_thumbnail)
 		return;
@@ -651,22 +651,19 @@ destroy_widget_idle_source_func(GtkWidget *widget)
 }
 
 static void
-show_context_menu(GtkWidget *widget, const char *uri)
+show_context_menu(GtkWidget *widget, GFile *file)
 {
-	GFile *file = g_file_new_for_uri(uri);
 	GFileInfo *info = g_file_query_info(file,
 		G_FILE_ATTRIBUTE_STANDARD_NAME
 		"," G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE,
 		G_FILE_QUERY_INFO_NONE, NULL, NULL);
-	if (!info) {
-		g_object_unref(file);
+	if (!info)
 		return;
-	}
 
 	// This will have no application pre-assigned, for use with GTK+'s dialog.
 	OpenContext *ctx = g_malloc0(sizeof *ctx);
 	g_weak_ref_init(&ctx->widget, widget);
-	ctx->file = file;
+	ctx->file = g_object_ref(file);
 	ctx->content_type = g_strdup(g_file_info_get_content_type(info));
 	g_object_unref(info);
 
@@ -750,9 +747,13 @@ fiv_browser_finalize(GObject *gobject)
 {
 	FivBrowser *self = FIV_BROWSER(gobject);
 	thumbnailer_abort(self);
-	g_free(self->uri);
 	g_array_free(self->entries, TRUE);
 	g_array_free(self->layouted_rows, TRUE);
+	if (self->model) {
+		g_signal_handlers_disconnect_by_data(self->model, self);
+		g_clear_object(&self->model);
+	}
+
 	cairo_surface_destroy(self->glow);
 	g_clear_object(&self->pointer);
 
@@ -931,7 +932,7 @@ fiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 
 	const Entry *entry = entry_at(self, event->x, event->y);
 	if (!entry && event->button == GDK_BUTTON_SECONDARY) {
-		show_context_menu(widget, self->uri);
+		show_context_menu(widget, fiv_io_model_get_location(self->model));
 		return TRUE;
 	}
 	if (!entry)
@@ -952,7 +953,10 @@ fiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 		// On X11, after closing the menu, the pointer otherwise remains,
 		// no matter what its new location is.
 		gdk_window_set_cursor(gtk_widget_get_window(widget), NULL);
-		show_context_menu(widget, entry->uri);
+
+		GFile *file = g_file_new_for_uri(entry->uri);
+		show_context_menu(widget, file);
+		g_object_unref(file);
 		return TRUE;
 	default:
 		return FALSE;
@@ -1149,62 +1153,38 @@ fiv_browser_init(FivBrowser *self)
 
 // --- Public interface --------------------------------------------------------
 
-static gint
-entry_compare(gconstpointer a, gconstpointer b)
+static void
+on_model_files_changed(FivIoModel *model, FivBrowser *self)
 {
-	const Entry *entry1 = a;
-	const Entry *entry2 = b;
-	GFile *location1 = g_file_new_for_uri(entry1->uri);
-	GFile *location2 = g_file_new_for_uri(entry2->uri);
-	gint result = fiv_io_filecmp(location1, location2);
-	g_object_unref(location1);
-	g_object_unref(location2);
-	return result;
-}
+	g_return_if_fail(model == self->model);
 
-void
-fiv_browser_load(
-	FivBrowser *self, FivBrowserFilterCallback cb, const char *uri)
-{
-	g_return_if_fail(FIV_IS_BROWSER(self));
-
+	// TODO(p): Later implement arguments.
 	thumbnailer_abort(self);
 	g_array_set_size(self->entries, 0);
 	g_array_set_size(self->layouted_rows, 0);
-	g_clear_pointer(&self->uri, g_free);
 
-	GFile *file = g_file_new_for_uri((self->uri = g_strdup(uri)));
-
-	GError *error = NULL;
-	GFileEnumerator *enumerator = g_file_enumerate_children(file,
-		G_FILE_ATTRIBUTE_STANDARD_NAME "," G_FILE_ATTRIBUTE_STANDARD_TYPE,
-		G_FILE_QUERY_INFO_NONE, NULL, &error);
-	g_object_unref(file);
-	if (!enumerator) {
-		// Note that this has had a side-effect of clearing all entries.
-		g_error_free(error);
-		return;
-	}
-
-	while (TRUE) {
-		GFileInfo *info = NULL;
-		GFile *child = NULL;
-		if (!g_file_enumerator_iterate(enumerator, &info, &child, NULL, NULL) ||
-			!info)
-			break;
-		if (g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY)
-			continue;
-		if (cb && !cb(g_file_info_get_name(info)))
-			continue;
-
+	GPtrArray *files = fiv_io_model_get_files(self->model);
+	for (guint i = 0; i < files->len; i++) {
 		g_array_append_val(self->entries,
-			((Entry) {.thumbnail = NULL, .uri = g_file_get_uri(child)}));
+			((Entry) {.thumbnail = NULL, .uri = files->pdata[i]}));
+		files->pdata[i] = NULL;
 	}
-	g_object_unref(enumerator);
-
-	// TODO(p): Support being passed a sort function.
-	g_array_sort(self->entries, entry_compare);
+	g_ptr_array_free(files, TRUE);
 
 	reload_thumbnails(self);
 	thumbnailer_start(self);
+}
+
+GtkWidget *
+fiv_browser_new(FivIoModel *model)
+{
+	g_return_val_if_fail(FIV_IS_IO_MODEL(model), NULL);
+
+	FivBrowser *self = g_object_new(FIV_TYPE_BROWSER, NULL);
+	self->model = g_object_ref(model);
+
+	g_signal_connect(
+		self->model, "files-changed", G_CALLBACK(on_model_files_changed), self);
+	on_model_files_changed(self->model, self);
+	return GTK_WIDGET(self);
 }

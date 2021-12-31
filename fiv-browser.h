@@ -1,7 +1,7 @@
 //
 // fiv-browser.h: fast image viewer - filesystem browser widget
 //
-// Copyright (c) 2021, Přemysl Eric Janouch <p@janouch.name>
+// Copyright (c) 2021 - 2022, Přemysl Eric Janouch <p@janouch.name>
 //
 // Permission to use, copy, modify, and/or distribute this software for any
 // purpose with or without fee is hereby granted.
@@ -17,12 +17,11 @@
 
 #pragma once
 
+#include "fiv-io.h"
+
 #include <gtk/gtk.h>
 
 #define FIV_TYPE_BROWSER (fiv_browser_get_type())
 G_DECLARE_FINAL_TYPE(FivBrowser, fiv_browser, FIV, BROWSER, GtkWidget)
 
-typedef gboolean (*FivBrowserFilterCallback) (const char *);
-
-void fiv_browser_load(
-	FivBrowser *self, FivBrowserFilterCallback cb, const char *path);
+GtkWidget *fiv_browser_new(FivIoModel *model);

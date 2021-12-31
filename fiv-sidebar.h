@@ -1,7 +1,7 @@
 //
 // fiv-sidebar.h: molesting GtkPlacesSidebar
 //
-// Copyright (c) 2021, Přemysl Eric Janouch <p@janouch.name>
+// Copyright (c) 2021 - 2022, Přemysl Eric Janouch <p@janouch.name>
 //
 // Permission to use, copy, modify, and/or distribute this software for any
 // purpose with or without fee is hereby granted.
@@ -17,11 +17,13 @@
 
 #pragma once
 
+#include "fiv-io.h"
+
 #include <gtk/gtk.h>
 
 #define FIV_TYPE_SIDEBAR (fiv_sidebar_get_type())
 G_DECLARE_FINAL_TYPE(FivSidebar, fiv_sidebar, FIV, SIDEBAR, GtkScrolledWindow)
 
-void fiv_sidebar_set_location(FivSidebar *self, GFile *location);
+GtkWidget *fiv_sidebar_new(FivIoModel *model);
 void fiv_sidebar_show_enter_location(FivSidebar *self);
 GtkBox *fiv_sidebar_get_toolbar(FivSidebar *self);

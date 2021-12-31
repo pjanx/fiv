@@ -1,7 +1,7 @@
 //
 // fiv-io.h: image operations
 //
-// Copyright (c) 2021, Přemysl Eric Janouch <p@janouch.name>
+// Copyright (c) 2021 - 2022, Přemysl Eric Janouch <p@janouch.name>
 //
 // Permission to use, copy, modify, and/or distribute this software for any
 // purpose with or without fee is hereby granted.
@@ -77,7 +77,20 @@ cairo_surface_t *fiv_io_open(
 cairo_surface_t *fiv_io_open_from_data(const char *data, size_t len,
 	const gchar *uri, FivIoProfile profile, gboolean enhance, GError **error);
 
-int fiv_io_filecmp(GFile *f1, GFile *f2);
+// --- Filesystem --------------------------------------------------------------
+
+#define FIV_TYPE_IO_MODEL (fiv_io_model_get_type())
+G_DECLARE_FINAL_TYPE(FivIoModel, fiv_io_model, FIV, IO_MODEL, GObject)
+
+/// Loads a directory. Clears itself even on failure.
+gboolean fiv_io_model_open(FivIoModel *self, GFile *directory, GError **error);
+
+/// Returns the current location as a GFile.
+/// There is no ownership transfer, and the object may be NULL.
+GFile *fiv_io_model_get_location(FivIoModel *self);
+
+GPtrArray *fiv_io_model_get_files(FivIoModel *self);
+GPtrArray *fiv_io_model_get_subdirectories(FivIoModel *self);
 
 // --- Export ------------------------------------------------------------------
 
