@@ -383,6 +383,10 @@ entry_add_thumbnail(gpointer data, gpointer user_data)
 			self->icon = g_object_ref(icon);
 		g_object_unref(info);
 	}
+
+	// The GVfs backend may not be friendly.
+	if (!self->icon)
+		self->icon = g_icon_new_for_string("text-x-generic-symbolic", NULL);
 out:
 	g_object_unref(file);
 }
