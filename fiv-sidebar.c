@@ -309,15 +309,27 @@ on_show_enter_location(
 	g_signal_connect(entry, "changed",
 		G_CALLBACK(on_enter_location_changed), self);
 
+	// Can't have it ellipsized and word-wrapped at the same time.
+	GtkWidget *protocols = gtk_label_new("");
+	gtk_label_set_ellipsize(GTK_LABEL(protocols), PANGO_ELLIPSIZE_END);
+	gtk_label_set_xalign(GTK_LABEL(protocols), 0);
+
+	gchar *protos = g_strjoinv(
+		", ", (gchar **) g_vfs_get_supported_uri_schemes(g_vfs_get_default()));
+	gchar *label = g_strdup_printf("<i>Available protocols:</i> %s", protos);
+	g_free(protos);
+	gtk_label_set_markup(GTK_LABEL(protocols), label);
+	g_free(label);
+
 	GtkWidget *content = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
 	gtk_container_add(GTK_CONTAINER(content), entry);
+	gtk_container_add(GTK_CONTAINER(content), protocols);
 	gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_ACCEPT);
 	gtk_window_set_skip_taskbar_hint(GTK_WINDOW(dialog), TRUE);
 	gtk_window_set_default_size(GTK_WINDOW(dialog), 800, -1);
-
-	GdkGeometry geometry = {.max_width = G_MAXSHORT, .max_height = -1};
-	gtk_window_set_geometry_hints(
-		GTK_WINDOW(dialog), NULL, &geometry, GDK_HINT_MAX_SIZE);
+	gtk_window_set_geometry_hints(GTK_WINDOW(dialog), NULL,
+		&(GdkGeometry) {.max_width = G_MAXSHORT, .max_height = -1},
+		GDK_HINT_MAX_SIZE);
 	gtk_widget_show_all(dialog);
 
 	if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
