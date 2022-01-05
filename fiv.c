@@ -26,6 +26,7 @@
 #include <stdlib.h>
 
 #include "config.h"
+
 #include "fiv-browser.h"
 #include "fiv-io.h"
 #include "fiv-sidebar.h"
@@ -273,6 +274,8 @@ struct {
 	GtkWidget *browser_sidebar;
 	GtkWidget *plus;
 	GtkWidget *minus;
+	GtkWidget *sort_field[FIV_IO_MODEL_SORT_COUNT];
+	GtkWidget *sort_direction[2];
 	GtkWidget *browser_scroller;
 	GtkWidget *browser;
 
@@ -434,6 +437,18 @@ on_filtering_toggled(GtkToggleButton *button, G_GNUC_UNUSED gpointer user_data)
 {
 	g_object_set(
 		g.model, "filtering", gtk_toggle_button_get_active(button), NULL);
+}
+
+static void
+on_sort_field(G_GNUC_UNUSED GtkMenuItem *item, gpointer data)
+{
+	g_object_set(g.model, "sort-field", (gint) (intptr_t) data, NULL);
+}
+
+static void
+on_sort_direction(G_GNUC_UNUSED GtkMenuItem *item, gpointer data)
+{
+	g_object_set(g.model, "sort-descending", (gboolean) (intptr_t) data, NULL);
 }
 
 static void
@@ -655,6 +670,26 @@ on_notify_filtering(
 	gboolean b = FALSE;
 	g_object_get(object, g_param_spec_get_name(param_spec), &b, NULL);
 	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(user_data), b);
+}
+
+static void
+on_notify_sort_field(
+	GObject *object, GParamSpec *param_spec, G_GNUC_UNUSED gpointer user_data)
+{
+	gint field = -1;
+	g_object_get(object, g_param_spec_get_name(param_spec), &field, NULL);
+	gtk_check_menu_item_set_active(
+		GTK_CHECK_MENU_ITEM(g.sort_field[field]), TRUE);
+}
+
+static void
+on_notify_sort_descending(
+	GObject *object, GParamSpec *param_spec, G_GNUC_UNUSED gpointer user_data)
+{
+	gboolean b = FALSE;
+	g_object_get(object, g_param_spec_get_name(param_spec), &b, NULL);
+	gtk_check_menu_item_set_active(
+		GTK_CHECK_MENU_ITEM(g.sort_direction[b]), TRUE);
 }
 
 static void
@@ -1180,17 +1215,61 @@ make_browser_sidebar(FivIoModel *model)
 	g_signal_connect(funnel, "toggled",
 		G_CALLBACK(on_filtering_toggled), NULL);
 
+	GtkWidget *menu = gtk_menu_new();
+	g.sort_field[0] = gtk_radio_menu_item_new_with_mnemonic(NULL, "By _Name");
+	g.sort_field[1] = gtk_radio_menu_item_new_with_mnemonic(
+		gtk_radio_menu_item_get_group(GTK_RADIO_MENU_ITEM(g.sort_field[0])),
+		"By _Modification Time");
+	for (int i = FIV_IO_MODEL_SORT_MIN; i <= FIV_IO_MODEL_SORT_MAX; i++) {
+		g_signal_connect(g.sort_field[i], "activate",
+			G_CALLBACK(on_sort_field), (void *) (intptr_t) i);
+		gtk_menu_shell_append(GTK_MENU_SHELL(menu), g.sort_field[i]);
+	}
+
+	g.sort_direction[0] =
+		gtk_radio_menu_item_new_with_mnemonic(NULL, "_Ascending");
+	g.sort_direction[1] = gtk_radio_menu_item_new_with_mnemonic(
+		gtk_radio_menu_item_get_group(GTK_RADIO_MENU_ITEM(g.sort_direction[0])),
+		"_Descending");
+	g_signal_connect(g.sort_direction[0], "activate",
+		G_CALLBACK(on_sort_direction), (void *) 0);
+	g_signal_connect(g.sort_direction[1], "activate",
+		G_CALLBACK(on_sort_direction), (void *) 1);
+
+	gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
+	gtk_menu_shell_append(GTK_MENU_SHELL(menu), g.sort_direction[0]);
+	gtk_menu_shell_append(GTK_MENU_SHELL(menu), g.sort_direction[1]);
+	gtk_widget_show_all(menu);
+
+	GtkWidget *sort = gtk_menu_button_new();
+	gtk_widget_set_tooltip_text(sort, "Sort order");
+	gtk_button_set_image(GTK_BUTTON(sort),
+		gtk_image_new_from_icon_name(
+			"view-sort-ascending-symbolic", GTK_ICON_SIZE_BUTTON));
+	gtk_menu_button_set_popup(GTK_MENU_BUTTON(sort), menu);
+
+	GtkWidget *model_group = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+	gtk_style_context_add_class(
+		gtk_widget_get_style_context(model_group), GTK_STYLE_CLASS_LINKED);
+	gtk_box_pack_start(GTK_BOX(model_group), funnel, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(model_group), sort, FALSE, FALSE, 0);
+
 	GtkBox *toolbar = fiv_sidebar_get_toolbar(FIV_SIDEBAR(sidebar));
 	gtk_box_pack_start(toolbar, zoom_group, FALSE, FALSE, 0);
-	gtk_box_pack_start(toolbar, funnel, FALSE, FALSE, 0);
+	gtk_box_pack_start(toolbar, model_group, FALSE, FALSE, 0);
 	gtk_widget_set_halign(GTK_WIDGET(toolbar), GTK_ALIGN_CENTER);
 
 	g_signal_connect(g.browser, "notify::thumbnail-size",
 		G_CALLBACK(on_notify_thumbnail_size), NULL);
 	g_signal_connect(model, "notify::filtering",
 		G_CALLBACK(on_notify_filtering), funnel);
+	g_signal_connect(model, "notify::sort-field",
+		G_CALLBACK(on_notify_sort_field), NULL);
+	g_signal_connect(model, "notify::sort-descending",
+		G_CALLBACK(on_notify_sort_descending), NULL);
 	on_toolbar_zoom(NULL, (gpointer) 0);
 	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(funnel), TRUE);
+	// TODO(p): Invoke sort configuration notifications explicitly.
 	return sidebar;
 }
 

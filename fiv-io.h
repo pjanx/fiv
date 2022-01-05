@@ -79,6 +79,15 @@ cairo_surface_t *fiv_io_open_from_data(const char *data, size_t len,
 
 // --- Filesystem --------------------------------------------------------------
 
+typedef enum _FivIoModelSort {
+	FIV_IO_MODEL_SORT_NAME,
+	FIV_IO_MODEL_SORT_MTIME,
+	FIV_IO_MODEL_SORT_COUNT,
+
+	FIV_IO_MODEL_SORT_MIN = 0,
+	FIV_IO_MODEL_SORT_MAX = FIV_IO_MODEL_SORT_COUNT - 1
+} FivIoModelSort;
+
 #define FIV_TYPE_IO_MODEL (fiv_io_model_get_type())
 G_DECLARE_FINAL_TYPE(FivIoModel, fiv_io_model, FIV, IO_MODEL, GObject)
 

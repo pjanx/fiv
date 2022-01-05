@@ -2464,11 +2464,6 @@ model_entry_finalize(ModelEntry *entry)
 	g_free(entry->uri);
 }
 
-typedef enum _FivIoModelSort {
-	FIV_IO_MODEL_SORT_NAME,
-	FIV_IO_MODEL_SORT_MTIME,
-} FivIoModelSort;
-
 struct _FivIoModel {
 	GObject parent_instance;
 	gchar **supported_globs;
@@ -2478,7 +2473,7 @@ struct _FivIoModel {
 	GArray *subdirs;                    ///< "directory" contents
 	GArray *files;                      ///< "directory" contents
 
-	FivIoModelSort sort;                ///< How to sort
+	FivIoModelSort sort_field;          ///< How to sort
 	gboolean sort_descending;           ///< Whether to sort in reverse
 	gboolean filtering;                 ///< Only show non-hidden, supported
 };
@@ -2487,6 +2482,8 @@ G_DEFINE_TYPE(FivIoModel, fiv_io_model, G_TYPE_OBJECT)
 
 enum {
 	PROP_FILTERING = 1,
+	PROP_SORT_FIELD,
+	PROP_SORT_DESCENDING,
 	N_PROPERTIES
 };
 
@@ -2546,13 +2543,17 @@ model_compare_entries(FivIoModel *self, const ModelEntry *entry1, GFile *file1,
 		return -1;
 
 	int result = 0;
-	switch (self->sort) {
-	case FIV_IO_MODEL_SORT_NAME:
-		result = model_compare_name(file1, file2);
-		break;
+	switch (self->sort_field) {
 	case FIV_IO_MODEL_SORT_MTIME:
 		result -= entry1->mtime_msec < entry2->mtime_msec;
 		result += entry1->mtime_msec > entry2->mtime_msec;
+		if (result != 0)
+			break;
+
+		// Fall-through
+	case FIV_IO_MODEL_SORT_NAME:
+	case FIV_IO_MODEL_SORT_COUNT:
+		result = model_compare_name(file1, file2);
 	}
 	return self->sort_descending ? -result : +result;
 }
@@ -2568,6 +2569,16 @@ model_compare(gconstpointer a, gconstpointer b, gpointer user_data)
 	g_object_unref(file1);
 	g_object_unref(file2);
 	return result;
+}
+
+static void
+model_resort(FivIoModel *self)
+{
+	g_array_sort_with_data(self->subdirs, model_compare, self);
+	g_array_sort_with_data(self->files, model_compare, self);
+
+	g_signal_emit(self, model_signals[FILES_CHANGED], 0);
+	g_signal_emit(self, model_signals[SUBDIRECTORIES_CHANGED], 0);
 }
 
 static gboolean
@@ -2613,11 +2624,9 @@ model_reload(FivIoModel *self, GError **error)
 		}
 	}
 	g_object_unref(enumerator);
-	g_array_sort_with_data(self->subdirs, model_compare, self);
-	g_array_sort_with_data(self->files, model_compare, self);
 
-	g_signal_emit(self, model_signals[FILES_CHANGED], 0);
-	g_signal_emit(self, model_signals[SUBDIRECTORIES_CHANGED], 0);
+	// We also emit change signals there, indirectly.
+	model_resort(self);
 	return TRUE;
 }
 
@@ -2644,6 +2653,12 @@ fiv_io_model_get_property(
 	case PROP_FILTERING:
 		g_value_set_boolean(value, self->filtering);
 		break;
+	case PROP_SORT_FIELD:
+		g_value_set_int(value, self->sort_field);
+		break;
+	case PROP_SORT_DESCENDING:
+		g_value_set_boolean(value, self->sort_descending);
+		break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
 	}
@@ -2656,12 +2671,25 @@ fiv_io_model_set_property(
 	FivIoModel *self = FIV_IO_MODEL(object);
 	switch (property_id) {
 	case PROP_FILTERING:
-		if (self->filtering == g_value_get_boolean(value))
-			return;
-
-		self->filtering = !self->filtering;
-		g_object_notify_by_pspec(object, model_properties[PROP_FILTERING]);
-		(void) model_reload(self, NULL /* error */);
+		if (self->filtering != g_value_get_boolean(value)) {
+			self->filtering = !self->filtering;
+			g_object_notify_by_pspec(object, model_properties[property_id]);
+			(void) model_reload(self, NULL /* error */);
+		}
+		break;
+	case PROP_SORT_FIELD:
+		if ((int) self->sort_field != g_value_get_int(value)) {
+			self->sort_field = g_value_get_int(value);
+			g_object_notify_by_pspec(object, model_properties[property_id]);
+			model_resort(self);
+		}
+		break;
+	case PROP_SORT_DESCENDING:
+		if (self->sort_descending != g_value_get_boolean(value)) {
+			self->sort_descending = !self->sort_descending;
+			g_object_notify_by_pspec(object, model_properties[property_id]);
+			model_resort(self);
+		}
 		break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
@@ -2679,6 +2707,14 @@ fiv_io_model_class_init(FivIoModelClass *klass)
 	model_properties[PROP_FILTERING] = g_param_spec_boolean(
 		"filtering", "Filtering", "Only show non-hidden, supported entries",
 		TRUE, G_PARAM_READWRITE);
+	// TODO(p): GObject enumerations are annoying, but this should be one.
+	model_properties[PROP_SORT_FIELD] = g_param_spec_int(
+		"sort-field", "Sort field", "Sort order",
+		FIV_IO_MODEL_SORT_MIN, FIV_IO_MODEL_SORT_MAX,
+		FIV_IO_MODEL_SORT_NAME, G_PARAM_READWRITE);
+	model_properties[PROP_SORT_DESCENDING] = g_param_spec_boolean(
+		"sort-descending", "Sort descending", "Use reverse sort order",
+		FALSE, G_PARAM_READWRITE);
 	g_object_class_install_properties(
 		object_class, N_PROPERTIES, model_properties);
 
