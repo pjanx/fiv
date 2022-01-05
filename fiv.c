@@ -1124,6 +1124,52 @@ make_view_toolbar(void)
 	return view_toolbar;
 }
 
+static GtkWidget *
+make_browser_sidebar(FivIoModel *model)
+{
+	GtkWidget *sidebar = fiv_sidebar_new(model);
+	g_signal_connect(sidebar, "open-location",
+		G_CALLBACK(on_open_location), NULL);
+
+	g.plus = gtk_button_new_from_icon_name("zoom-in-symbolic",
+		GTK_ICON_SIZE_BUTTON);
+	gtk_widget_set_tooltip_text(g.plus, "Larger thumbnails");
+	g_signal_connect(g.plus, "clicked",
+		G_CALLBACK(on_toolbar_zoom), (gpointer) +1);
+
+	g.minus = gtk_button_new_from_icon_name("zoom-out-symbolic",
+		GTK_ICON_SIZE_BUTTON);
+	gtk_widget_set_tooltip_text(g.minus, "Smaller thumbnails");
+	g_signal_connect(g.minus, "clicked",
+		G_CALLBACK(on_toolbar_zoom), (gpointer) -1);
+
+	GtkWidget *zoom_group = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+	gtk_style_context_add_class(
+		gtk_widget_get_style_context(zoom_group), GTK_STYLE_CLASS_LINKED);
+	gtk_box_pack_start(GTK_BOX(zoom_group), g.plus, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(zoom_group), g.minus, FALSE, FALSE, 0);
+
+	GtkWidget *funnel = gtk_toggle_button_new();
+	gtk_container_add(GTK_CONTAINER(funnel),
+		gtk_image_new_from_icon_name("funnel-symbolic", GTK_ICON_SIZE_BUTTON));
+	gtk_widget_set_tooltip_text(funnel, "Hide unsupported files");
+	g_signal_connect(funnel, "toggled",
+		G_CALLBACK(on_filtering_toggled), NULL);
+
+	GtkBox *toolbar = fiv_sidebar_get_toolbar(FIV_SIDEBAR(sidebar));
+	gtk_box_pack_start(toolbar, zoom_group, FALSE, FALSE, 0);
+	gtk_box_pack_start(toolbar, funnel, FALSE, FALSE, 0);
+	gtk_widget_set_halign(GTK_WIDGET(toolbar), GTK_ALIGN_CENTER);
+
+	g_signal_connect(g.browser, "notify::thumbnail-size",
+		G_CALLBACK(on_notify_thumbnail_size), NULL);
+	g_signal_connect(model, "notify::filtering",
+		G_CALLBACK(on_notify_filtering), funnel);
+	on_toolbar_zoom(NULL, (gpointer) 0);
+	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(funnel), TRUE);
+	return sidebar;
+}
+
 // This is incredibly broken https://stackoverflow.com/a/51054396/76313
 // thus resolving the problem using overlaps.
 // We're trying to be universal for light and dark themes both. It's hard.
@@ -1271,48 +1317,7 @@ main(int argc, char *argv[])
 
 	// TODO(p): As with GtkFileChooserWidget, bind C-h to filtering,
 	// and mayhaps forward the rest to the sidebar, somehow.
-	g.browser_sidebar = fiv_sidebar_new(g.model);
-	g_signal_connect(g.browser_sidebar, "open-location",
-		G_CALLBACK(on_open_location), NULL);
-
-	// The opposite case, and it doesn't work from the init function.
-	GtkWidget *sidebar_port = gtk_bin_get_child(GTK_BIN(g.browser_sidebar));
-	gtk_container_set_focus_hadjustment(GTK_CONTAINER(sidebar_port),
-		gtk_scrolled_window_get_hadjustment(
-			GTK_SCROLLED_WINDOW(g.browser_sidebar)));
-	gtk_container_set_focus_vadjustment(GTK_CONTAINER(sidebar_port),
-		gtk_scrolled_window_get_vadjustment(
-			GTK_SCROLLED_WINDOW(g.browser_sidebar)));
-
-	g.plus = gtk_button_new_from_icon_name("zoom-in-symbolic",
-		GTK_ICON_SIZE_BUTTON);
-	gtk_widget_set_tooltip_text(g.plus, "Larger thumbnails");
-	g_signal_connect(g.plus, "clicked",
-		G_CALLBACK(on_toolbar_zoom), (gpointer) +1);
-
-	g.minus = gtk_button_new_from_icon_name("zoom-out-symbolic",
-		GTK_ICON_SIZE_BUTTON);
-	gtk_widget_set_tooltip_text(g.minus, "Smaller thumbnails");
-	g_signal_connect(g.minus, "clicked",
-		G_CALLBACK(on_toolbar_zoom), (gpointer) -1);
-
-	GtkWidget *zoom_group = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_style_context_add_class(
-		gtk_widget_get_style_context(zoom_group), GTK_STYLE_CLASS_LINKED);
-	gtk_box_pack_start(GTK_BOX(zoom_group), g.plus, FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(zoom_group), g.minus, FALSE, FALSE, 0);
-
-	GtkWidget *funnel = gtk_toggle_button_new();
-	gtk_container_add(GTK_CONTAINER(funnel),
-		gtk_image_new_from_icon_name("funnel-symbolic", GTK_ICON_SIZE_BUTTON));
-	gtk_widget_set_tooltip_text(funnel, "Hide unsupported files");
-	g_signal_connect(funnel, "toggled",
-		G_CALLBACK(on_filtering_toggled), NULL);
-
-	GtkBox *toolbar = fiv_sidebar_get_toolbar(FIV_SIDEBAR(g.browser_sidebar));
-	gtk_box_pack_start(toolbar, zoom_group, FALSE, FALSE, 0);
-	gtk_box_pack_start(toolbar, funnel, FALSE, FALSE, 0);
-	gtk_widget_set_halign(GTK_WIDGET(toolbar), GTK_ALIGN_CENTER);
+	g.browser_sidebar = make_browser_sidebar(g.model);
 
 	g.browser_paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
 	gtk_paned_add1(GTK_PANED(g.browser_paned), g.browser_sidebar);
@@ -1338,13 +1343,6 @@ main(int argc, char *argv[])
 	g_signal_connect(g.window, "window-state-event",
 		G_CALLBACK(on_window_state_event), NULL);
 	gtk_container_add(GTK_CONTAINER(g.window), g.stack);
-
-	g_signal_connect(g.browser, "notify::thumbnail-size",
-		G_CALLBACK(on_notify_thumbnail_size), NULL);
-	on_toolbar_zoom(NULL, (gpointer) 0);
-	g_signal_connect(g.model, "notify::filtering",
-		G_CALLBACK(on_notify_filtering), funnel);
-	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(funnel), TRUE);
 
 	// Try to get half of the screen vertically, in 4:3 aspect ratio.
 	//

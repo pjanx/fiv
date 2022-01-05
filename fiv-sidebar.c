@@ -397,9 +397,16 @@ fiv_sidebar_new(FivIoModel *model)
 	g_return_val_if_fail(FIV_IS_IO_MODEL(model), NULL);
 
 	FivSidebar *self = g_object_new(FIV_TYPE_SIDEBAR, NULL);
-	self->model = g_object_ref(model);
+
+	// This doesn't work from the init function.
+	GtkWidget *sidebar_port = gtk_bin_get_child(GTK_BIN(self));
+	gtk_container_set_focus_hadjustment(GTK_CONTAINER(sidebar_port),
+		gtk_scrolled_window_get_hadjustment(GTK_SCROLLED_WINDOW(self)));
+	gtk_container_set_focus_vadjustment(GTK_CONTAINER(sidebar_port),
+		gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(self)));
 
 	// TODO(p): There should be an extra signal to watch location changes only.
+	self->model = g_object_ref(model);
 	g_signal_connect_swapped(self->model, "subdirectories-changed",
 		G_CALLBACK(update_location), self);
 
