@@ -566,11 +566,35 @@ on_item_activated(G_GNUC_UNUSED FivBrowser *browser, GFile *location,
 	g_free(uri);
 }
 
+static void open_any_file(GFile *file, gboolean force_browser);
+
+static void
+on_mounted_enclosing(GObject *source_object, GAsyncResult *res,
+	G_GNUC_UNUSED gpointer user_data)
+{
+	GFile *file = G_FILE(source_object);
+	GError *error = NULL;
+	if (!g_file_mount_enclosing_volume_finish(file, res, &error))
+		show_error_dialog(error);
+	else
+		open_any_file(file, FALSE);
+}
+
 static void
 open_any_file(GFile *file, gboolean force_browser)
 {
-	gchar *uri = g_file_get_uri(file);
 	GFileType type = g_file_query_file_type(file, G_FILE_QUERY_INFO_NONE, NULL);
+	if (type == G_FILE_TYPE_UNKNOWN &&
+		G_FILE_GET_IFACE(file)->mount_enclosing_volume) {
+		// TODO(p): At least provide some kind of indication.
+		GMountOperation *op = gtk_mount_operation_new(GTK_WINDOW(g.window));
+		g_file_mount_enclosing_volume(file, G_MOUNT_MOUNT_NONE, op, NULL,
+			on_mounted_enclosing, NULL);
+		g_object_unref(op);
+		return;
+	}
+
+	gchar *uri = g_file_get_uri(file);
 	if (type == G_FILE_TYPE_UNKNOWN) {
 		errno = ENOENT;
 		show_error_dialog(g_error_new(G_FILE_ERROR,
