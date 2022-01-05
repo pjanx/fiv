@@ -1,5 +1,5 @@
 //
-// fastiv.c: fast image viewer
+// fiv.c: fuck-if-I-know-how-to-name-it image browser and viewer
 //
 // Copyright (c) 2021 - 2022, Přemysl Eric Janouch <p@janouch.name>
 //
@@ -1187,7 +1187,7 @@ main(int argc, char *argv[])
 
 	GError *error = NULL;
 	gboolean initialized = gtk_init_with_args(
-		&argc, &argv, " - fast image viewer", options, NULL, &error);
+		&argc, &argv, " - Image browser and viewer", options, NULL, &error);
 	if (show_version) {
 		printf(PROJECT_NAME " " PROJECT_VERSION "\n");
 		return 0;

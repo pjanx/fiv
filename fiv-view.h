@@ -1,5 +1,5 @@
 //
-// fiv-view.h: fast image viewer - view widget
+// fiv-view.h: image viewing widget
 //
 // Copyright (c) 2021, Přemysl Eric Janouch <p@janouch.name>
 //

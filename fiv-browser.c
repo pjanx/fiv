@@ -1,5 +1,5 @@
 //
-// fiv-browser.c: fast image viewer - filesystem browser widget
+// fiv-browser.c: filesystem browsing widget
 //
 // Copyright (c) 2021 - 2022, Přemysl Eric Janouch <p@janouch.name>
 //

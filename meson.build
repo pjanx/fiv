@@ -1,5 +1,5 @@
 # vim: noet ts=4 sts=4 sw=4:
-project('fastiv', 'c',
+project('fiv', 'c',
 	default_options : ['c_std=gnu99', 'warning_level=2'],
 	version : '0.1.0')
 add_project_arguments(
@@ -70,7 +70,7 @@ resources = gnome.compile_resources('resources',
 	c_name : 'resources',
 )
 
-exe = executable('fastiv', 'fastiv.c', 'fiv-view.c', 'fiv-io.c',
+exe = executable('fiv', 'fiv.c', 'fiv-view.c', 'fiv-io.c',
 	'fiv-browser.c', 'fiv-sidebar.c', 'fiv-thumbnail.c', 'xdg.c', resources,
 	install : true,
 	dependencies : [dependencies])
@@ -81,11 +81,11 @@ if gdkpixbuf.found()
 		dependencies : [dependencies, gdkpixbuf])
 endif
 
-install_data('fastiv.desktop',
+install_data('fiv.desktop',
 	install_dir : get_option('datadir') + '/applications')
-install_data('fastiv-browse.desktop',
+install_data('fiv-browse.desktop',
 	install_dir : get_option('datadir') + '/applications')
-install_data('fastiv.svg',
+install_data('fiv.svg',
 	install_dir : get_option('datadir') + '/icons/hicolor/scalable/apps')
 
 # TODO(p): Replace this with custom_target().
@@ -96,5 +96,5 @@ MimeType=$($1 --list-supported-media-types | tr "\\012" ";")
 }" "$MESON_INSTALL_DESTDIR_PREFIX/$2"''',
 		'sh',
 		exe.full_path(),
-		get_option('datadir') + '/applications/fastiv.desktop')
+		get_option('datadir') + '/applications/fiv.desktop')
 endif

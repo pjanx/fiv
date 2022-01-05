@@ -1,8 +1,8 @@
-fastiv
-======
+fiv
+===
 
-'fastiv' is a fast image viewer, directly supporting BMP, PNG, GIF, JPEG, WebP,
-and optionally raw photos, HEIC, AVIF, SVG, X11 cursors and TIFF,
+'fiv' is an image browser and viewer, supporting BMP, PNG, GIF, JPEG, WebP
+directly, plus optionally raw photos, HEIC, AVIF, SVG, X11 cursors and TIFF,
 or whatever gdk-pixbuf loads.
 
 Its development status can be summarized as '`beta`'.
@@ -29,7 +29,7 @@ libturbojpeg, libwebp, spng>=0.7.0 +
 Optional dependencies: lcms2, LibRaw, librsvg-2.0, xcursor, libheif, libtiff,
 gdk-pixbuf-2.0, ExifTool
 
- $ git clone --recursive https://git.janouch.name/p/fastiv.git
+ $ git clone --recursive https://git.janouch.name/p/fiv.git
  $ meson builddir
  $ cd builddir
  $ meson compile
@@ -50,7 +50,7 @@ The GTK+ inspector will be very helpful, should you want to experiment.
 
 Contributing and Support
 ------------------------
-Use https://git.janouch.name/p/fastiv to report any bugs, request features,
+Use https://git.janouch.name/p/fiv to report any bugs, request features,
 or submit pull requests.  `git send-email` is tolerated.  If you want to discuss
 the project, feel free to join me at ircs://irc.janouch.name, channel #dev.
 

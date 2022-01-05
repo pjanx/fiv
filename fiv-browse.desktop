@@ -1,9 +1,9 @@
 [Desktop Entry]
 Type=Application
-Name=fastiv
-GenericName=File Browser
-Icon=fastiv
-Exec=fastiv --browse -- %u
+Name=fiv
+GenericName=Image Browser
+Icon=fiv
+Exec=fiv --browse -- %u
 NoDisplay=true
 Terminal=false
 StartupNotify=true
