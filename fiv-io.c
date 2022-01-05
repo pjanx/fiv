@@ -265,6 +265,7 @@ static void
 trivial_cmyk_to_host_byte_order_argb(unsigned char *p, int len)
 {
 	// This CMYK handling has been seen in gdk-pixbuf/JPEG, GIMP/JPEG, skcms.
+	// It will typically produce horribly oversaturated results.
 	// Assume that all YCCK/CMYK JPEG files use inverted CMYK, as Photoshop
 	// does, see https://bugzilla.gnome.org/show_bug.cgi?id=618096
 	while (len--) {
@@ -1055,6 +1056,10 @@ static cairo_surface_t *
 open_libjpeg_turbo(
 	const gchar *data, gsize len, FivIoProfile profile, GError **error)
 {
+	// Note that there doesn't seem to be much of a point in using this
+	// simplified API anymore, because JPEG-QS needs the original libjpeg API.
+	// It's just more or less duplicated code which won't compile with
+	// the slow version of the library.
 	tjhandle dec = tjInitDecompress();
 	if (!dec) {
 		set_error(error, tjGetErrorStr2(dec));
@@ -2325,7 +2330,7 @@ fiv_io_open(
 
 	cairo_surface_t *surface =
 		fiv_io_open_from_data(data, len, uri, profile, enhance, error);
-	free(data);
+	g_free(data);
 	return surface;
 }
 
