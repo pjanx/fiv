@@ -84,6 +84,7 @@ static struct key_group help_keys_browser[] = {
 	{"General", help_keys_general},
 	{"View", (struct key[]) {
 		{"F9", "Toggle navigation sidebar"},
+		{"h <control>h", "Toggle hiding unsupported files"},
 		{}
 	}},
 	{"Navigation", (struct key[]) {
@@ -274,6 +275,7 @@ struct {
 	GtkWidget *browser_sidebar;
 	GtkWidget *plus;
 	GtkWidget *minus;
+	GtkWidget *funnel;
 	GtkWidget *sort_field[FIV_IO_MODEL_SORT_COUNT];
 	GtkWidget *sort_direction[2];
 	GtkWidget *browser_scroller;
@@ -665,11 +667,11 @@ on_notify_thumbnail_size(
 
 static void
 on_notify_filtering(
-	GObject *object, GParamSpec *param_spec, gpointer user_data)
+	GObject *object, GParamSpec *param_spec, G_GNUC_UNUSED gpointer user_data)
 {
 	gboolean b = FALSE;
 	g_object_get(object, g_param_spec_get_name(param_spec), &b, NULL);
-	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(user_data), b);
+	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(g.funnel), b);
 }
 
 static void
@@ -770,14 +772,17 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 		break;
 	case GDK_CONTROL_MASK:
 		switch (event->keyval) {
-		case GDK_KEY_o:
-			on_open();
+		case GDK_KEY_h:
+			gtk_button_clicked(GTK_BUTTON(g.funnel));
 			return TRUE;
 		case GDK_KEY_l:
 			fiv_sidebar_show_enter_location(FIV_SIDEBAR(g.browser_sidebar));
 			return TRUE;
 		case GDK_KEY_n:
 			spawn_uri(g.directory);
+			return TRUE;
+		case GDK_KEY_o:
+			on_open();
 			return TRUE;
 		case GDK_KEY_r:
 			// TODO(p): Reload the image instead, if it's currently visible.
@@ -832,6 +837,9 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 			gtk_widget_destroy(g.window);
 			return TRUE;
 
+		case GDK_KEY_h:
+			gtk_button_clicked(GTK_BUTTON(g.funnel));
+			return TRUE;
 		case GDK_KEY_o:
 			on_open();
 			return TRUE;
@@ -1208,11 +1216,11 @@ make_browser_sidebar(FivIoModel *model)
 	gtk_box_pack_start(GTK_BOX(zoom_group), g.plus, FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(zoom_group), g.minus, FALSE, FALSE, 0);
 
-	GtkWidget *funnel = gtk_toggle_button_new();
-	gtk_container_add(GTK_CONTAINER(funnel),
+	g.funnel = gtk_toggle_button_new();
+	gtk_container_add(GTK_CONTAINER(g.funnel),
 		gtk_image_new_from_icon_name("funnel-symbolic", GTK_ICON_SIZE_BUTTON));
-	gtk_widget_set_tooltip_text(funnel, "Hide unsupported files");
-	g_signal_connect(funnel, "toggled",
+	gtk_widget_set_tooltip_text(g.funnel, "Hide unsupported files");
+	g_signal_connect(g.funnel, "toggled",
 		G_CALLBACK(on_filtering_toggled), NULL);
 
 	GtkWidget *menu = gtk_menu_new();
@@ -1251,7 +1259,7 @@ make_browser_sidebar(FivIoModel *model)
 	GtkWidget *model_group = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	gtk_style_context_add_class(
 		gtk_widget_get_style_context(model_group), GTK_STYLE_CLASS_LINKED);
-	gtk_box_pack_start(GTK_BOX(model_group), funnel, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(model_group), g.funnel, FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(model_group), sort, FALSE, FALSE, 0);
 
 	GtkBox *toolbar = fiv_sidebar_get_toolbar(FIV_SIDEBAR(sidebar));
@@ -1262,13 +1270,13 @@ make_browser_sidebar(FivIoModel *model)
 	g_signal_connect(g.browser, "notify::thumbnail-size",
 		G_CALLBACK(on_notify_thumbnail_size), NULL);
 	g_signal_connect(model, "notify::filtering",
-		G_CALLBACK(on_notify_filtering), funnel);
+		G_CALLBACK(on_notify_filtering), NULL);
 	g_signal_connect(model, "notify::sort-field",
 		G_CALLBACK(on_notify_sort_field), NULL);
 	g_signal_connect(model, "notify::sort-descending",
 		G_CALLBACK(on_notify_sort_descending), NULL);
 	on_toolbar_zoom(NULL, (gpointer) 0);
-	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(funnel), TRUE);
+	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(g.funnel), TRUE);
 	// TODO(p): Invoke sort configuration notifications explicitly.
 	return sidebar;
 }
