@@ -83,20 +83,25 @@ if gdkpixbuf.found()
 		dependencies : [dependencies, gdkpixbuf])
 endif
 
-install_data('fiv.desktop',
-	install_dir : get_option('datadir') + '/applications')
+# XXX: With gdk-pixbuf, this even dependens on currently installed modules.
+if meson.is_cross_build()
+	install_data('fiv.desktop',
+		install_dir : get_option('datadir') + '/applications')
+else
+	# XXX: The exe path may not contain spaces--quoting is a bitch in Meson.
+	desktop = custom_target('desktop',
+		output : 'fiv.desktop',
+		input : 'fiv.desktop',
+		command : ['sh', '-c', '''awk '/^MimeType=/ { $0 = "MimeType=";
+			while ((exe " --list-supported-media-types" | getline type) > 0)
+				$0 = $0 type ";" } 1' "exe=$1" "$2"''', 'sh', exe, '@INPUT@'],
+		capture : true,
+		install : true,
+		install_dir : get_option('datadir') + '/applications',
+	)
+endif
+
 install_data('fiv-browse.desktop',
 	install_dir : get_option('datadir') + '/applications')
 install_data('fiv.svg',
 	install_dir : get_option('datadir') + '/icons/hicolor/scalable/apps')
-
-# TODO(p): Replace this with custom_target().
-if not meson.is_cross_build()
-	meson.add_install_script(
-		'sh', '-c', '''sed -i "/^MimeType=/{c \\
-MimeType=$($1 --list-supported-media-types | tr "\\012" ";")
-}" "$MESON_INSTALL_DESTDIR_PREFIX/$2"''',
-		'sh',
-		exe.full_path(),
-		get_option('datadir') + '/applications/fiv.desktop')
-endif
