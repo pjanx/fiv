@@ -27,19 +27,21 @@
 #include <webp/encode.h>
 #include <webp/mux.h>
 
-// Colour management must be handled before RGB conversions.
-#ifdef HAVE_LCMS2
-#include <lcms2.h>
-#endif  // HAVE_LCMS2
-
 #ifdef HAVE_JPEG_QS
-#include <jpeglib.h>
 #include <setjmp.h>
+#include <stdio.h>
+
+#include <jpeglib.h>
 // This library is tricky to build, simply make it work at all.
 #define NO_SIMD
 #include <jpeg-quantsmooth/quantsmooth.h>
 #undef NO_SIMD
 #endif  // HAVE_JPEG_QS
+
+// Colour management must be handled before RGB conversions.
+#ifdef HAVE_LCMS2
+#include <lcms2.h>
+#endif  // HAVE_LCMS2
 
 #ifdef HAVE_LIBRAW
 #include <libraw.h>
