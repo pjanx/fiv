@@ -8,6 +8,8 @@ or whatever gdk-pixbuf loads.
 Its development status can be summarized as '`beta`'.
 E.g., certain GIFs animate wrong.
 
+image::fiv.webp["Screenshot of both the browser and the viewer"]
+
 Non-goals
 ---------
  - fancy UI--the focus is on speed of use first, colour accuracy second
