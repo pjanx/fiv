@@ -22,6 +22,7 @@
 #include <webp/mux.h>
 #include <glib/gstdio.h>
 
+#include <errno.h>
 #include <math.h>
 #include <stdbool.h>
 

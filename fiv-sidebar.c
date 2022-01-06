@@ -244,9 +244,20 @@ resolve_location(FivSidebar *self, const char *text)
 	// Relative paths produce invalid GFile objects with this function.
 	// And even if they didn't, we have our own root for them.
 	GFile *file = g_file_parse_name(text);
-	if (g_uri_is_valid(text, G_URI_FLAGS_PARSE_RELAXED, NULL) ||
-		g_file_peek_path(file))
+	if (g_file_peek_path(file))
 		return file;
+
+	// Neither branch looks like a particularly good solution.
+	// Though in general, false positives are preferred over negatives.
+#if GLIB_CHECK_VERSION(2, 66, 0)
+	if (g_uri_is_valid(text, G_URI_FLAGS_PARSE_RELAXED, NULL))
+		return file;
+#else
+	gchar *scheme = g_uri_parse_scheme(text);
+	g_free(scheme);
+	if (scheme)
+		return file;
+#endif
 
 	GFile *absolute = g_file_get_child_for_display_name(
 		fiv_io_model_get_location(self->model), text, NULL);

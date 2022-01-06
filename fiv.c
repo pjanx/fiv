@@ -944,8 +944,9 @@ on_button_press_browser_paned(
 static GtkWidget *
 make_toolbar_button(const gchar *symbolic, const gchar *tooltip)
 {
-	GtkWidget *button =
-		gtk_button_new_from_icon_name(symbolic, GTK_ICON_SIZE_BUTTON);
+	GtkWidget *button = gtk_button_new();
+	gtk_button_set_image(GTK_BUTTON(button),
+		gtk_image_new_from_icon_name(symbolic, GTK_ICON_SIZE_BUTTON));
 	gtk_widget_set_tooltip_text(button, tooltip);
 	gtk_widget_set_focus_on_click(button, FALSE);
 	gtk_style_context_add_class(
