@@ -395,15 +395,10 @@ load_directory_without_switching(const gchar *uri)
 			vadjustment, gtk_adjustment_get_lower(vadjustment));
 	}
 
-	g_ptr_array_set_size(g.files, 0);
-	g.files_index = -1;
-
 	GError *error = NULL;
 	GFile *file = g_file_new_for_uri(g.directory);
 	if (fiv_io_model_open(g.model, file, &error)) {
-		g_ptr_array_free(g.files, TRUE);
-		g.files = fiv_io_model_get_files(g.model);
-		update_files_index();
+		// Handled by the signal callback.
 	} else if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED)) {
 		g_error_free(error);
 	} else {
@@ -411,11 +406,6 @@ load_directory_without_switching(const gchar *uri)
 	}
 
 	g_object_unref(file);
-
-	gtk_widget_set_sensitive(
-		g.toolbar[TOOLBAR_FILE_PREVIOUS], g.files->len > 1);
-	gtk_widget_set_sensitive(
-		g.toolbar[TOOLBAR_FILE_NEXT], g.files->len > 1);
 }
 
 static void
@@ -435,10 +425,25 @@ load_directory(const gchar *uri)
 }
 
 static void
+on_model_files_changed(FivIoModel *model, G_GNUC_UNUSED gpointer user_data)
+{
+	g_return_if_fail(model == g.model);
+
+	g_ptr_array_free(g.files, TRUE);
+	g.files = fiv_io_model_get_files(g.model);
+	update_files_index();
+
+	gtk_widget_set_sensitive(
+		g.toolbar[TOOLBAR_FILE_PREVIOUS], g.files->len > 1);
+	gtk_widget_set_sensitive(
+		g.toolbar[TOOLBAR_FILE_NEXT], g.files->len > 1);
+}
+
+static void
 on_filtering_toggled(GtkToggleButton *button, G_GNUC_UNUSED gpointer user_data)
 {
-	g_object_set(
-		g.model, "filtering", gtk_toggle_button_get_active(button), NULL);
+	gboolean active = gtk_toggle_button_get_active(button);
+	g_object_set(g.model, "filtering", active, NULL);
 }
 
 static void
@@ -1386,6 +1391,8 @@ main(int argc, char *argv[])
 	}
 
 	g.model = g_object_new(FIV_TYPE_IO_MODEL, NULL);
+	g_signal_connect(g.model, "files-changed",
+		G_CALLBACK(on_model_files_changed), NULL);
 
 	gtk_window_set_default_icon_name(PROJECT_NAME);
 	gtk_icon_theme_add_resource_path(
