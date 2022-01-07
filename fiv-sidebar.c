@@ -31,6 +31,7 @@ struct _FivSidebar {
 G_DEFINE_TYPE(FivSidebar, fiv_sidebar, GTK_TYPE_SCROLLED_WINDOW)
 
 G_DEFINE_QUARK(fiv-sidebar-location-quark, fiv_sidebar_location)
+G_DEFINE_QUARK(fiv-sidebar-self-quark, fiv_sidebar_self)
 
 enum {
 	OPEN_LOCATION,
@@ -66,7 +67,7 @@ fiv_sidebar_class_init(FivSidebarClass *klass)
 
 	// TODO(p): Consider a return value, and using it.
 	sidebar_signals[OPEN_LOCATION] =
-		g_signal_new("open_location", G_TYPE_FROM_CLASS(klass), 0, 0,
+		g_signal_new("open-location", G_TYPE_FROM_CLASS(klass), 0, 0,
 			NULL, NULL, NULL, G_TYPE_NONE,
 			2, G_TYPE_FILE, GTK_TYPE_PLACES_OPEN_FLAGS);
 }
@@ -84,10 +85,30 @@ on_rowlabel_query_tooltip(GtkWidget *widget,
 	return TRUE;
 }
 
-static GtkWidget *
-create_row(GFile *file, const char *icon_name)
+static gboolean
+on_breadcrumb_release(
+	G_GNUC_UNUSED GtkWidget *widget, GdkEventButton *event, gpointer user_data)
 {
-	// TODO(p): Handle errors better.
+	// This also prevents unwanted primary button click handling in GtkListBox.
+	if (event->x > gdk_window_get_width(event->window) ||
+		event->y > gdk_window_get_height(event->window))
+		return TRUE;
+
+	guint state = event->state & gtk_accelerator_get_default_mod_mask();
+	if (event->button != GDK_BUTTON_MIDDLE || state != 0)
+		return FALSE;
+
+	GtkListBoxRow *row = GTK_LIST_BOX_ROW(user_data);
+	g_signal_emit(g_object_get_qdata(G_OBJECT(row), fiv_sidebar_self_quark()),
+		sidebar_signals[OPEN_LOCATION], 0,
+		g_object_get_qdata(G_OBJECT(row), fiv_sidebar_location_quark()),
+		GTK_PLACES_OPEN_NEW_WINDOW);
+	return TRUE;
+}
+
+static GtkWidget *
+create_row(FivSidebar *self, GFile *file, const char *icon_name)
+{
 	GError *error = NULL;
 	GFileInfo *info =
 		g_file_query_info(file, G_FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME,
@@ -116,7 +137,11 @@ create_row(GFile *file, const char *icon_name)
 		gtk_widget_get_style_context(rowlabel), "sidebar-label");
 	gtk_container_add(GTK_CONTAINER(rowbox), rowlabel);
 
+	// The revealer is primarily necessary to match Adwaita CSS rules,
+	// but it conveniently also has its own GdkWindow to hook events on.
 	GtkWidget *revealer = gtk_revealer_new();
+	gtk_widget_add_events(
+		revealer, GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK);
 	gtk_revealer_set_reveal_child(
 		GTK_REVEALER(revealer), TRUE);
 	gtk_revealer_set_transition_type(
@@ -126,6 +151,11 @@ create_row(GFile *file, const char *icon_name)
 	GtkWidget *row = gtk_list_box_row_new();
 	g_object_set_qdata_full(G_OBJECT(row), fiv_sidebar_location_quark(),
 		g_object_ref(file), (GDestroyNotify) g_object_unref);
+	g_object_set_qdata_full(G_OBJECT(row), fiv_sidebar_self_quark(),
+		g_object_ref(self), (GDestroyNotify) g_object_unref);
+	g_signal_connect(revealer, "button-release-event",
+		G_CALLBACK(on_breadcrumb_release), row);
+
 	gtk_container_add(GTK_CONTAINER(row), revealer);
 	gtk_widget_show_all(row);
 	return row;
@@ -150,19 +180,19 @@ update_location(FivSidebar *self)
 		if (!(iter = parent))
 			break;
 
-		if ((row = create_row(parent, "go-up-symbolic")))
+		if ((row = create_row(self, parent, "go-up-symbolic")))
 			gtk_list_box_prepend(GTK_LIST_BOX(self->listbox), row);
 	}
 
 	// Other options are "folder-{visiting,open}-symbolic", though the former
 	// is mildly inappropriate (means: open in another window).
-	if ((row = create_row(location, "circle-filled-symbolic")))
+	if ((row = create_row(self, location, "circle-filled-symbolic")))
 		gtk_container_add(GTK_CONTAINER(self->listbox), row);
 
 	GPtrArray *subdirs = fiv_io_model_get_subdirectories(self->model);
 	for (guint i = 0; i < subdirs->len; i++) {
 		GFile *file = g_file_new_for_uri(subdirs->pdata[i]);
-		if ((row = create_row(file, "go-down-symbolic")))
+		if ((row = create_row(self, file, "go-down-symbolic")))
 			gtk_container_add(GTK_CONTAINER(self->listbox), row);
 		g_object_unref(file);
 	}

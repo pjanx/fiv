@@ -1431,8 +1431,7 @@ main(int argc, char *argv[])
 	gtk_container_set_focus_hadjustment(GTK_CONTAINER(browser_port), NULL);
 	gtk_container_set_focus_vadjustment(GTK_CONTAINER(browser_port), NULL);
 
-	// TODO(p): As with GtkFileChooserWidget, bind C-h to filtering,
-	// and mayhaps forward the rest to the sidebar, somehow.
+	// TODO(p): Mayhaps forward some key presses to the sidebar, somehow.
 	g.browser_sidebar = make_browser_sidebar(g.model);
 
 	g.browser_paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
