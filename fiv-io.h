@@ -130,12 +130,11 @@ typedef enum _FivIoOrientation {
 	FivIoOrientation270       = 8
 } FivIoOrientation;
 
-/// Returns whether dimensions need to be swapped for rendering.
-gboolean fiv_io_orientation_is_sideways(FivIoOrientation orientation);
-
-/// Returns a rendering matrix for a surface. Dimensions need to be pre-swapped.
-cairo_matrix_t fiv_io_orientation_matrix(
-	FivIoOrientation orientation, double width, double height);
+/// Returns a rendering matrix for a surface, and its target dimensions.
+cairo_matrix_t fiv_io_orientation_apply(cairo_surface_t *surface,
+	FivIoOrientation orientation, double *width, double *height);
+void fiv_io_orientation_dimensions(cairo_surface_t *surface,
+	FivIoOrientation orientation, double *width, double *height);
 
 /// Extracts the orientation field from Exif, if there's any.
 FivIoOrientation fiv_io_exif_orientation(const guint8 *exif, gsize len);

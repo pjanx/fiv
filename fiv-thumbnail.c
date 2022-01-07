@@ -108,16 +108,13 @@ fiv_thumbnail_get_root(void)
 static cairo_surface_t *
 adjust_thumbnail(cairo_surface_t *thumbnail, double row_height)
 {
-	cairo_format_t format = cairo_image_surface_get_format(thumbnail);
-	int w = 0, width = cairo_image_surface_get_width(thumbnail);
-	int h = 0, height = cairo_image_surface_get_height(thumbnail);
-
 	// Hardcode orientation.
 	FivIoOrientation orientation = (uintptr_t) cairo_surface_get_user_data(
 		thumbnail, &fiv_io_key_orientation);
-	cairo_matrix_t matrix = fiv_io_orientation_is_sideways(orientation)
-		? fiv_io_orientation_matrix(orientation, (w = height), (h = width))
-		: fiv_io_orientation_matrix(orientation, (w = width), (h = height));
+
+	double w = 0, h = 0;
+	cairo_matrix_t matrix =
+		fiv_io_orientation_apply(thumbnail, orientation, &w, &h);
 
 	double scale_x = 1;
 	double scale_y = 1;
@@ -128,7 +125,11 @@ adjust_thumbnail(cairo_surface_t *thumbnail, double row_height)
 		scale_y = row_height / h;
 		scale_x = round(scale_y * w) / w;
 	}
-	if (orientation <= FivIoOrientation0 && scale_x == 1 && scale_y == 1)
+
+	// This will be CAIRO_FORMAT_INVALID with non-image surfaces, which is fine.
+	cairo_format_t format = cairo_image_surface_get_format(thumbnail);
+	if (format != CAIRO_FORMAT_INVALID &&
+		orientation <= FivIoOrientation0 && scale_x == 1 && scale_y == 1)
 		return cairo_surface_reference(thumbnail);
 
 	int projected_width = round(scale_x * w);
@@ -265,10 +266,13 @@ fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size, GError **error)
 		thum, "%s%c%ld%c", THUMB_MTIME, 0, (long) st.st_mtim.tv_sec, 0);
 	g_string_append_printf(
 		thum, "%s%c%ld%c", THUMB_SIZE, 0, (long) filesize, 0);
-	g_string_append_printf(thum, "%s%c%d%c", THUMB_IMAGE_WIDTH, 0,
-		cairo_image_surface_get_width(surface), 0);
-	g_string_append_printf(thum, "%s%c%d%c", THUMB_IMAGE_HEIGHT, 0,
-		cairo_image_surface_get_height(surface), 0);
+
+	if (cairo_surface_get_type(surface) == CAIRO_SURFACE_TYPE_IMAGE) {
+		g_string_append_printf(thum, "%s%c%d%c", THUMB_IMAGE_WIDTH, 0,
+			cairo_image_surface_get_width(surface), 0);
+		g_string_append_printf(thum, "%s%c%d%c", THUMB_IMAGE_HEIGHT, 0,
+			cairo_image_surface_get_height(surface), 0);
+	}
 
 	// Without a CMM, no conversion is attempted.
 	if (sRGB) {

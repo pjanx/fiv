@@ -207,25 +207,10 @@ get_surface_dimensions(FivView *self)
 	if (!self->image)
 		return (Dimensions) {};
 
-	cairo_rectangle_t extents = {};
-	switch (cairo_surface_get_type(self->page)) {
-	case CAIRO_SURFACE_TYPE_IMAGE:
-		extents.width = cairo_image_surface_get_width(self->page);
-		extents.height = cairo_image_surface_get_height(self->page);
-		break;
-	case CAIRO_SURFACE_TYPE_RECORDING:
-		if (!cairo_recording_surface_get_extents(self->page, &extents))
-			cairo_recording_surface_ink_extents(self->page,
-				&extents.x, &extents.y, &extents.width, &extents.height);
-		break;
-	default:
-		g_assert_not_reached();
-	}
-
-	if (fiv_io_orientation_is_sideways(self->orientation))
-		return (Dimensions) {extents.height, extents.width};
-
-	return (Dimensions) {extents.width, extents.height};
+	Dimensions dimensions = {};
+	fiv_io_orientation_dimensions(
+		self->page, self->orientation, &dimensions.width, &dimensions.height);
+	return dimensions;
 }
 
 static void
@@ -398,9 +383,11 @@ fiv_view_draw(GtkWidget *widget, cairo_t *cr)
 	if (h < allocation.height)
 		y = round((allocation.height - h) / 2.);
 
-	Dimensions surface_dimensions = get_surface_dimensions(self);
-	cairo_matrix_t matrix = fiv_io_orientation_matrix(
-		self->orientation, surface_dimensions.width, surface_dimensions.height);
+	Dimensions surface_dimensions = {};
+	cairo_matrix_t matrix =
+		fiv_io_orientation_apply(self->page, self->orientation,
+			&surface_dimensions.width, &surface_dimensions.height);
+
 	cairo_translate(cr, x, y);
 	if (self->checkerboard) {
 		gtk_style_context_save(style);
@@ -686,7 +673,11 @@ on_draw_page(G_GNUC_UNUSED GtkPrintOperation *operation,
 {
 	// Any DPI will be wrong, unless we import that information from the image.
 	double scale = 1 / 96.;
-	Dimensions surface_dimensions = get_surface_dimensions(self);
+	Dimensions surface_dimensions = {};
+	cairo_matrix_t matrix =
+		fiv_io_orientation_apply(self->page, self->orientation,
+			&surface_dimensions.width, &surface_dimensions.height);
+
 	double w = surface_dimensions.width * scale;
 	double h = surface_dimensions.height * scale;
 
@@ -698,8 +689,6 @@ on_draw_page(G_GNUC_UNUSED GtkPrintOperation *operation,
 	cairo_t *cr = gtk_print_context_get_cairo_context(context);
 	cairo_scale(cr, scale, scale);
 	cairo_set_source_surface(cr, self->frame, 0, 0);
-	cairo_matrix_t matrix = fiv_io_orientation_matrix(
-		self->orientation, surface_dimensions.width, surface_dimensions.height);
 	cairo_pattern_set_matrix(cairo_get_source(cr), &matrix);
 	cairo_paint(cr);
 }
