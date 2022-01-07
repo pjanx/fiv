@@ -54,15 +54,28 @@ fiv_sidebar_dispose(GObject *gobject)
 }
 
 static void
+fiv_sidebar_realize(GtkWidget *widget)
+{
+	GTK_WIDGET_CLASS(fiv_sidebar_parent_class)->realize(widget);
+
+	// Fucking GTK+. With no bookmarks, the revealer takes up space anyway.
+	FivSidebar *self = FIV_SIDEBAR(widget);
+	gtk_places_sidebar_set_drop_targets_visible(self->places, TRUE, NULL);
+	gtk_places_sidebar_set_drop_targets_visible(self->places, FALSE, NULL);
+}
+
+static void
 fiv_sidebar_class_init(FivSidebarClass *klass)
 {
 	GObjectClass *object_class = G_OBJECT_CLASS(klass);
 	object_class->dispose = fiv_sidebar_dispose;
 
+	GtkWidgetClass *widget_class = GTK_WIDGET_CLASS(klass);
+	widget_class->realize = fiv_sidebar_realize;
+
 	// You're giving me no choice, Adwaita.
 	// Your style is hardcoded to match against the class' CSS name.
 	// And I need replicate the internal widget structure.
-	GtkWidgetClass *widget_class = GTK_WIDGET_CLASS(klass);
 	gtk_widget_class_set_css_name(widget_class, "placessidebar");
 
 	// TODO(p): Consider a return value, and using it.
