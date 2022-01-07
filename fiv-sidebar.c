@@ -106,6 +106,20 @@ on_breadcrumb_release(
 	return TRUE;
 }
 
+static void
+on_breadcrumb_drag_data_get(G_GNUC_UNUSED GtkWidget *widget,
+	G_GNUC_UNUSED GdkDragContext *context, GtkSelectionData *selection_data,
+	G_GNUC_UNUSED guint info, G_GNUC_UNUSED guint time_, gpointer user_data)
+{
+	GtkListBoxRow *row = GTK_LIST_BOX_ROW(user_data);
+	GFile *location =
+		g_object_get_qdata(G_OBJECT(row), fiv_sidebar_location_quark());
+
+	gchar *uris[] = {g_file_get_uri(location), NULL};
+	gtk_selection_data_set_uris(selection_data, uris);
+	g_free(*uris);
+}
+
 static GtkWidget *
 create_row(FivSidebar *self, GFile *file, const char *icon_name)
 {
@@ -148,6 +162,13 @@ create_row(FivSidebar *self, GFile *file, const char *icon_name)
 		GTK_REVEALER(revealer), GTK_REVEALER_TRANSITION_TYPE_NONE);
 	gtk_container_add(GTK_CONTAINER(revealer), rowbox);
 
+	GtkTargetList *target_list = gtk_target_list_new(NULL, 0);
+	gtk_target_list_add_uri_targets(target_list, 0);
+	gtk_drag_source_set(revealer, GDK_BUTTON1_MASK, NULL, 0, GDK_ACTION_LINK);
+	gtk_drag_source_set_target_list(revealer, target_list);
+	gtk_drag_source_set_icon_name(revealer, "inode-directory-symbolic");
+	gtk_target_list_unref(target_list);
+
 	GtkWidget *row = gtk_list_box_row_new();
 	g_object_set_qdata_full(G_OBJECT(row), fiv_sidebar_location_quark(),
 		g_object_ref(file), (GDestroyNotify) g_object_unref);
@@ -155,6 +176,8 @@ create_row(FivSidebar *self, GFile *file, const char *icon_name)
 		g_object_ref(self), (GDestroyNotify) g_object_unref);
 	g_signal_connect(revealer, "button-release-event",
 		G_CALLBACK(on_breadcrumb_release), row);
+	g_signal_connect(revealer, "drag-data-get",
+		G_CALLBACK(on_breadcrumb_drag_data_get), row);
 
 	gtk_container_add(GTK_CONTAINER(row), revealer);
 	gtk_widget_show_all(row);
