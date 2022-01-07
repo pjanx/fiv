@@ -7,12 +7,15 @@ add_project_arguments(
 	language : 'c',
 )
 
-if get_option('buildtype').startswith('debug')
-	flags = meson.get_compiler('c').get_supported_arguments(
-		'-fsanitize=address,undefined')
-	add_project_arguments(flags, language : ['c'])
-	add_project_link_arguments(flags, language : ['c'])
-endif
+# This, annoyingly, enables the leak sanitizer by default,
+# which requires some tuning to not stand in the way.
+# Use -Db_sanitize=address,undefined and adjust LSAN_OPTIONS yourself.
+#if get_option('buildtype').startswith('debug')
+#	flags = meson.get_compiler('c').get_supported_arguments(
+#		'-fsanitize=address,undefined')
+#	add_project_arguments(flags, language : ['c'])
+#	add_project_link_arguments(flags, language : ['c'])
+#endif
 
 lcms2 = dependency('lcms2', required : get_option('lcms2'))
 # Note that only libraw_r is thread-safe, but we'll just run it out-of process.
