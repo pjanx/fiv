@@ -1406,12 +1406,16 @@ main(int argc, char *argv[])
 		G_CALLBACK(on_button_press_view), NULL);
 	gtk_container_add(GTK_CONTAINER(view_scroller), g.view);
 
+	// We need to hide it together with the separator.
+	g.view_toolbar = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	gtk_box_pack_start(GTK_BOX(g.view_toolbar),
+		make_view_toolbar(), FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(g.view_toolbar),
+		gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, 0);
+
 	// Need to put the toolbar at the top, because of the horizontal scrollbar.
 	g.view_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-	g.view_toolbar = make_view_toolbar();
 	gtk_box_pack_start(GTK_BOX(g.view_box), g.view_toolbar, FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(g.view_box),
-		gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(g.view_box), view_scroller, TRUE, TRUE, 0);
 
 	g.browser_scroller = gtk_scrolled_window_new(NULL, NULL);
