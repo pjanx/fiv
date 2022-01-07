@@ -133,6 +133,20 @@ on_breadcrumb_drag_data_get(G_GNUC_UNUSED GtkWidget *widget,
 	g_free(*uris);
 }
 
+static void
+on_breadcrumb_drag_begin(G_GNUC_UNUSED GtkWidget *widget,
+	GdkDragContext *context, gpointer user_data)
+{
+	gtk_places_sidebar_set_drop_targets_visible(user_data, TRUE, context);
+}
+
+static void
+on_breadcrumb_drag_end(G_GNUC_UNUSED GtkWidget *widget,
+	GdkDragContext *context, gpointer user_data)
+{
+	gtk_places_sidebar_set_drop_targets_visible(user_data, FALSE, context);
+}
+
 static GtkWidget *
 create_row(FivSidebar *self, GFile *file, const char *icon_name)
 {
@@ -191,6 +205,10 @@ create_row(FivSidebar *self, GFile *file, const char *icon_name)
 		G_CALLBACK(on_breadcrumb_release), row);
 	g_signal_connect(revealer, "drag-data-get",
 		G_CALLBACK(on_breadcrumb_drag_data_get), row);
+	g_signal_connect(revealer, "drag-begin",
+		G_CALLBACK(on_breadcrumb_drag_begin), self->places);
+	g_signal_connect(revealer, "drag-end",
+		G_CALLBACK(on_breadcrumb_drag_end), self->places);
 
 	gtk_container_add(GTK_CONTAINER(row), revealer);
 	gtk_widget_show_all(row);
