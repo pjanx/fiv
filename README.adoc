@@ -1,22 +1,32 @@
 fiv
 ===
 
-'fiv' is an image browser and viewer, supporting BMP, PNG, GIF, JPEG, WebP
-directly, plus optionally raw photos, HEIC, AVIF, SVG, X11 cursors and TIFF,
-or whatever gdk-pixbuf loads.
-
-Its development status can be summarized as '`beta`'.
-E.g., certain GIFs animate wrong.
+'fiv' is a slightly unconventional, general-purpose image browser and viewer.
 
 image::fiv.webp["Screenshot of both the browser and the viewer"]
 
-Non-goals
----------
- - fancy UI--the focus is on speed of use first, colour accuracy second
- - editing--that's what _editors_ are for, be it GIMP or Rawtherapee;
-   nothing beyond the most basic of adjustments is desired
- - memory efficiency, though preloading can cause some pressure
- - portability to non-UNIXy systems
+Features
+--------
+ - Uses a compact thumbnail view, helping you browse collections comfortably.
+ - Supports BMP, (A)PNG, GIF, JPEG, WebP directly, plus optionally raw photos,
+   HEIC, AVIF, SVG, X11 cursors and TIFF, or whatever gdk-pixbuf loads.
+ - Employs high-performance file format libraries: Wuffs and libjpeg-turbo.
+ - Makes use of 30-bit X.org visuals, whenever it's possible and appropriate.
+ - Has a notion of pages, and tries to load all included content within files.
+
+Explicit non-goals
+------------------
+ - Editing--that's what _editors_ are for, be it GIMP or Rawtherapee;
+   nothing beyond the most basic of adjustments is desired.
+ - Following the latest GNOME HIG to the letter--header bars are deliberately
+   avoided, for their general user hostility.
+ - Portability to non-UNIXy systems, although patches are welcome.
+ - Memory efficiency is secondary to both performance and development time.
+
+Aspirations
+-----------
+Show colours as accurately as hardware allows.  Open everything.  Be fast.
+Not necessarily in this order.
 
 Packages
 --------
@@ -36,9 +46,12 @@ gdk-pixbuf-2.0, ExifTool
  $ cd builddir
  $ meson compile
 
-To install the application, you can do:
+Considering the vast amount of dynamically-linked dependencies, do not attempt
+direct installations.  To test the program, help it find its custom thumbnailer:
 
- # meson install
+ $ PATH=$(pwd):$PATH ./fiv
+
+Pressing F1 will give you a convenient list of keyboard shortcuts.
 
 Configuration
 -------------
@@ -48,7 +61,7 @@ _~/.config/gtk-3.0/gtk.css_:
 
  fiv-browser { -FivBrowser-spacing: 0; padding: 0; border: 0; margin: 0; }
 
-The GTK+ inspector will be very helpful, should you want to experiment.
+Should you want to experiment, you will find the GTK+ inspector very helpful.
 
 Contributing and Support
 ------------------------
