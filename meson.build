@@ -83,7 +83,7 @@ if gdkpixbuf.found()
 		dependencies : [dependencies, gdkpixbuf])
 endif
 
-# XXX: With gdk-pixbuf, this even dependens on currently installed modules.
+# XXX: With gdk-pixbuf, this even depends on currently installed modules.
 if meson.is_cross_build()
 	install_data('fiv.desktop',
 		install_dir : get_option('datadir') + '/applications')
@@ -93,7 +93,7 @@ else
 		output : 'fiv.desktop',
 		input : 'fiv.desktop',
 		command : ['sh', '-c', '''awk '/^MimeType=/ { $0 = "MimeType=";
-			while ((exe " --list-supported-media-types" | getline type) > 0)
+			while (((exe " --list-supported-media-types") | getline type) > 0)
 				$0 = $0 type ";" } 1' "exe=$1" "$2"''', 'sh', exe, '@INPUT@'],
 		capture : true,
 		install : true,
