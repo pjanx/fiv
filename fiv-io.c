@@ -2377,15 +2377,10 @@ fiv_io_open_from_data(const char *data, size_t len, const gchar *uri,
 			? open_libjpeg_enhanced(data, len, profile, error)
 			: open_libjpeg_turbo(data, len, profile, error);
 		break;
+	case WUFFS_BASE__FOURCC__WEBP:
+		surface = open_libwebp(data, len, uri, profile, error);
+		break;
 	default:
-		// TODO(p): https://github.com/google/wuffs/commit/4c04ac1
-		if ((surface = open_libwebp(data, len, uri, profile, error)))
-			break;
-		if (error) {
-			g_debug("%s", (*error)->message);
-			g_clear_error(error);
-		}
-
 #ifdef HAVE_LIBRAW  // ---------------------------------------------------------
 		if ((surface = open_libraw(data, len, error)))
 			break;
