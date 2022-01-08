@@ -41,6 +41,17 @@
 // The glow is actually a glowing margin, the border is rendered in two parts.
 //
 
+typedef struct entry Entry;
+typedef struct item Item;
+typedef struct row Row;
+
+typedef struct _Thumbnailer {
+	FivBrowser *self;                   ///< Parent browser
+	Entry *target;                      ///< Currently processed Entry pointer
+	GSubprocess *minion;                ///< A slave for the current queue head
+	GCancellable *cancel;               ///< Cancellable handle
+} Thumbnailer;
+
 struct _FivBrowser {
 	GtkWidget parent_instance;
 
@@ -53,19 +64,15 @@ struct _FivBrowser {
 	GArray *layouted_rows;              ///< []Row
 	int selected;
 
-	GList *thumbnail_queue;             ///< Entry pointers
-	GSubprocess *thumbnailer;           ///< A slave for the current queue head
-	GCancellable *thumbnail_cancel;     ///< Cancellable handle
+	Thumbnailer *thumbnailers;          ///< Parallelized thumbnailers
+	size_t thumbnailers_len;            ///< Thumbnailers array size
+	GList *thumbnailers_queue;          ///< Queued up Entry pointers
 
 	GdkCursor *pointer;                 ///< Cached pointer cursor
 	cairo_surface_t *glow;              ///< CAIRO_FORMAT_A8 mask
 	int item_border_x;                  ///< L/R .item margin + border
 	int item_border_y;                  ///< T/B .item margin + border
 };
-
-typedef struct entry Entry;
-typedef struct item Item;
-typedef struct row Row;
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
@@ -450,9 +457,9 @@ reload_thumbnails(FivBrowser *self)
 	gtk_widget_queue_resize(GTK_WIDGET(self));
 }
 
-// --- Slave management --------------------------------------------------------
+// --- Minion management -------------------------------------------------------
 
-static void thumbnailer_next(FivBrowser *self);
+static gboolean thumbnailer_next(Thumbnailer *thumbnailer);
 
 static void
 thumbnailer_reprocess_entry(FivBrowser *self, Entry *entry)
@@ -466,7 +473,8 @@ static void
 on_thumbnailer_ready(GObject *object, GAsyncResult *res, gpointer user_data)
 {
 	GSubprocess *subprocess = G_SUBPROCESS(object);
-	FivBrowser *self = FIV_BROWSER(user_data);
+	Thumbnailer *thumbnailer = user_data;
+
 	GError *error = NULL;
 	if (!g_subprocess_wait_check_finish(subprocess, res, &error)) {
 		if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
@@ -479,67 +487,78 @@ on_thumbnailer_ready(GObject *object, GAsyncResult *res, gpointer user_data)
 		g_error_free(error);
 	}
 
+	g_return_if_fail(subprocess == thumbnailer->minion);
+
 	gboolean succeeded = g_subprocess_get_if_exited(subprocess) &&
 		g_subprocess_get_exit_status(subprocess) == EXIT_SUCCESS;
-	g_clear_object(&self->thumbnailer);
-	if (!self->thumbnail_queue) {
+	g_clear_object(&thumbnailer->minion);
+	if (!thumbnailer->target) {
 		g_warning("finished thumbnailing an unknown image");
 		return;
 	}
 
-	Entry *entry = self->thumbnail_queue->data;
-	self->thumbnail_queue =
-		g_list_delete_link(self->thumbnail_queue, self->thumbnail_queue);
 	if (succeeded)
-		thumbnailer_reprocess_entry(self, entry);
+		thumbnailer_reprocess_entry(thumbnailer->self, thumbnailer->target);
 
-	thumbnailer_next(self);
+	thumbnailer->target = NULL;
+	thumbnailer_next(thumbnailer);
 }
 
-static void
-thumbnailer_next(FivBrowser *self)
+static gboolean
+thumbnailer_next(Thumbnailer *thumbnailer)
 {
-	// TODO(p): At least launch multiple thumbnailers in parallel.
-	// Ideally, try to keep them alive.
-	GList *link = self->thumbnail_queue;
+	// TODO(p): Ideally, try to keep the minions alive.
+	FivBrowser *self = thumbnailer->self;
+	GList *link = self->thumbnailers_queue;
 	if (!link)
-		return;
+		return FALSE;
 
-	const Entry *entry = link->data;
+	thumbnailer->target = link->data;
+	self->thumbnailers_queue =
+		g_list_delete_link(self->thumbnailers_queue, self->thumbnailers_queue);
+
 	GError *error = NULL;
-	self->thumbnailer = g_subprocess_new(G_SUBPROCESS_FLAGS_NONE, &error,
+	thumbnailer->minion = g_subprocess_new(G_SUBPROCESS_FLAGS_NONE, &error,
 		PROJECT_NAME, "--thumbnail",
 		fiv_thumbnail_sizes[self->item_size].thumbnail_spec_name, "--",
-		entry->uri, NULL);
+		thumbnailer->target->uri, NULL);
 	if (error) {
 		g_warning("%s", error->message);
 		g_error_free(error);
-		return;
+		return FALSE;
 	}
 
-	self->thumbnail_cancel = g_cancellable_new();
-	g_subprocess_wait_check_async(
-		self->thumbnailer, self->thumbnail_cancel, on_thumbnailer_ready, self);
+	thumbnailer->cancel = g_cancellable_new();
+	g_subprocess_wait_check_async(thumbnailer->minion, thumbnailer->cancel,
+		on_thumbnailer_ready, thumbnailer);
+	return TRUE;
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+static void
+thumbnailers_abort(FivBrowser *self)
+{
+	g_list_free(self->thumbnailers_queue);
+	self->thumbnailers_queue = NULL;
+
+	for (size_t i = 0; i < self->thumbnailers_len; i++) {
+		Thumbnailer *thumbnailer = self->thumbnailers + i;
+		if (thumbnailer->cancel) {
+			g_cancellable_cancel(thumbnailer->cancel);
+			g_clear_object(&thumbnailer->cancel);
+		}
+
+		// Just let them exit on their own.
+		g_clear_object(&thumbnailer->minion);
+		thumbnailer->target = NULL;
+	}
 }
 
 static void
-thumbnailer_abort(FivBrowser *self)
+thumbnailers_start(FivBrowser *self)
 {
-	if (self->thumbnail_cancel) {
-		g_cancellable_cancel(self->thumbnail_cancel);
-		g_clear_object(&self->thumbnail_cancel);
-	}
-
-	// Just let it exit on its own.
-	g_clear_object(&self->thumbnailer);
-	g_list_free(self->thumbnail_queue);
-	self->thumbnail_queue = NULL;
-}
-
-static void
-thumbnailer_start(FivBrowser *self)
-{
-	thumbnailer_abort(self);
+	thumbnailers_abort(self);
 
 	// TODO(p): Leave out all paths containing .cache/thumbnails altogether.
 	gchar *thumbnails_dir = fiv_thumbnail_get_root();
@@ -562,8 +581,11 @@ thumbnailer_start(FivBrowser *self)
 			lq = g_list_prepend(lq, entry);
 	}
 
-	self->thumbnail_queue = g_list_concat(missing, lq);
-	thumbnailer_next(self);
+	self->thumbnailers_queue = g_list_concat(missing, lq);
+	for (size_t i = 0; i < self->thumbnailers_len; i++) {
+		if (!thumbnailer_next(self->thumbnailers + i))
+			break;
+	}
 }
 
 // --- Context menu-------------------------------------------------------------
@@ -750,7 +772,7 @@ static void
 fiv_browser_finalize(GObject *gobject)
 {
 	FivBrowser *self = FIV_BROWSER(gobject);
-	thumbnailer_abort(self);
+	thumbnailers_abort(self);
 	g_array_free(self->entries, TRUE);
 	g_array_free(self->layouted_rows, TRUE);
 	if (self->model) {
@@ -1146,9 +1168,15 @@ fiv_browser_init(FivBrowser *self)
 	g_array_set_clear_func(self->entries, (GDestroyNotify) entry_free);
 	self->layouted_rows = g_array_new(FALSE, TRUE, sizeof(Row));
 	g_array_set_clear_func(self->layouted_rows, (GDestroyNotify) row_free);
+	self->selected = -1;
+
+	self->thumbnailers_len = g_get_num_processors();
+	self->thumbnailers =
+		g_malloc0_n(self->thumbnailers_len, sizeof *self->thumbnailers);
+	for (size_t i = 0; i < self->thumbnailers_len; i++)
+		self->thumbnailers[i].self = self;
 
 	set_item_size(self, FIV_THUMBNAIL_SIZE_NORMAL);
-	self->selected = -1;
 	self->glow = cairo_image_surface_create(CAIRO_FORMAT_A1, 0, 0);
 
 	g_signal_connect_swapped(gtk_settings_get_default(),
@@ -1163,7 +1191,7 @@ on_model_files_changed(FivIoModel *model, FivBrowser *self)
 	g_return_if_fail(model == self->model);
 
 	// TODO(p): Later implement arguments.
-	thumbnailer_abort(self);
+	thumbnailers_abort(self);
 	g_array_set_size(self->entries, 0);
 	g_array_set_size(self->layouted_rows, 0);
 
@@ -1176,7 +1204,7 @@ on_model_files_changed(FivIoModel *model, FivBrowser *self)
 	g_ptr_array_free(files, TRUE);
 
 	reload_thumbnails(self);
-	thumbnailer_start(self);
+	thumbnailers_start(self);
 }
 
 GtkWidget *
