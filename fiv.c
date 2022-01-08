@@ -888,6 +888,7 @@ static gboolean
 on_key_press_browser_paned(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 	G_GNUC_UNUSED gpointer data)
 {
+	// TODO(p): Consider replicating more GtkFileChooserWidget bindings.
 	switch (event->state & gtk_accelerator_get_default_mod_mask()) {
 	case GDK_MOD1_MASK:
 		switch (event->keyval) {
@@ -1451,9 +1452,7 @@ main(int argc, char *argv[])
 	gtk_container_set_focus_hadjustment(GTK_CONTAINER(browser_port), NULL);
 	gtk_container_set_focus_vadjustment(GTK_CONTAINER(browser_port), NULL);
 
-	// TODO(p): Mayhaps forward some key presses to the sidebar, somehow.
 	g.browser_sidebar = make_browser_sidebar(g.model);
-
 	g.browser_paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
 	gtk_paned_add1(GTK_PANED(g.browser_paned), g.browser_sidebar);
 	gtk_paned_add2(GTK_PANED(g.browser_paned), g.browser_scroller);
@@ -1467,10 +1466,7 @@ main(int argc, char *argv[])
 		GTK_STACK(g.stack), GTK_STACK_TRANSITION_TYPE_NONE);
 	gtk_container_add(GTK_CONTAINER(g.stack), g.view_box);
 	gtk_container_add(GTK_CONTAINER(g.stack), g.browser_paned);
-
-	// TODO(p): Can we not do it here separately?
-	gtk_widget_show_all(g.view_box);
-	gtk_widget_show_all(g.browser_paned);
+	gtk_widget_show_all(g.stack);
 
 	g.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	g_signal_connect(g.window, "destroy",
