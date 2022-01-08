@@ -564,10 +564,17 @@ load_wuffs_frame(struct load_wuffs_frame_context *ctx, GError **error)
 		return false;
 	}
 
+	// Wuffs' test/data/animated-red-blue.gif, e.g., needs this handling.
+	cairo_format_t decode_format = ctx->cairo_format;
+	if (wuffs_base__frame_config__index(&fc) > 0 &&
+		wuffs_base__pixel_config__pixel_format(&ctx->cfg.pixcfg).repr ==
+			WUFFS_BASE__PIXEL_FORMAT__BGRA_NONPREMUL)
+		decode_format = CAIRO_FORMAT_ARGB32;
+
 	bool success = false;
 	unsigned char *targetbuf = NULL;
 	cairo_surface_t *surface =
-		cairo_image_surface_create(ctx->cairo_format, ctx->width, ctx->height);
+		cairo_image_surface_create(decode_format, ctx->width, ctx->height);
 	cairo_status_t surface_status = cairo_surface_status(surface);
 	if (surface_status != CAIRO_STATUS_SUCCESS) {
 		set_error(error, cairo_status_to_string(surface_status));
@@ -659,6 +666,7 @@ load_wuffs_frame(struct load_wuffs_frame_context *ctx, GError **error)
 		cairo_surface_mark_dirty(canvas);
 
 		// Apply that frame's disposal method.
+		// XXX: We do not expect opaque pictures to receive holes this way.
 		wuffs_base__rect_ie_u32 bounds =
 			wuffs_base__frame_config__bounds(&ctx->last_fc);
 		// TODO(p): This field needs to be colour-managed.
@@ -685,6 +693,8 @@ load_wuffs_frame(struct load_wuffs_frame_context *ctx, GError **error)
 		case WUFFS_BASE__ANIMATION_DISPOSAL__RESTORE_PREVIOUS:
 			// TODO(p): Implement, it seems tricky.
 			// Might need another surface to keep track of the state.
+			break;
+		case WUFFS_BASE__ANIMATION_DISPOSAL__NONE:
 			break;
 		}
 
@@ -844,8 +854,6 @@ open_wuffs(wuffs_base__image_decoder *dec, wuffs_base__io_buffer src,
 
 	// Wuffs maps tRNS to BGRA in `decoder.decode_trns?`, we should be fine.
 	// wuffs_base__pixel_format__transparency() doesn't reflect the image file.
-	// TODO(p): See if wuffs_base__image_config__first_frame_is_opaque() causes
-	// issues with animations, and eventually ensure an alpha-capable format.
 	bool opaque = wuffs_base__image_config__first_frame_is_opaque(&ctx.cfg);
 
 	// Wuffs' API is kind of awful--we want to catch wide RGB and wide grey.
@@ -886,6 +894,8 @@ open_wuffs(wuffs_base__image_decoder *dec, wuffs_base__io_buffer src,
 		ctx.cairo_format = CAIRO_FORMAT_RGB30;
 	} else if (opaque) {
 		// BGRX doesn't have as wide swizzler support, namely in GIF.
+		// Moreover, follower frames may still be partly transparent.
+		// Therefore, we choose to keep "wuffs_format" intact.
 		ctx.cairo_format = CAIRO_FORMAT_RGB24;
 	} else if (!ctx.target) {
 		wuffs_format = WUFFS_BASE__PIXEL_FORMAT__BGRA_PREMUL;
