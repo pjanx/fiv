@@ -817,22 +817,6 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 			else if (g.uri)
 				switch_to_view();
 			return TRUE;
-		case GDK_KEY_Up:
-			if (gtk_stack_get_visible_child(GTK_STACK(g.stack)) != g.view_box) {
-				GFile *directory = g_file_new_for_uri(g.directory);
-				gchar *parent = parent_uri(directory);
-				g_object_unref(directory);
-				load_directory(parent);
-				g_free(parent);
-			}
-			return TRUE;
-		case GDK_KEY_Home:
-			if (gtk_stack_get_visible_child(GTK_STACK(g.stack)) != g.view_box) {
-				gchar *uri = g_filename_to_uri(g_get_home_dir(), NULL, NULL);
-				load_directory(uri);
-				g_free(uri);
-			}
-			return TRUE;
 		}
 		break;
 	case 0:
@@ -842,9 +826,6 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 			gtk_widget_destroy(g.window);
 			return TRUE;
 
-		case GDK_KEY_h:
-			gtk_button_clicked(GTK_BUTTON(g.funnel));
-			return TRUE;
 		case GDK_KEY_o:
 			on_open();
 			return TRUE;
@@ -899,7 +880,39 @@ on_key_press_view(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 			switch_to_browser();
 			return TRUE;
 		}
+	}
+	return FALSE;
+}
+
+static gboolean
+on_key_press_browser_paned(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
+	G_GNUC_UNUSED gpointer data)
+{
+	switch (event->state & gtk_accelerator_get_default_mod_mask()) {
+	case GDK_MOD1_MASK:
+		switch (event->keyval) {
+		case GDK_KEY_Up: {
+			GFile *directory = g_file_new_for_uri(g.directory);
+			gchar *parent = parent_uri(directory);
+			g_object_unref(directory);
+			load_directory(parent);
+			g_free(parent);
+			return TRUE;
+		}
+		case GDK_KEY_Home: {
+			gchar *uri = g_filename_to_uri(g_get_home_dir(), NULL, NULL);
+			load_directory(uri);
+			g_free(uri);
+			return TRUE;
+		}
+		}
 		break;
+	case 0:
+		switch (event->keyval) {
+		case GDK_KEY_h:
+			gtk_button_clicked(GTK_BUTTON(g.funnel));
+			return TRUE;
+		}
 	}
 	return FALSE;
 }
@@ -1444,6 +1457,8 @@ main(int argc, char *argv[])
 	g.browser_paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
 	gtk_paned_add1(GTK_PANED(g.browser_paned), g.browser_sidebar);
 	gtk_paned_add2(GTK_PANED(g.browser_paned), g.browser_scroller);
+	g_signal_connect(g.browser_paned, "key-press-event",
+		G_CALLBACK(on_key_press_browser_paned), NULL);
 	g_signal_connect(g.browser_paned, "button-press-event",
 		G_CALLBACK(on_button_press_browser_paned), NULL);
 
