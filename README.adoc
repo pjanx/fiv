@@ -61,6 +61,12 @@ _~/.config/gtk-3.0/gtk.css_:
 
  fiv-browser { -FivBrowser-spacing: 0; padding: 0; border: 0; margin: 0; }
 
+Similarly, you can adjust some of the key bindings, as per the command table
+in link:fiv-view.h[]:
+
+ @binding-set ViewBindings { bind 'p' { 'command' (print) }; }
+ fiv-view { -gtk-key-bindings: ViewBindings; }
+
 Should you want to experiment, you will find the GTK+ inspector very helpful.
 
 Contributing and Support

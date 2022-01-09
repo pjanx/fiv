@@ -31,6 +31,23 @@
 #include <gdk/gdkquartz.h>
 #endif  // GDK_WINDOWING_QUARTZ
 
+GType
+fiv_view_command_get_type(void)
+{
+	static gsize guard;
+	if (g_once_init_enter(&guard)) {
+#define XX(constant, name) {constant, #constant, name},
+		static const GEnumValue values[] = {FIV_VIEW_COMMANDS(XX) {}};
+#undef XX
+		GType type = g_enum_register_static(
+			g_intern_static_string("FivViewCommand"), values);
+		g_once_init_leave(&guard, type);
+	}
+	return guard;
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
 struct _FivView {
 	GtkWidget parent_instance;
 	gchar *uri;                         ///< Path to the current image (if any)
@@ -111,6 +128,14 @@ enum {
 };
 
 static GParamSpec *view_properties[N_PROPERTIES];
+
+enum {
+	COMMAND,
+	LAST_SIGNAL
+};
+
+// Globals are, sadly, the canonical way of storing signal numbers.
+static guint view_signals[LAST_SIGNAL];
 
 static void
 fiv_view_finalize(GObject *gobject)
@@ -478,26 +503,24 @@ set_scale(FivView *self, double scale)
 	return set_scale_to_fit(self, false);
 }
 
-static gboolean
+static void
 set_scale_to_fit_width(FivView *self)
 {
 	double w = get_surface_dimensions(self).width;
 	int allocated = gtk_widget_get_allocated_width(
 		gtk_widget_get_parent(GTK_WIDGET(self)));
 	if (ceil(w * self->scale) > allocated)
-		return set_scale(self, allocated / w);
-	return TRUE;
+		set_scale(self, allocated / w);
 }
 
-static gboolean
+static void
 set_scale_to_fit_height(FivView *self)
 {
 	double h = get_surface_dimensions(self).height;
 	int allocated = gtk_widget_get_allocated_height(
 		gtk_widget_get_parent(GTK_WIDGET(self)));
 	if (ceil(h * self->scale) > allocated)
-		return set_scale(self, allocated / h);
-	return TRUE;
+		set_scale(self, allocated / h);
 }
 
 static gboolean
@@ -951,102 +974,27 @@ info(FivView *self)
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-static inline gboolean
-command(FivView *self, FivViewCommand command)
-{
-	fiv_view_command(self, command);
-	return TRUE;
-}
-
 static gboolean
 fiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 {
 	FivView *self = FIV_VIEW(widget);
-	if (!self->image)
-		return FALSE;
 
-	// It should not matter that GDK_KEY_plus involves holding Shift.
-	guint state = event->state & gtk_accelerator_get_default_mod_mask() &
-		~GDK_SHIFT_MASK;
-
-	// The standard, intuitive bindings.
-	if (state == GDK_CONTROL_MASK) {
-		switch (event->keyval) {
-		case GDK_KEY_0:
-			return command(self, FIV_VIEW_COMMAND_ZOOM_1);
-		case GDK_KEY_plus:
-			return command(self, FIV_VIEW_COMMAND_ZOOM_IN);
-		case GDK_KEY_minus:
-			return command(self, FIV_VIEW_COMMAND_ZOOM_OUT);
-		case GDK_KEY_p:
-			return command(self, FIV_VIEW_COMMAND_PRINT);
-		case GDK_KEY_s:
-			return command(self, FIV_VIEW_COMMAND_SAVE_PAGE);
-		case GDK_KEY_S:
-			return save_as(self, self->frame);
-		}
-	}
-	if (state == GDK_MOD1_MASK) {
-		switch (event->keyval) {
-		case GDK_KEY_Return:
-			return command(self, FIV_VIEW_COMMAND_INFO);
-		}
-	}
-	if (state != 0)
-		return FALSE;
-
-	switch (event->keyval) {
-	case GDK_KEY_1:
-	case GDK_KEY_2:
-	case GDK_KEY_3:
-	case GDK_KEY_4:
-	case GDK_KEY_5:
-	case GDK_KEY_6:
-	case GDK_KEY_7:
-	case GDK_KEY_8:
-	case GDK_KEY_9:
+	// So far, our commands cannot accept arguments, so these few are hardcoded.
+	if (self->image &&
+		!(event->state & gtk_accelerator_get_default_mod_mask()) &&
+		event->keyval >= GDK_KEY_1 && event->keyval <= GDK_KEY_9)
 		return set_scale(self, event->keyval - GDK_KEY_0);
-	case GDK_KEY_plus:
-		return command(self, FIV_VIEW_COMMAND_ZOOM_IN);
-	case GDK_KEY_minus:
-		return command(self, FIV_VIEW_COMMAND_ZOOM_OUT);
 
-	case GDK_KEY_w:
-		return set_scale_to_fit_width(self);
-	case GDK_KEY_h:
-		return set_scale_to_fit_height(self);
+	return GTK_WIDGET_CLASS(fiv_view_parent_class)
+		->key_press_event(widget, event);
+}
 
-	case GDK_KEY_c:
-		return command(self, FIV_VIEW_COMMAND_TOGGLE_CMS);
-	case GDK_KEY_x:  // Inspired by gThumb, which has more such modes.
-		return command(self, FIV_VIEW_COMMAND_TOGGLE_SCALE_TO_FIT);
-	case GDK_KEY_i:
-		return command(self, FIV_VIEW_COMMAND_TOGGLE_FILTER);
-	case GDK_KEY_t:
-		return command(self, FIV_VIEW_COMMAND_TOGGLE_CHECKERBOARD);
-	case GDK_KEY_e:
-		return command(self, FIV_VIEW_COMMAND_TOGGLE_ENHANCE);
-
-	case GDK_KEY_less:
-		return command(self, FIV_VIEW_COMMAND_ROTATE_LEFT);
-	case GDK_KEY_equal:
-		return command(self, FIV_VIEW_COMMAND_MIRROR);
-	case GDK_KEY_greater:
-		return command(self, FIV_VIEW_COMMAND_ROTATE_RIGHT);
-
-	case GDK_KEY_bracketleft:
-		return command(self, FIV_VIEW_COMMAND_PAGE_PREVIOUS);
-	case GDK_KEY_bracketright:
-		return command(self, FIV_VIEW_COMMAND_PAGE_NEXT);
-
-	case GDK_KEY_braceleft:
-		return command(self, FIV_VIEW_COMMAND_FRAME_PREVIOUS);
-	case GDK_KEY_braceright:
-		return command(self, FIV_VIEW_COMMAND_FRAME_NEXT);
-	case GDK_KEY_space:
-		return command(self, FIV_VIEW_COMMAND_TOGGLE_PLAYBACK);
-	}
-	return FALSE;
+static void
+bind(GtkBindingSet *bs, guint keyval, GdkModifierType modifiers,
+	FivViewCommand command)
+{
+	gtk_binding_entry_add_signal(
+		bs, keyval, modifiers, "command", 1, FIV_TYPE_VIEW_COMMAND, command);
 }
 
 static void
@@ -1093,6 +1041,11 @@ fiv_view_class_init(FivViewClass *klass)
 	g_object_class_install_properties(
 		object_class, N_PROPERTIES, view_properties);
 
+	view_signals[COMMAND] =
+		g_signal_new_class_handler("command", G_TYPE_FROM_CLASS(klass),
+			G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, G_CALLBACK(fiv_view_command),
+			NULL, NULL, NULL, G_TYPE_NONE, 1, FIV_TYPE_VIEW_COMMAND);
+
 	GtkWidgetClass *widget_class = GTK_WIDGET_CLASS(klass);
 	widget_class->get_preferred_height = fiv_view_get_preferred_height;
 	widget_class->get_preferred_width = fiv_view_get_preferred_width;
@@ -1104,6 +1057,37 @@ fiv_view_class_init(FivViewClass *klass)
 	widget_class->button_press_event = fiv_view_button_press_event;
 	widget_class->scroll_event = fiv_view_scroll_event;
 	widget_class->key_press_event = fiv_view_key_press_event;
+
+	GtkBindingSet *bs = gtk_binding_set_by_class(klass);
+	// First, the standard, intuitive bindings.
+	bind(bs, GDK_KEY_0,      GDK_CONTROL_MASK, FIV_VIEW_COMMAND_ZOOM_1);
+	bind(bs, GDK_KEY_plus,   GDK_CONTROL_MASK, FIV_VIEW_COMMAND_ZOOM_IN);
+	bind(bs, GDK_KEY_minus,  GDK_CONTROL_MASK, FIV_VIEW_COMMAND_ZOOM_OUT);
+	bind(bs, GDK_KEY_p,      GDK_CONTROL_MASK, FIV_VIEW_COMMAND_PRINT);
+	bind(bs, GDK_KEY_s,      GDK_CONTROL_MASK, FIV_VIEW_COMMAND_SAVE_PAGE);
+	bind(bs, GDK_KEY_s,      GDK_MOD1_MASK,    FIV_VIEW_COMMAND_SAVE_FRAME);
+	bind(bs, GDK_KEY_Return, GDK_MOD1_MASK,    FIV_VIEW_COMMAND_INFO);
+
+	// The scale-to-fit binding is from gThumb, which has more such modes.
+	bind(bs, GDK_KEY_plus,         0, FIV_VIEW_COMMAND_ZOOM_IN);
+	bind(bs, GDK_KEY_minus,        0, FIV_VIEW_COMMAND_ZOOM_OUT);
+	bind(bs, GDK_KEY_w,            0, FIV_VIEW_COMMAND_FIT_WIDTH);
+	bind(bs, GDK_KEY_h,            0, FIV_VIEW_COMMAND_FIT_HEIGHT);
+	bind(bs, GDK_KEY_x,            0, FIV_VIEW_COMMAND_TOGGLE_SCALE_TO_FIT);
+	bind(bs, GDK_KEY_c,            0, FIV_VIEW_COMMAND_TOGGLE_CMS);
+	bind(bs, GDK_KEY_i,            0, FIV_VIEW_COMMAND_TOGGLE_FILTER);
+	bind(bs, GDK_KEY_t,            0, FIV_VIEW_COMMAND_TOGGLE_CHECKERBOARD);
+	bind(bs, GDK_KEY_e,            0, FIV_VIEW_COMMAND_TOGGLE_ENHANCE);
+
+	bind(bs, GDK_KEY_less,         0, FIV_VIEW_COMMAND_ROTATE_LEFT);
+	bind(bs, GDK_KEY_equal,        0, FIV_VIEW_COMMAND_MIRROR);
+	bind(bs, GDK_KEY_greater,      0, FIV_VIEW_COMMAND_ROTATE_RIGHT);
+
+	bind(bs, GDK_KEY_bracketleft,  0, FIV_VIEW_COMMAND_PAGE_PREVIOUS);
+	bind(bs, GDK_KEY_bracketright, 0, FIV_VIEW_COMMAND_PAGE_NEXT);
+	bind(bs, GDK_KEY_braceleft,    0, FIV_VIEW_COMMAND_FRAME_PREVIOUS);
+	bind(bs, GDK_KEY_braceright,   0, FIV_VIEW_COMMAND_FRAME_NEXT);
+	bind(bs, GDK_KEY_space,        0, FIV_VIEW_COMMAND_TOGGLE_PLAYBACK);
 
 	// TODO(p): Later override "screen_changed", recreate Pango layouts there,
 	// if we get to have any, or otherwise reflect DPI changes.
@@ -1277,6 +1261,8 @@ fiv_view_command(FivView *self, FivViewCommand command)
 		print(self);
 	break; case FIV_VIEW_COMMAND_SAVE_PAGE:
 		save_as(self, NULL);
+	break; case FIV_VIEW_COMMAND_SAVE_FRAME:
+		save_as(self, self->frame);
 	break; case FIV_VIEW_COMMAND_INFO:
 		info(self);
 
@@ -1286,6 +1272,10 @@ fiv_view_command(FivView *self, FivViewCommand command)
 		set_scale(self, self->scale / SCALE_STEP);
 	break; case FIV_VIEW_COMMAND_ZOOM_1:
 		set_scale(self, 1.0);
+	break; case FIV_VIEW_COMMAND_FIT_WIDTH:
+		set_scale_to_fit_width(self);
+	break; case FIV_VIEW_COMMAND_FIT_HEIGHT:
+		set_scale_to_fit_height(self);
 	break; case FIV_VIEW_COMMAND_TOGGLE_SCALE_TO_FIT:
 		set_scale_to_fit(self, !self->scale_to_fit);
 	}

@@ -25,35 +25,46 @@ G_DECLARE_FINAL_TYPE(FivView, fiv_view, FIV, VIEW, GtkWidget)
 /// Try to open the given file, synchronously, to be displayed by the widget.
 gboolean fiv_view_open(FivView *self, const gchar *uri, GError **error);
 
+// And this is how you avoid glib-mkenums.
 typedef enum _FivViewCommand {
-	FIV_VIEW_COMMAND_ROTATE_LEFT = 1,
-	FIV_VIEW_COMMAND_MIRROR,
-	FIV_VIEW_COMMAND_ROTATE_RIGHT,
-
-	FIV_VIEW_COMMAND_PAGE_FIRST,
-	FIV_VIEW_COMMAND_PAGE_PREVIOUS,
-	FIV_VIEW_COMMAND_PAGE_NEXT,
-	FIV_VIEW_COMMAND_PAGE_LAST,
-
-	FIV_VIEW_COMMAND_FRAME_FIRST,
-	FIV_VIEW_COMMAND_FRAME_PREVIOUS,
-	FIV_VIEW_COMMAND_FRAME_NEXT,
-	// Going to the end frame makes no sense, wrap around if needed.
-	FIV_VIEW_COMMAND_TOGGLE_PLAYBACK,
-
-	FIV_VIEW_COMMAND_TOGGLE_CMS,
-	FIV_VIEW_COMMAND_TOGGLE_FILTER,
-	FIV_VIEW_COMMAND_TOGGLE_CHECKERBOARD,
-	FIV_VIEW_COMMAND_TOGGLE_ENHANCE,
-	FIV_VIEW_COMMAND_PRINT,
-	FIV_VIEW_COMMAND_SAVE_PAGE,
-	FIV_VIEW_COMMAND_INFO,
-
-	FIV_VIEW_COMMAND_ZOOM_IN,
-	FIV_VIEW_COMMAND_ZOOM_OUT,
-	FIV_VIEW_COMMAND_ZOOM_1,
-	FIV_VIEW_COMMAND_TOGGLE_SCALE_TO_FIT,
+#define FIV_VIEW_COMMANDS(XX)                                                  \
+	XX(FIV_VIEW_COMMAND_ROTATE_LEFT,         "rotate-left")                    \
+	XX(FIV_VIEW_COMMAND_MIRROR,              "mirror")                         \
+	XX(FIV_VIEW_COMMAND_ROTATE_RIGHT,        "rotate-right")                   \
+	\
+	XX(FIV_VIEW_COMMAND_PAGE_FIRST,          "page-first")                     \
+	XX(FIV_VIEW_COMMAND_PAGE_PREVIOUS,       "page-previous")                  \
+	XX(FIV_VIEW_COMMAND_PAGE_NEXT,           "page-next")                      \
+	XX(FIV_VIEW_COMMAND_PAGE_LAST,           "page-last")                      \
+	\
+	XX(FIV_VIEW_COMMAND_FRAME_FIRST,         "frame-first")                    \
+	XX(FIV_VIEW_COMMAND_FRAME_PREVIOUS,      "frame-previous")                 \
+	XX(FIV_VIEW_COMMAND_FRAME_NEXT,          "frame-next")                     \
+	/* Going to the end frame makes no sense, wrap around if needed. */        \
+	XX(FIV_VIEW_COMMAND_TOGGLE_PLAYBACK,     "toggle-playback")                \
+	\
+	XX(FIV_VIEW_COMMAND_TOGGLE_CMS,          "toggle-cms")                     \
+	XX(FIV_VIEW_COMMAND_TOGGLE_FILTER,       "toggle-filter")                  \
+	XX(FIV_VIEW_COMMAND_TOGGLE_CHECKERBOARD, "toggle-checkerboard")            \
+	XX(FIV_VIEW_COMMAND_TOGGLE_ENHANCE,      "toggle-enhance")                 \
+	XX(FIV_VIEW_COMMAND_PRINT,               "print")                          \
+	XX(FIV_VIEW_COMMAND_SAVE_PAGE,           "save-page")                      \
+	XX(FIV_VIEW_COMMAND_SAVE_FRAME,          "save-frame")                     \
+	XX(FIV_VIEW_COMMAND_INFO,                "info")                           \
+	\
+	XX(FIV_VIEW_COMMAND_ZOOM_IN,             "zoom-in")                        \
+	XX(FIV_VIEW_COMMAND_ZOOM_OUT,            "zoom-out")                       \
+	XX(FIV_VIEW_COMMAND_ZOOM_1,              "zoom-1")                         \
+	XX(FIV_VIEW_COMMAND_FIT_WIDTH,           "fit-width")                      \
+	XX(FIV_VIEW_COMMAND_FIT_HEIGHT,          "fit-height")                     \
+	XX(FIV_VIEW_COMMAND_TOGGLE_SCALE_TO_FIT, "toggle-scale-to-fit")
+#define XX(constant, name) constant,
+	FIV_VIEW_COMMANDS(XX)
+#undef XX
 } FivViewCommand;
+
+GType fiv_view_command_get_type(void) G_GNUC_CONST;
+#define FIV_TYPE_VIEW_COMMAND (fiv_view_command_get_type())
 
 /// Execute a user action.
 void fiv_view_command(FivView *self, FivViewCommand command);
