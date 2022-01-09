@@ -4,40 +4,19 @@
    xmlns="http://www.w3.org/2000/svg"
    xmlns:svg="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="base-background" x1="0" y1="0" x2="1" y2="1">
-      <stop stop-color="#ffffff" offset="0.1" />
-      <stop stop-color="#7f7f7f" offset="1" />
+    <linearGradient id="v" x1="0" y1="1" x2="0" y2="0">
+      <stop stop-color="#f60" offset="0" />
+      <stop stop-color="#fa0" offset="1" />
     </linearGradient>
-    <linearGradient id="i-background">
-      <stop stop-color="#e0e0e0" offset="0" />
-      <stop stop-color="#ffffff" offset="1" />
-    </linearGradient>
-    <linearGradient id="red-background" x1="0" y1="0" x2="0" y2="1">
-      <stop stop-color="#ff9b9b" offset="0" />
-      <stop stop-color="#ffffff" offset="0.8" />
-    </linearGradient>
-    <linearGradient id="green-background" x1="0" y1="0" x2="0" y2="1">
-      <stop stop-color="#98ff98" offset="0" />
-      <stop stop-color="#ffffff" offset="0.8" />
-    </linearGradient>
-    <linearGradient id="blue-background" x1="0" y1="0" x2="0" y2="1">
-      <stop stop-color="#9999ff" offset="0" />
-      <stop stop-color="#ffffff" offset="0.8" />
-    </linearGradient>
+    <filter id="shadow" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0.5" flood-color="#000" />
+      <feComposite in2="SourceGraphic" operator="out" />
+      <feGaussianBlur stdDeviation="1.4" />
+      <feOffset dx="1.4" dy="1.4" />
+      <feComposite in2="SourceGraphic" operator="atop" />
+    </filter>
   </defs>
-  <rect x="1" y="1" width="46" height="46" ry="5"
-     style="fill: url(#base-background)" stroke="#bfbfbf" stroke-width="2" />
-  <circle cx="13.5" cy="12" r="4"
-     style="fill: url(#i-background)" stroke="#000000" stroke-width="2" />
-  <path d="m 9.75,24 0,13 a 3.5 3.5 180 0 0 7.5,0 l 0,-13 a 3.5 3.5 180 0 0 -7.5,0 z"
-     style="fill: url(#i-background)" stroke="#000000" stroke-width="2" />
-  <path d="m 22,8.25 6,0 3,3 3,-3 6,0 -9,10 z"
-     style="fill: url(#red-background)" stroke="#000000" stroke-width="2"
-     stroke-linejoin="round" />
-  <path d="m 22,19.5 6,0 3,3 3,-3 6,0 -9,10 z"
-     style="fill: url(#green-background)" stroke="#000000" stroke-width="2"
-     stroke-linejoin="round" />
-  <path d="m 22,30.75 6,0 3,3 3,-3 6,0 -9,10 z"
-     style="fill: url(#blue-background)" stroke="#000000" stroke-width="2"
-     stroke-linejoin="round" />
+  <path fill="url(#v)" d="m 2,7 h 44 l -17,39 h -10 z" />
+  <path d="M 12.5,20.5 h -4 v 5 h 4 v 15 h 9 v -15 h 2 v -5 h -2 v -8 c 0,-4 5,-4 5,0 c 0,6 9,6 9,0 c 0,-12 -23,-12 -23,0 z M 26.5,20.5 h 9 v 20 h -9 z"
+     fill="#fff" stroke="#000" stroke-width="1" filter="url(#shadow)" />
 </svg>
