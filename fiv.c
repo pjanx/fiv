@@ -227,9 +227,9 @@ make_key_window(void)
 	XX(PLAY_PAUSE,    B("media-playback-start-symbolic", "Pause")) \
 	XX(SEEK_FORWARD,  B("media-seek-forward-symbolic", "Next frame")) \
 	XX(S3,            gtk_separator_new(GTK_ORIENTATION_HORIZONTAL)) \
-	XX(PLUS,          B("zoom-in-symbolic", "Zoom in")) \
-	XX(SCALE,         gtk_label_new("")) \
 	XX(MINUS,         B("zoom-out-symbolic", "Zoom out")) \
+	XX(SCALE,         gtk_label_new("")) \
+	XX(PLUS,          B("zoom-in-symbolic", "Zoom in")) \
 	XX(ONE,           B("zoom-original-symbolic", "Original size")) \
 	XX(FIT,           T("zoom-fit-best-symbolic", "Scale to fit")) \
 	XX(S4,            gtk_separator_new(GTK_ORIENTATION_HORIZONTAL)) \
@@ -1006,9 +1006,9 @@ on_view_actions_changed(void)
 	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_SEEK_FORWARD], can_animate);
 
 	// Note that none of the following should be visible with no image.
-	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_PLUS], has_image);
-	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_SCALE], has_image);
 	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_MINUS], has_image);
+	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_SCALE], has_image);
+	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_PLUS], has_image);
 	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_ONE], has_image);
 	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_FIT], has_image);
 
@@ -1156,8 +1156,8 @@ make_view_toolbar(void)
 	toolbar_command(TOOLBAR_SEEK_BACK,     FIV_VIEW_COMMAND_FRAME_PREVIOUS);
 	toolbar_command(TOOLBAR_PLAY_PAUSE,    FIV_VIEW_COMMAND_TOGGLE_PLAYBACK);
 	toolbar_command(TOOLBAR_SEEK_FORWARD,  FIV_VIEW_COMMAND_FRAME_NEXT);
-	toolbar_command(TOOLBAR_PLUS,          FIV_VIEW_COMMAND_ZOOM_IN);
 	toolbar_command(TOOLBAR_MINUS,         FIV_VIEW_COMMAND_ZOOM_OUT);
+	toolbar_command(TOOLBAR_PLUS,          FIV_VIEW_COMMAND_ZOOM_IN);
 	toolbar_command(TOOLBAR_ONE,           FIV_VIEW_COMMAND_ZOOM_1);
 	toolbar_toggler(TOOLBAR_FIT,           "scale-to-fit");
 	toolbar_toggler(TOOLBAR_COLOR,         "enable-cms");
