@@ -72,7 +72,7 @@ struct key_section {
 };
 
 static struct key help_keys_general[] = {
-	{"F1 <control>F1", "Show this list of shortcuts"},
+	{"F1 <control>question", "Show this list of shortcuts"},
 	{"F11 f", "Toggle fullscreen view"},
 	{"<alt><shift>d", "Toggle dark theme variant"},
 	{"q <control>q", "Exit the program"},
@@ -776,6 +776,7 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 		}
 		break;
 	case GDK_CONTROL_MASK:
+	case GDK_CONTROL_MASK | GDK_SHIFT_MASK:
 		switch (event->keyval) {
 		case GDK_KEY_h:
 			gtk_button_clicked(GTK_BUTTON(g.funnel));
@@ -798,7 +799,7 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 			gtk_widget_destroy(g.window);
 			return TRUE;
 
-		case GDK_KEY_F1:
+		case GDK_KEY_question:
 			show_help_shortcuts();
 			return TRUE;
 		}
