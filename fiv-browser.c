@@ -989,7 +989,7 @@ fiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 	}
 }
 
-gboolean
+static gboolean
 fiv_browser_motion_notify_event(GtkWidget *widget, GdkEventMotion *event)
 {
 	GTK_WIDGET_CLASS(fiv_browser_parent_class)

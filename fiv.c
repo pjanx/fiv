@@ -206,6 +206,252 @@ make_key_window(void)
 	return window;
 }
 
+// --- About -------------------------------------------------------------------
+
+static void
+on_about_map(GtkWidget *widget, G_GNUC_UNUSED gpointer user_data)
+{
+	GdkFrameClock *clock = gtk_widget_get_frame_clock(widget);
+	(void) g_signal_connect_swapped(
+		clock, "update", G_CALLBACK(gtk_widget_queue_draw), widget);
+	gdk_frame_clock_begin_updating(clock);
+}
+
+static void
+on_about_unmap(GtkWidget *widget, G_GNUC_UNUSED gpointer user_data)
+{
+	GdkFrameClock *clock = gtk_widget_get_frame_clock(widget);
+	gdk_frame_clock_end_updating(clock);
+}
+
+static gint g_about_x, g_about_y;
+
+static gboolean
+on_about_motion(G_GNUC_UNUSED GtkWidget *widget, GdkEventMotion *event,
+	G_GNUC_UNUSED gpointer user_data)
+{
+	g_about_x = event->x;
+	g_about_y = event->y;
+	return FALSE;
+}
+
+static gboolean
+on_about_leave(G_GNUC_UNUSED GtkWidget *widget,
+	G_GNUC_UNUSED GdkEventCrossing *event, G_GNUC_UNUSED gpointer user_data)
+{
+	g_about_x = 0;
+	g_about_y = 0;
+	return FALSE;
+}
+
+enum { ABOUT_SIZE = 48, ABOUT_SCALE = 3, ABOUT_HEIGHT = ABOUT_SIZE * 4 / 3 };
+
+// The mismatching resolution is incidental, and kept for interesting looks.
+cairo_pattern_t *
+make_infinite_v_pattern(void)
+{
+	cairo_surface_t *surface =
+		cairo_image_surface_create(CAIRO_FORMAT_ARGB32, ABOUT_SIZE, ABOUT_SIZE);
+	cairo_t *cr = cairo_create(surface);
+	cairo_move_to(cr, 2, 7);
+	cairo_rel_line_to(cr, 44, 0);
+	cairo_rel_line_to(cr, -17, 39);
+	cairo_rel_line_to(cr, -10, 0);
+	cairo_close_path(cr);
+
+	cairo_pattern_t *gradient = cairo_pattern_create_linear(0, 7, 0, 46);
+	cairo_pattern_add_color_stop_rgba(gradient, 1, 1, 0x66 / 255., 0, 1);
+	cairo_pattern_add_color_stop_rgba(gradient, 0, 1, 0xaa / 255., 0, 1);
+	cairo_set_source(cr, gradient);
+	cairo_fill(cr);
+
+	cairo_destroy(cr);
+	cairo_pattern_t *pattern = cairo_pattern_create_for_surface(surface);
+	cairo_surface_destroy(surface);
+	cairo_pattern_set_extend(pattern, CAIRO_EXTEND_REPEAT);
+	cairo_pattern_set_filter(pattern, CAIRO_FILTER_NEAREST);
+	cairo_matrix_t matrix = {};
+	cairo_matrix_init_translate(&matrix, ABOUT_SIZE / 2, 0);
+	cairo_pattern_set_matrix(pattern, &matrix);
+	return pattern;
+}
+
+static void
+draw_ligature(cairo_t *cr)
+{
+	// Transcribed fiv.svg--it would arguably make more sense to generate
+	// that file and these Cairo instructions from the same source.
+	cairo_move_to(cr, 12.5, 20.5);
+	cairo_rel_line_to(cr, -4, 0);
+	cairo_rel_line_to(cr, 0, +5);
+	cairo_rel_line_to(cr, +4, 0);
+	cairo_rel_line_to(cr, 0, +15);
+	cairo_rel_line_to(cr, 9, 0);
+	cairo_rel_line_to(cr, 0, -15);
+	cairo_rel_line_to(cr, +2, 0);
+	cairo_rel_line_to(cr, 0, -5);
+	cairo_rel_line_to(cr, -2, 0);
+	cairo_rel_line_to(cr, 0, -8);
+	cairo_rel_curve_to(cr, 0, -4, 5, -4, 5, 0);
+	cairo_rel_curve_to(cr, 0, 6, 9, 6, 9, 0);
+	cairo_rel_curve_to(cr, 0, -12, -23, -12, -23, 0);
+	cairo_close_path(cr);
+
+	cairo_move_to(cr, 26.5, 20.5);
+	cairo_rel_line_to(cr, 9, 0);
+	cairo_rel_line_to(cr, 0, 20);
+	cairo_rel_line_to(cr, -9, 0);
+	cairo_close_path(cr);
+
+	cairo_path_t *ligature = cairo_copy_path(cr);
+	cairo_save(cr);
+	cairo_clip(cr);
+
+	// Shadow approximation, given the lack of filters in Cairo.
+	enum { STEPS = 5 };
+	for (int i = 0; i <= STEPS; i++) {
+		cairo_save(cr);
+		double o = 1. / ABOUT_SCALE + 1. / ABOUT_SCALE * i;
+		cairo_translate(cr, o, o);
+		cairo_append_path(cr, ligature);
+		double v = 1 - (STEPS - i) * 0.075;
+		cairo_set_source_rgb(cr, v, v, v);
+		cairo_fill(cr);
+		cairo_restore(cr);
+	}
+
+	cairo_restore(cr);
+	cairo_append_path(cr, ligature);
+	cairo_path_destroy(ligature);
+	cairo_set_source_rgb(cr, 0, 0, 0);
+	cairo_set_line_width(cr, 1);
+	cairo_stroke(cr);
+}
+
+static gboolean
+on_about_draw(GtkWidget *widget, cairo_t *cr, G_GNUC_UNUSED gpointer user_data)
+{
+	GtkAllocation allocation;
+	gtk_widget_get_allocation(widget, &allocation);
+	GtkStyleContext *style = gtk_widget_get_style_context(widget);
+	gtk_render_background(style, cr, 0, 0, allocation.width, allocation.height);
+
+	cairo_translate(cr, (allocation.width - ABOUT_SIZE * ABOUT_SCALE) / 2,
+		ABOUT_SIZE * ABOUT_SCALE / 4);
+	cairo_scale(cr, ABOUT_SCALE, ABOUT_SCALE);
+
+	cairo_save(cr);
+	cairo_translate(cr, ABOUT_SIZE / 2, ABOUT_SIZE / 2);
+	if (g_about_x && g_about_y) {
+		gint dx = g_about_x - allocation.width / 2;
+		gint dy = g_about_y - ABOUT_SIZE * ABOUT_SCALE * 3 / 4;
+		cairo_rotate(cr, atan2(dy, dx) - M_PI_2);
+	}
+
+	GdkFrameClock *clock = gtk_widget_get_frame_clock(widget);
+	gint64 t = gdk_frame_clock_get_frame_time(clock);
+	cairo_translate(cr, 0, (gint64) (t / 4e4) % ABOUT_SIZE);
+
+	cairo_pattern_t *v = make_infinite_v_pattern();
+	cairo_set_source(cr, v);
+	cairo_paint(cr);
+
+	cairo_save(cr);
+	cairo_translate(cr, ABOUT_SIZE / 2, 14 /* Through trial and error. */);
+	cairo_scale(cr, 1, -1);
+	cairo_set_source(cr, v);
+	cairo_paint(cr);
+	cairo_restore(cr);
+
+	cairo_pattern_destroy(v);
+	cairo_restore(cr);
+	draw_ligature(cr);
+	return TRUE;
+}
+
+static GtkWidget *
+make_about_dialog(GtkWidget *parent)
+{
+	GtkWidget *dialog = gtk_widget_new(GTK_TYPE_DIALOG, "use-header-bar", TRUE,
+		"title", "About", "transient-for", parent, "destroy-with-parent", TRUE,
+		NULL);
+
+	GtkWidget *area = gtk_drawing_area_new();
+	gtk_style_context_add_class(gtk_widget_get_style_context(area), "view");
+	gtk_widget_set_size_request(
+		area, ABOUT_SIZE * ABOUT_SCALE * 2, ABOUT_HEIGHT * ABOUT_SCALE);
+
+	gtk_widget_add_events(
+		area, GDK_POINTER_MOTION_MASK | GDK_LEAVE_NOTIFY_MASK);
+	g_signal_connect(
+		area, "motion-notify-event", G_CALLBACK(on_about_motion), NULL);
+	g_signal_connect(
+		area, "leave-notify-event", G_CALLBACK(on_about_leave), NULL);
+
+	g_signal_connect(area, "draw", G_CALLBACK(on_about_draw), NULL);
+	g_signal_connect(area, "map", G_CALLBACK(on_about_map), NULL);
+	g_signal_connect(area, "unmap", G_CALLBACK(on_about_unmap), NULL);
+
+	// The rest is approximately copying GTK+'s own gtkaboutdialog.ui.
+	GtkWidget *name = gtk_label_new(NULL);
+	gtk_label_set_selectable(GTK_LABEL(name), TRUE);
+	gtk_label_set_markup(
+		GTK_LABEL(name), "<b>" PROJECT_NAME "</b> " PROJECT_VERSION);
+
+	GtkWidget *website = gtk_label_new(NULL);
+	gtk_label_set_selectable(GTK_LABEL(website), TRUE);
+	const char *url = "https://git.janouch.name/p/fiv";
+	gchar *link = g_strdup_printf("<a href='%s'>%s</a>", url, url);
+	gtk_label_set_markup(GTK_LABEL(website), link);
+	g_free(link);
+
+	GtkWidget *sw = gtk_scrolled_window_new(NULL, NULL);
+	gtk_scrolled_window_set_policy(
+		GTK_SCROLLED_WINDOW(sw), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+	gtk_scrolled_window_set_shadow_type(GTK_SCROLLED_WINDOW(sw), GTK_SHADOW_IN);
+
+	GtkWidget *viewer = gtk_text_view_new();
+	gtk_text_view_set_editable(GTK_TEXT_VIEW(viewer), FALSE);
+	gtk_text_view_set_cursor_visible(GTK_TEXT_VIEW(viewer), FALSE);
+	gtk_text_view_set_left_margin(GTK_TEXT_VIEW(viewer), 8);
+	gtk_text_view_set_right_margin(GTK_TEXT_VIEW(viewer), 8);
+	gtk_container_add(GTK_CONTAINER(sw), viewer);
+
+	GBytes *license =
+		g_resources_lookup_data("/LICENSE", G_RESOURCE_LOOKUP_FLAGS_NONE, NULL);
+	g_return_val_if_fail(license != NULL, dialog);
+	gchar *escaped = g_markup_escape_text(g_bytes_get_data(license, NULL), -1);
+	g_bytes_unref(license);
+
+	GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(viewer));
+	gchar *formatted = g_strdup_printf("<small>%s</small>", escaped);
+	g_free(escaped);
+	GtkTextIter iter = {};
+	gtk_text_buffer_get_start_iter(buffer, &iter);
+	gtk_text_buffer_insert_markup(buffer, &iter, formatted, -1);
+	g_free(formatted);
+
+	enum { SUBBOX_MARGIN = 12 /* Roughly matches. */ };
+	GtkWidget *subbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+	gtk_widget_set_margin_start(subbox, SUBBOX_MARGIN);
+	gtk_widget_set_margin_end(subbox, SUBBOX_MARGIN);
+	gtk_box_pack_start(GTK_BOX(subbox), name, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(subbox), website, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(subbox), sw, TRUE, TRUE, 0);
+
+	GtkWidget *box = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
+	gtk_box_pack_start(GTK_BOX(box), area, FALSE, FALSE, 0);
+	gtk_box_pack_end(GTK_BOX(box), subbox, TRUE, TRUE, SUBBOX_MARGIN);
+
+	gtk_window_set_default_size(GTK_WINDOW(dialog), -1, 480);
+	gtk_window_set_geometry_hints(GTK_WINDOW(dialog), NULL,
+		&(GdkGeometry) {.max_width = -1, .max_height = G_MAXSHORT},
+		GDK_HINT_MAX_SIZE);
+
+	gtk_widget_grab_focus(viewer);
+	return dialog;
+}
+
 // --- Main --------------------------------------------------------------------
 
 // TODO(p): See if it's possible to give separators room to shrink
@@ -818,6 +1064,17 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 			else if (g.uri)
 				switch_to_view();
 			return TRUE;
+		}
+		break;
+	case GDK_SHIFT_MASK:
+		switch (event->keyval) {
+		case GDK_KEY_F1: {
+			GtkWidget *dialog = make_about_dialog(g.window);
+			gtk_widget_show_all(dialog);
+			gtk_dialog_run(GTK_DIALOG(dialog));
+			gtk_widget_destroy(dialog);
+			return TRUE;
+		}
 		}
 		break;
 	case 0:

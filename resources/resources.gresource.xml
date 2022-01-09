@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <gresources>
+	<gresource prefix="/">
+		<file alias="LICENSE">../LICENSE</file>
+	</gresource>
 	<gresource prefix="/org/gnome/design/IconLibrary/scalable/actions/">
 		<file preprocess="xml-stripblanks">circle-filled-symbolic.svg</file>
 		<file preprocess="xml-stripblanks">funnel-symbolic.svg</file>
