@@ -1709,11 +1709,6 @@ main(int argc, char *argv[])
 		G_CALLBACK(on_item_activated), NULL);
 	gtk_container_add(GTK_CONTAINER(g.browser_scroller), g.browser);
 
-	// Christ, no, do not scroll all the way to the top on focus.
-	GtkWidget *browser_port = gtk_bin_get_child(GTK_BIN(g.browser_scroller));
-	gtk_container_set_focus_hadjustment(GTK_CONTAINER(browser_port), NULL);
-	gtk_container_set_focus_vadjustment(GTK_CONTAINER(browser_port), NULL);
-
 	g.browser_sidebar = make_browser_sidebar(g.model);
 	g.browser_paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
 	gtk_paned_add1(GTK_PANED(g.browser_paned), g.browser_sidebar);

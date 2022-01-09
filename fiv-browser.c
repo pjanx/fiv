@@ -54,6 +54,10 @@ typedef struct _Thumbnailer {
 
 struct _FivBrowser {
 	GtkWidget parent_instance;
+	GtkAdjustment *hadjustment;         ///< GtkScrollable boilerplate
+	GtkAdjustment *vadjustment;         ///< GtkScrollable boilerplate
+	GtkScrollablePolicy hscroll_policy; ///< GtkScrollable boilerplate
+	GtkScrollablePolicy vscroll_policy; ///< GtkScrollable boilerplate
 
 	FivThumbnailSize item_size;         ///< Thumbnail size
 	int item_height;                    ///< Thumbnail height in pixels
@@ -170,7 +174,21 @@ relayout(FivBrowser *self, int width)
 	}
 
 	g_array_free(items, TRUE);
-	return y + padding.bottom;
+	int total_height = y + padding.bottom;
+	if (self->hadjustment) {
+		// TODO(p): Set it to the width. Ideally, bump it to the minimum width.
+	}
+	if (self->vadjustment) {
+		gtk_adjustment_set_lower(self->vadjustment, 0);
+		gtk_adjustment_set_upper(self->vadjustment, total_height);
+		gtk_adjustment_set_page_size(
+			self->vadjustment, gtk_widget_get_allocated_height(widget));
+		gtk_adjustment_set_page_increment(
+			self->vadjustment, gtk_widget_get_allocated_height(widget));
+		gtk_adjustment_set_step_increment(self->vadjustment,
+			self->item_height + self->item_spacing + 2 * self->item_border_y);
+	}
+	return total_height;
 }
 
 static void
@@ -225,6 +243,9 @@ item_extents(FivBrowser *self, const Item *item, const Row *row)
 static const Entry *
 entry_at(FivBrowser *self, int x, int y)
 {
+	if (self->vadjustment)
+		y += gtk_adjustment_get_value(self->vadjustment);
+
 	for (guint i = 0; i < self->layouted_rows->len; i++) {
 		const Row *row = &g_array_index(self->layouted_rows, Row, i);
 		for (Item *item = row->items; item->entry; item++) {
@@ -748,14 +769,18 @@ show_context_menu(GtkWidget *widget, GFile *file)
 
 // --- Boilerplate -------------------------------------------------------------
 
-// TODO(p): For proper navigation, we need to implement GtkScrollable.
 G_DEFINE_TYPE_EXTENDED(FivBrowser, fiv_browser, GTK_TYPE_WIDGET, 0,
-	/* G_IMPLEMENT_INTERFACE(GTK_TYPE_SCROLLABLE,
-		fiv_browser_scrollable_init) */)
+	G_IMPLEMENT_INTERFACE(GTK_TYPE_SCROLLABLE, NULL))
 
 enum {
 	PROP_THUMBNAIL_SIZE = 1,
-	N_PROPERTIES
+	N_PROPERTIES,
+
+	// These are overriden, we do not register them.
+	PROP_HADJUSTMENT,
+	PROP_VADJUSTMENT,
+	PROP_HSCROLL_POLICY,
+	PROP_VSCROLL_POLICY,
 };
 
 static GParamSpec *browser_properties[N_PROPERTIES];
@@ -767,6 +792,35 @@ enum {
 
 // Globals are, sadly, the canonical way of storing signal numbers.
 static guint browser_signals[LAST_SIGNAL];
+
+static void
+on_adjustment_value_changed(
+	G_GNUC_UNUSED GtkAdjustment *adjustment, gpointer user_data)
+{
+	FivBrowser *self = FIV_BROWSER(user_data);
+	gtk_widget_queue_draw(GTK_WIDGET(self));
+}
+
+static gboolean
+replace_adjustment(
+	FivBrowser *self, GtkAdjustment **adjustment, GtkAdjustment *replacement)
+{
+	if (*adjustment == replacement)
+		return FALSE;
+
+	if (*adjustment) {
+		g_signal_handlers_disconnect_by_func(
+			*adjustment, on_adjustment_value_changed, self);
+		g_clear_object(adjustment);
+	}
+	if (replacement) {
+		*adjustment = g_object_ref(replacement);
+		g_signal_connect(*adjustment, "value-changed",
+			G_CALLBACK(on_adjustment_value_changed), self);
+		// TODO(p): We should set it up, as it is done in relayout().
+	}
+	return TRUE;
+}
 
 static void
 fiv_browser_finalize(GObject *gobject)
@@ -783,6 +837,9 @@ fiv_browser_finalize(GObject *gobject)
 	cairo_surface_destroy(self->glow);
 	g_clear_object(&self->pointer);
 
+	replace_adjustment(self, &self->hadjustment, NULL);
+	replace_adjustment(self, &self->vadjustment, NULL);
+
 	G_OBJECT_CLASS(fiv_browser_parent_class)->finalize(gobject);
 }
 
@@ -794,6 +851,18 @@ fiv_browser_get_property(
 	switch (property_id) {
 	case PROP_THUMBNAIL_SIZE:
 		g_value_set_enum(value, self->item_size);
+		break;
+	case PROP_HADJUSTMENT:
+		g_value_set_object(value, self->hadjustment);
+		break;
+	case PROP_VADJUSTMENT:
+		g_value_set_object(value, self->vadjustment);
+		break;
+	case PROP_HSCROLL_POLICY:
+		g_value_set_enum(value, self->hscroll_policy);
+		break;
+	case PROP_VSCROLL_POLICY:
+		g_value_set_enum(value, self->vscroll_policy);
 		break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
@@ -824,6 +893,30 @@ fiv_browser_set_property(
 	switch (property_id) {
 	case PROP_THUMBNAIL_SIZE:
 		set_item_size(self, g_value_get_enum(value));
+		break;
+	case PROP_HADJUSTMENT:
+		if (replace_adjustment(
+				self, &self->hadjustment, g_value_get_object(value)))
+			g_object_notify_by_pspec(object, pspec);
+		break;
+	case PROP_VADJUSTMENT:
+		if (replace_adjustment(
+				self, &self->vadjustment, g_value_get_object(value)))
+			g_object_notify_by_pspec(object, pspec);
+		break;
+	case PROP_HSCROLL_POLICY:
+		if ((gint) self->hscroll_policy != g_value_get_enum(value)) {
+			self->hscroll_policy = g_value_get_enum(value);
+			gtk_widget_queue_resize(GTK_WIDGET(self));
+			g_object_notify_by_pspec(object, pspec);
+		}
+		break;
+	case PROP_VSCROLL_POLICY:
+		if ((gint) self->vscroll_policy != g_value_get_enum(value)) {
+			self->vscroll_policy = g_value_get_enum(value);
+			gtk_widget_queue_resize(GTK_WIDGET(self));
+			g_object_notify_by_pspec(object, pspec);
+		}
 		break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
@@ -899,6 +992,7 @@ fiv_browser_size_allocate(GtkWidget *widget, GtkAllocation *allocation)
 	GTK_WIDGET_CLASS(fiv_browser_parent_class)
 		->size_allocate(widget, allocation);
 
+	// TODO(p): Update adjustments so that blank space is avoided.
 	relayout(FIV_BROWSER(widget), allocation->width);
 }
 
@@ -913,6 +1007,12 @@ fiv_browser_draw(GtkWidget *widget, cairo_t *cr)
 	gtk_widget_get_allocation(widget, &allocation);
 	gtk_render_background(gtk_widget_get_style_context(widget), cr, 0, 0,
 		allocation.width, allocation.height);
+
+	// TODO(p): self->hadjustment as well, and test it.
+	if (self->vadjustment) {
+		gdouble y = gtk_adjustment_get_value(self->vadjustment);
+		cairo_translate(cr, 0, -y);
+	}
 
 	GdkRectangle clip = {};
 	gboolean have_clip = gdk_cairo_get_clip_rectangle(cr, &clip);
@@ -1128,6 +1228,15 @@ fiv_browser_class_init(FivBrowserClass *klass)
 		G_PARAM_READWRITE);
 	g_object_class_install_properties(
 		object_class, N_PROPERTIES, browser_properties);
+
+	g_object_class_override_property(
+		object_class, PROP_HADJUSTMENT, "hadjustment");
+	g_object_class_override_property(
+		object_class, PROP_VADJUSTMENT, "vadjustment");
+	g_object_class_override_property(
+		object_class, PROP_HSCROLL_POLICY, "hscroll-policy");
+	g_object_class_override_property(
+		object_class, PROP_VSCROLL_POLICY, "vscroll-policy");
 
 	browser_signals[ITEM_ACTIVATED] = g_signal_new("item-activated",
 		G_TYPE_FROM_CLASS(klass), 0, 0, NULL, NULL, NULL,
