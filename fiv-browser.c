@@ -45,7 +45,7 @@ typedef struct entry Entry;
 typedef struct item Item;
 typedef struct row Row;
 
-typedef struct _Thumbnailer {
+typedef struct {
 	FivBrowser *self;                   ///< Parent browser
 	Entry *target;                      ///< Currently processed Entry pointer
 	GSubprocess *minion;                ///< A slave for the current queue head
@@ -66,7 +66,7 @@ struct _FivBrowser {
 	FivIoModel *model;                  ///< Filesystem model
 	GArray *entries;                    ///< []Entry
 	GArray *layouted_rows;              ///< []Row
-	int selected;
+	const Entry *selected;              ///< Selected entry or NULL
 
 	Thumbnailer *thumbnailers;          ///< Parallelized thumbnailers
 	size_t thumbnailers_len;            ///< Thumbnailers array size
@@ -244,7 +244,7 @@ static const Entry *
 entry_at(FivBrowser *self, int x, int y)
 {
 	if (self->vadjustment)
-		y += gtk_adjustment_get_value(self->vadjustment);
+		y += round(gtk_adjustment_get_value(self->vadjustment));
 
 	for (guint i = 0; i < self->layouted_rows->len; i++) {
 		const Row *row = &g_array_index(self->layouted_rows, Row, i);
@@ -267,21 +267,25 @@ draw_row(FivBrowser *self, cairo_t *cr, const Row *row)
 	gtk_style_context_save(style);
 	gtk_style_context_add_class(style, "item");
 
-	GdkRGBA glow_color = {};
-	GtkStateFlags state = gtk_style_context_get_state (style);
-	gtk_style_context_get_color(style, state, &glow_color);
-
 	GtkBorder border;
-	gtk_style_context_get_border(style, state, &border);
+	GtkStateFlags common_state = gtk_style_context_get_state(style);
+	gtk_style_context_get_border(style, common_state, &border);
 	for (Item *item = row->items; item->entry; item++) {
 		cairo_save(cr);
 		GdkRectangle extents = item_extents(self, item, row);
 		cairo_translate(cr, extents.x - border.left, extents.y - border.top);
 
+		GtkStateFlags state = common_state;
+		if (item->entry == self->selected)
+			state |= GTK_STATE_FLAG_SELECTED;
+
 		gtk_style_context_save(style);
+		gtk_style_context_set_state(style, state);
 		if (item->entry->icon) {
 			gtk_style_context_add_class(style, "symbolic");
 		} else {
+			GdkRGBA glow_color = {};
+			gtk_style_context_get_color(style, state, &glow_color);
 			gdk_cairo_set_source_rgba(cr, &glow_color);
 			draw_outer_border(self, cr,
 				border.left + extents.width + border.right,
@@ -309,6 +313,9 @@ draw_row(FivBrowser *self, cairo_t *cr, const Row *row)
 			cairo_set_source_surface(
 				cr, item->entry->thumbnail, border.left, border.top);
 			cairo_paint(cr);
+
+			// Here, we could consider multiplying
+			// the whole rectangle with the selection color.
 		}
 
 		cairo_restore(cr);
@@ -1010,7 +1017,7 @@ fiv_browser_draw(GtkWidget *widget, cairo_t *cr)
 
 	// TODO(p): self->hadjustment as well, and test it.
 	if (self->vadjustment) {
-		gdouble y = gtk_adjustment_get_value(self->vadjustment);
+		gdouble y = round(gtk_adjustment_get_value(self->vadjustment));
 		cairo_translate(cr, 0, -y);
 	}
 
@@ -1057,8 +1064,21 @@ fiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 		gtk_widget_grab_focus(widget);
 
 	const Entry *entry = entry_at(self, event->x, event->y);
-	if (!entry && event->button == GDK_BUTTON_SECONDARY) {
-		show_context_menu(widget, fiv_io_model_get_location(self->model));
+	if (!entry && state == 0) {
+		switch (event->button) {
+		case GDK_BUTTON_PRIMARY:
+			break;
+		case GDK_BUTTON_SECONDARY:
+			show_context_menu(widget, fiv_io_model_get_location(self->model));
+			break;
+		default:
+			return FALSE;
+		}
+
+		if (self->selected) {
+			self->selected = NULL;
+			gtk_widget_queue_draw(widget);
+		}
 		return TRUE;
 	}
 	if (!entry)
@@ -1076,6 +1096,9 @@ fiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 			return open_entry(widget, entry, TRUE);
 		return FALSE;
 	case GDK_BUTTON_SECONDARY:
+		self->selected = entry;
+		gtk_widget_queue_draw(widget);
+
 		// On X11, after closing the menu, the pointer otherwise remains,
 		// no matter what its new location is.
 		gdk_window_set_cursor(gtk_widget_get_window(widget), NULL);
@@ -1125,6 +1148,18 @@ fiv_browser_scroll_event(GtkWidget *widget, GdkEventScroll *event)
 		// Left/right are good to steal from GtkScrolledWindow for consistency.
 		return TRUE;
 	}
+}
+
+static gboolean
+fiv_browser_key_press_event(GtkWidget *widget, GdkEventKey *event)
+{
+	FivBrowser *self = FIV_BROWSER(widget);
+	if (!(event->state & gtk_accelerator_get_default_mod_mask()) &&
+		event->keyval == GDK_KEY_Return && self->selected)
+		return open_entry(widget, self->selected, FALSE);
+
+	return GTK_WIDGET_CLASS(fiv_browser_parent_class)
+		->key_press_event(widget, event);
 }
 
 static gboolean
@@ -1253,6 +1288,7 @@ fiv_browser_class_init(FivBrowserClass *klass)
 	widget_class->button_press_event = fiv_browser_button_press_event;
 	widget_class->motion_notify_event = fiv_browser_motion_notify_event;
 	widget_class->scroll_event = fiv_browser_scroll_event;
+	widget_class->key_press_event = fiv_browser_key_press_event;
 	widget_class->query_tooltip = fiv_browser_query_tooltip;
 	widget_class->style_updated = fiv_browser_style_updated;
 
@@ -1277,7 +1313,6 @@ fiv_browser_init(FivBrowser *self)
 	g_array_set_clear_func(self->entries, (GDestroyNotify) entry_free);
 	self->layouted_rows = g_array_new(FALSE, TRUE, sizeof(Row));
 	g_array_set_clear_func(self->layouted_rows, (GDestroyNotify) row_free);
-	self->selected = -1;
 
 	self->thumbnailers_len = g_get_num_processors();
 	self->thumbnailers =
@@ -1299,6 +1334,13 @@ on_model_files_changed(FivIoModel *model, FivBrowser *self)
 {
 	g_return_if_fail(model == self->model);
 
+	int selected = -1;
+	gchar *selected_uri = NULL;
+	if (self->selected) {
+		selected_uri = g_strdup(self->selected->uri);
+		self->selected = NULL;
+	}
+
 	// TODO(p): Later implement arguments.
 	thumbnailers_abort(self);
 	g_array_set_size(self->entries, 0);
@@ -1308,9 +1350,16 @@ on_model_files_changed(FivIoModel *model, FivBrowser *self)
 	for (guint i = 0; i < files->len; i++) {
 		g_array_append_val(self->entries,
 			((Entry) {.thumbnail = NULL, .uri = files->pdata[i]}));
+		if (!g_strcmp0(selected_uri, files->pdata[i]))
+			selected = i;
 		files->pdata[i] = NULL;
 	}
 	g_ptr_array_free(files, TRUE);
+
+	// Beware that the pointer may shift with the storage.
+	g_free(selected_uri);
+	if (selected >= 0)
+		self->selected = &g_array_index(self->entries, Entry, selected);
 
 	reload_thumbnails(self);
 	thumbnailers_start(self);
