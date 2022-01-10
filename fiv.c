@@ -208,6 +208,11 @@ make_key_window(void)
 
 // --- About -------------------------------------------------------------------
 
+typedef struct {
+	gint cx, cy;
+	cairo_pattern_t *v_pattern;
+} AboutContext;
+
 static void
 on_about_map(GtkWidget *widget, G_GNUC_UNUSED gpointer user_data)
 {
@@ -224,30 +229,30 @@ on_about_unmap(GtkWidget *widget, G_GNUC_UNUSED gpointer user_data)
 	gdk_frame_clock_end_updating(clock);
 }
 
-static gint g_about_x, g_about_y;
-
 static gboolean
-on_about_motion(G_GNUC_UNUSED GtkWidget *widget, GdkEventMotion *event,
-	G_GNUC_UNUSED gpointer user_data)
+on_about_motion(
+	G_GNUC_UNUSED GtkWidget *widget, GdkEventMotion *event, gpointer user_data)
 {
-	g_about_x = event->x;
-	g_about_y = event->y;
+	AboutContext *ctx = user_data;
+	ctx->cx = event->x;
+	ctx->cy = event->y;
 	return FALSE;
 }
 
 static gboolean
 on_about_leave(G_GNUC_UNUSED GtkWidget *widget,
-	G_GNUC_UNUSED GdkEventCrossing *event, G_GNUC_UNUSED gpointer user_data)
+	G_GNUC_UNUSED GdkEventCrossing *event, gpointer user_data)
 {
-	g_about_x = 0;
-	g_about_y = 0;
+	AboutContext *ctx = user_data;
+	ctx->cx = -1;
+	ctx->cy = -1;
 	return FALSE;
 }
 
 enum { ABOUT_SIZE = 48, ABOUT_SCALE = 3, ABOUT_HEIGHT = ABOUT_SIZE * 4 / 3 };
 
 // The mismatching resolution is incidental, and kept for interesting looks.
-cairo_pattern_t *
+static cairo_pattern_t *
 make_infinite_v_pattern(void)
 {
 	cairo_surface_t *surface =
@@ -260,9 +265,10 @@ make_infinite_v_pattern(void)
 	cairo_close_path(cr);
 
 	cairo_pattern_t *gradient = cairo_pattern_create_linear(0, 7, 0, 46);
-	cairo_pattern_add_color_stop_rgba(gradient, 1, 1, 0x66 / 255., 0, 1);
-	cairo_pattern_add_color_stop_rgba(gradient, 0, 1, 0xaa / 255., 0, 1);
+	cairo_pattern_add_color_stop_rgb(gradient, 1, 1, 0x66 / 255., 0);
+	cairo_pattern_add_color_stop_rgb(gradient, 0, 1, 0xaa / 255., 0);
 	cairo_set_source(cr, gradient);
+	cairo_pattern_destroy(gradient);
 	cairo_fill(cr);
 
 	cairo_destroy(cr);
@@ -329,8 +335,9 @@ draw_ligature(cairo_t *cr)
 }
 
 static gboolean
-on_about_draw(GtkWidget *widget, cairo_t *cr, G_GNUC_UNUSED gpointer user_data)
+on_about_draw(GtkWidget *widget, cairo_t *cr, gpointer user_data)
 {
+	AboutContext *ctx = user_data;
 	GtkAllocation allocation;
 	gtk_widget_get_allocation(widget, &allocation);
 	GtkStyleContext *style = gtk_widget_get_style_context(widget);
@@ -342,9 +349,9 @@ on_about_draw(GtkWidget *widget, cairo_t *cr, G_GNUC_UNUSED gpointer user_data)
 
 	cairo_save(cr);
 	cairo_translate(cr, ABOUT_SIZE / 2, ABOUT_SIZE / 2);
-	if (g_about_x && g_about_y) {
-		gint dx = g_about_x - allocation.width / 2;
-		gint dy = g_about_y - ABOUT_SIZE * ABOUT_SCALE * 3 / 4;
+	if (ctx->cx >= 0 && ctx->cy >= 0) {
+		gint dx = ctx->cx - allocation.width / 2;
+		gint dy = ctx->cy - ABOUT_SIZE * ABOUT_SCALE * 3 / 4;
 		cairo_rotate(cr, atan2(dy, dx) - M_PI_2);
 	}
 
@@ -352,25 +359,20 @@ on_about_draw(GtkWidget *widget, cairo_t *cr, G_GNUC_UNUSED gpointer user_data)
 	gint64 t = gdk_frame_clock_get_frame_time(clock);
 	cairo_translate(cr, 0, (gint64) (t / 4e4) % ABOUT_SIZE);
 
-	cairo_pattern_t *v = make_infinite_v_pattern();
-	cairo_set_source(cr, v);
+	cairo_set_source(cr, ctx->v_pattern);
 	cairo_paint(cr);
-
-	cairo_save(cr);
 	cairo_translate(cr, ABOUT_SIZE / 2, 14 /* Through trial and error. */);
 	cairo_scale(cr, 1, -1);
-	cairo_set_source(cr, v);
+	cairo_set_source(cr, ctx->v_pattern);
 	cairo_paint(cr);
-	cairo_restore(cr);
 
-	cairo_pattern_destroy(v);
 	cairo_restore(cr);
 	draw_ligature(cr);
 	return TRUE;
 }
 
-static GtkWidget *
-make_about_dialog(GtkWidget *parent)
+static void
+show_about_dialog(GtkWidget *parent)
 {
 	GtkWidget *dialog = gtk_widget_new(GTK_TYPE_DIALOG, "use-header-bar", TRUE,
 		"title", "About", "transient-for", parent, "destroy-with-parent", TRUE,
@@ -381,16 +383,18 @@ make_about_dialog(GtkWidget *parent)
 	gtk_widget_set_size_request(
 		area, ABOUT_SIZE * ABOUT_SCALE * 2, ABOUT_HEIGHT * ABOUT_SCALE);
 
+	AboutContext ctx = {
+		.cx = -1, .cy = -1, .v_pattern = make_infinite_v_pattern()};
 	gtk_widget_add_events(
 		area, GDK_POINTER_MOTION_MASK | GDK_LEAVE_NOTIFY_MASK);
 	g_signal_connect(
-		area, "motion-notify-event", G_CALLBACK(on_about_motion), NULL);
+		area, "motion-notify-event", G_CALLBACK(on_about_motion), &ctx);
 	g_signal_connect(
-		area, "leave-notify-event", G_CALLBACK(on_about_leave), NULL);
+		area, "leave-notify-event", G_CALLBACK(on_about_leave), &ctx);
 
-	g_signal_connect(area, "draw", G_CALLBACK(on_about_draw), NULL);
-	g_signal_connect(area, "map", G_CALLBACK(on_about_map), NULL);
-	g_signal_connect(area, "unmap", G_CALLBACK(on_about_unmap), NULL);
+	g_signal_connect(area, "draw", G_CALLBACK(on_about_draw), &ctx);
+	g_signal_connect(area, "map", G_CALLBACK(on_about_map), &ctx);
+	g_signal_connect(area, "unmap", G_CALLBACK(on_about_unmap), &ctx);
 
 	// The rest is approximately copying GTK+'s own gtkaboutdialog.ui.
 	GtkWidget *name = gtk_label_new(NULL);
@@ -419,7 +423,7 @@ make_about_dialog(GtkWidget *parent)
 
 	GBytes *license =
 		g_resources_lookup_data("/LICENSE", G_RESOURCE_LOOKUP_FLAGS_NONE, NULL);
-	g_return_val_if_fail(license != NULL, dialog);
+	g_return_if_fail(license != NULL);
 	gchar *escaped = g_markup_escape_text(g_bytes_get_data(license, NULL), -1);
 	g_bytes_unref(license);
 
@@ -449,7 +453,11 @@ make_about_dialog(GtkWidget *parent)
 		GDK_HINT_MAX_SIZE);
 
 	gtk_widget_grab_focus(viewer);
-	return dialog;
+	gtk_widget_show_all(dialog);
+	gtk_dialog_run(GTK_DIALOG(dialog));
+	gtk_widget_destroy(dialog);
+
+	cairo_pattern_destroy(ctx.v_pattern);
 }
 
 // --- Main --------------------------------------------------------------------
@@ -1068,13 +1076,9 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 		break;
 	case GDK_SHIFT_MASK:
 		switch (event->keyval) {
-		case GDK_KEY_F1: {
-			GtkWidget *dialog = make_about_dialog(g.window);
-			gtk_widget_show_all(dialog);
-			gtk_dialog_run(GTK_DIALOG(dialog));
-			gtk_widget_destroy(dialog);
+		case GDK_KEY_F1:
+			show_about_dialog(g.window);
 			return TRUE;
-		}
 		}
 		break;
 	case 0:
