@@ -103,6 +103,7 @@ struct item {
 
 struct row {
 	Item *items;                        ///< Ends with a NULL entry
+	gsize len;                          ///< Length of items
 	int x_offset;                       ///< Start position outside borders
 	int y_offset;                       ///< Start position inside borders
 };
@@ -122,11 +123,9 @@ append_row(FivBrowser *self, int *y, int x, GArray *items_array)
 		*y += self->item_spacing;
 
 	*y += self->item_border_y;
-	g_array_append_val(self->layouted_rows, ((Row) {
-		.items = g_array_steal(items_array, NULL),
-		.x_offset = x,
-		.y_offset = *y,
-	}));
+	Row row = {.x_offset = x, .y_offset = *y};
+	row.items = g_array_steal(items_array, &row.len),
+	g_array_append_val(self->layouted_rows, row);
 
 	// Not trying to pack them vertically, but this would be the place to do it.
 	*y += self->item_height;
@@ -1174,13 +1173,172 @@ fiv_browser_scroll_event(GtkWidget *widget, GdkEventScroll *event)
 	}
 }
 
+static void
+select_closest(FivBrowser *self, const Row *row, int target)
+{
+	int closest = G_MAXINT;
+	for (guint i = 0; i < row->len; i++) {
+		GdkRectangle extents = item_extents(self, row->items + i, row);
+		int distance = ABS(extents.x + extents.width / 2 - target);
+		if (distance > closest)
+			break;
+		self->selected = row->items[i].entry;
+		closest = distance;
+	}
+}
+
+static void
+scroll_to_row(FivBrowser *self, const Row *row)
+{
+	if (!self->vadjustment)
+		return;
+
+	double y1 = gtk_adjustment_get_value(self->vadjustment);
+	double ph = gtk_adjustment_get_page_size(self->vadjustment);
+	if (row->y_offset < y1) {
+		gtk_adjustment_set_value(
+			self->vadjustment, row->y_offset - self->item_border_y);
+	} else if (row->y_offset + self->item_height > y1 + ph) {
+		gtk_adjustment_set_value(self->vadjustment,
+			row->y_offset - ph + self->item_height + self->item_border_y);
+	}
+}
+
+static void
+move_selection(FivBrowser *self, GtkDirectionType dir)
+{
+	GtkWidget *widget = GTK_WIDGET(self);
+	if (!self->layouted_rows->len)
+		return;
+
+	const Row *selected_row = NULL;
+	if (!self->selected) {
+		switch (dir) {
+		case GTK_DIR_RIGHT:
+		case GTK_DIR_DOWN:
+			selected_row = &g_array_index(self->layouted_rows, Row, 0);
+			self->selected = selected_row->items->entry;
+			goto adjust;
+		case GTK_DIR_LEFT:
+		case GTK_DIR_UP:
+			selected_row = &g_array_index(
+				self->layouted_rows, Row, self->layouted_rows->len - 1);
+			self->selected = selected_row->items[selected_row->len - 1].entry;
+			goto adjust;
+		default:
+			g_assert_not_reached();
+		}
+	}
+
+	gsize x = 0, y = 0;
+	int target_offset = 0;
+	for (y = 0; y < self->layouted_rows->len; y++) {
+		const Row *row = &g_array_index(self->layouted_rows, Row, y);
+		for (x = 0; x < row->len; x++) {
+			const Item *item = row->items + x;
+			if (item->entry == self->selected) {
+				GdkRectangle extents = item_extents(self, item, row);
+				target_offset = extents.x + extents.width / 2;
+				goto found;
+			}
+		}
+	}
+found:
+	g_return_if_fail(y < self->layouted_rows->len);
+	selected_row = &g_array_index(self->layouted_rows, Row, y);
+
+	switch (dir) {
+	case GTK_DIR_LEFT:
+		if (x > 0) {
+			self->selected = selected_row->items[--x].entry;
+		} else if (y-- > 0) {
+			selected_row = &g_array_index(self->layouted_rows, Row, y);
+			self->selected = selected_row->items[selected_row->len - 1].entry;
+		}
+		break;
+	case GTK_DIR_RIGHT:
+		if (++x < selected_row->len) {
+			self->selected = selected_row->items[x].entry;
+		} else if (++y < self->layouted_rows->len) {
+			selected_row = &g_array_index(self->layouted_rows, Row, y);
+			self->selected = selected_row->items[0].entry;
+		}
+		break;
+	case GTK_DIR_UP:
+		if (y-- > 0) {
+			selected_row = &g_array_index(self->layouted_rows, Row, y);
+			select_closest(self, selected_row, target_offset);
+		}
+		break;
+	case GTK_DIR_DOWN:
+		if (++y < self->layouted_rows->len) {
+			selected_row = &g_array_index(self->layouted_rows, Row, y);
+			select_closest(self, selected_row, target_offset);
+		}
+		break;
+	default:
+		g_assert_not_reached();
+	}
+
+adjust:
+	// TODO(p): We should also do it horizontally, although we don't use it.
+	scroll_to_row(self, selected_row);
+	gtk_widget_queue_draw(widget);
+}
+
+static void
+move_selection_home(FivBrowser *self)
+{
+	if (self->layouted_rows->len) {
+		const Row *row = &g_array_index(self->layouted_rows, Row, 0);
+		self->selected = row->items[0].entry;
+		scroll_to_row(self, row);
+		gtk_widget_queue_draw(GTK_WIDGET(self));
+	}
+}
+
+static void
+move_selection_end(FivBrowser *self)
+{
+	if (self->layouted_rows->len) {
+		const Row *row = &g_array_index(
+			self->layouted_rows, Row, self->layouted_rows->len - 1);
+		self->selected = row->items[row->len - 1].entry;
+		scroll_to_row(self, row);
+		gtk_widget_queue_draw(GTK_WIDGET(self));
+	}
+}
+
 static gboolean
 fiv_browser_key_press_event(GtkWidget *widget, GdkEventKey *event)
 {
 	FivBrowser *self = FIV_BROWSER(widget);
-	if (!(event->state & gtk_accelerator_get_default_mod_mask()) &&
-		event->keyval == GDK_KEY_Return && self->selected)
-		return open_entry(widget, self->selected, FALSE);
+	if (!(event->state & gtk_accelerator_get_default_mod_mask())) {
+		switch (event->keyval) {
+		case GDK_KEY_Return:
+			if (self->selected)
+				return open_entry(widget, self->selected, FALSE);
+			return TRUE;
+		case GDK_KEY_Left:
+			move_selection(self, GTK_DIR_LEFT);
+			return TRUE;
+		case GDK_KEY_Right:
+			move_selection(self, GTK_DIR_RIGHT);
+			return TRUE;
+		case GDK_KEY_Up:
+			move_selection(self, GTK_DIR_UP);
+			return TRUE;
+		case GDK_KEY_Down:
+			move_selection(self, GTK_DIR_DOWN);
+			return TRUE;
+		case GDK_KEY_Home:
+			move_selection_home(self);
+			return TRUE;
+		case GDK_KEY_End:
+			move_selection_end(self);
+			return TRUE;
+		}
+	}
 
 	return GTK_WIDGET_CLASS(fiv_browser_parent_class)
 		->key_press_event(widget, event);
