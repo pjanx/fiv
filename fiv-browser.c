@@ -260,6 +260,24 @@ entry_at(FivBrowser *self, int x, int y)
 	return NULL;
 }
 
+static GdkRectangle
+entry_rect(FivBrowser *self, const Entry *entry)
+{
+	GdkRectangle rect = {};
+	for (guint i = 0; i < self->layouted_rows->len; i++) {
+		const Row *row = &g_array_index(self->layouted_rows, Row, i);
+		for (Item *item = row->items; item->entry; item++) {
+			if (item->entry == entry) {
+				rect = item_extents(self, item, row);
+				break;
+			}
+		}
+	}
+	if (self->vadjustment)
+		rect.y -= round(gtk_adjustment_get_value(self->vadjustment));
+	return rect;
+}
+
 static void
 draw_row(FivBrowser *self, cairo_t *cr, const Row *row)
 {
@@ -704,15 +722,15 @@ destroy_widget_idle_source_func(GtkWidget *widget)
 	return FALSE;
 }
 
-static void
-show_context_menu(GtkWidget *widget, GFile *file)
+static GtkMenu *
+make_context_menu(GtkWidget *widget, GFile *file)
 {
 	GFileInfo *info = g_file_query_info(file,
 		G_FILE_ATTRIBUTE_STANDARD_NAME
 		"," G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE,
 		G_FILE_QUERY_INFO_NONE, NULL, NULL);
 	if (!info)
-		return;
+		return NULL;
 
 	// This will have no application pre-assigned, for use with GTK+'s dialog.
 	OpenContext *ctx = g_malloc0(sizeof *ctx);
@@ -771,7 +789,13 @@ show_context_menu(GtkWidget *widget, GFile *file)
 	g_signal_connect(menu, "destroy", G_CALLBACK(g_object_unref), NULL);
 
 	gtk_widget_show_all(menu);
-	gtk_menu_popup_at_pointer(GTK_MENU(menu), NULL);
+	return GTK_MENU(menu);
+}
+
+static void
+show_context_menu(GtkWidget *widget, GFile *file)
+{
+	gtk_menu_popup_at_pointer(make_context_menu(widget, file), NULL);
 }
 
 // --- Boilerplate -------------------------------------------------------------
@@ -1185,6 +1209,31 @@ fiv_browser_query_tooltip(GtkWidget *widget, gint x, gint y,
 	return TRUE;
 }
 
+static gboolean
+fiv_browser_popup_menu(GtkWidget *widget)
+{
+	FivBrowser *self = FIV_BROWSER(widget);
+
+	// This is what Windows Explorer does, and what you want to be done.
+	// Although invoking the menu outside the widget is questionable.
+	GFile *file = NULL;
+	GdkRectangle rect = {};
+	if (self->selected) {
+		file = g_file_new_for_uri(self->selected->uri);
+		rect = entry_rect(self, self->selected);
+		rect.x += rect.width / 2;
+		rect.y += rect.height / 2;
+	} else {
+		file = g_object_ref(fiv_io_model_get_location(self->model));
+	}
+
+	gtk_menu_popup_at_rect(make_context_menu(widget, file),
+		gtk_widget_get_window(widget), &rect, GDK_GRAVITY_NORTH_WEST,
+		GDK_GRAVITY_NORTH_WEST, NULL);
+	g_object_unref(file);
+	return TRUE;
+}
+
 static void
 fiv_browser_style_updated(GtkWidget *widget)
 {
@@ -1290,6 +1339,7 @@ fiv_browser_class_init(FivBrowserClass *klass)
 	widget_class->scroll_event = fiv_browser_scroll_event;
 	widget_class->key_press_event = fiv_browser_key_press_event;
 	widget_class->query_tooltip = fiv_browser_query_tooltip;
+	widget_class->popup_menu = fiv_browser_popup_menu;
 	widget_class->style_updated = fiv_browser_style_updated;
 
 	// Could be split to also-idiomatic row-spacing/column-spacing properties.
