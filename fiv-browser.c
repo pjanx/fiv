@@ -1019,11 +1019,19 @@ fiv_browser_realize(GtkWidget *widget)
 static void
 fiv_browser_size_allocate(GtkWidget *widget, GtkAllocation *allocation)
 {
+	FivBrowser *self = FIV_BROWSER(widget);
 	GTK_WIDGET_CLASS(fiv_browser_parent_class)
 		->size_allocate(widget, allocation);
 
-	// TODO(p): Update adjustments so that blank space is avoided.
-	relayout(FIV_BROWSER(widget), allocation->width);
+	int height = relayout(FIV_BROWSER(widget), allocation->width);
+
+	// Avoid fresh blank space.
+	if (self->vadjustment) {
+		double y1 = gtk_adjustment_get_value(self->vadjustment);
+		double ph = gtk_adjustment_get_page_size(self->vadjustment);
+		if (y1 + ph > height)
+			gtk_adjustment_set_value(self->vadjustment, height - ph);
+	}
 }
 
 static gboolean
