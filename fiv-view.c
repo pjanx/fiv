@@ -1064,11 +1064,14 @@ fiv_view_class_init(FivViewClass *klass)
 	bind(bs, GDK_KEY_plus,   GDK_CONTROL_MASK, FIV_VIEW_COMMAND_ZOOM_IN);
 	bind(bs, GDK_KEY_minus,  GDK_CONTROL_MASK, FIV_VIEW_COMMAND_ZOOM_OUT);
 	bind(bs, GDK_KEY_p,      GDK_CONTROL_MASK, FIV_VIEW_COMMAND_PRINT);
+	bind(bs, GDK_KEY_r,      GDK_CONTROL_MASK, FIV_VIEW_COMMAND_RELOAD);
 	bind(bs, GDK_KEY_s,      GDK_CONTROL_MASK, FIV_VIEW_COMMAND_SAVE_PAGE);
 	bind(bs, GDK_KEY_s,      GDK_MOD1_MASK,    FIV_VIEW_COMMAND_SAVE_FRAME);
 	bind(bs, GDK_KEY_Return, GDK_MOD1_MASK,    FIV_VIEW_COMMAND_INFO);
 
 	// The scale-to-fit binding is from gThumb, which has more such modes.
+	bind(bs, GDK_KEY_F5,           0, FIV_VIEW_COMMAND_RELOAD);
+	bind(bs, GDK_KEY_r,            0, FIV_VIEW_COMMAND_RELOAD);
 	bind(bs, GDK_KEY_plus,         0, FIV_VIEW_COMMAND_ZOOM_IN);
 	bind(bs, GDK_KEY_minus,        0, FIV_VIEW_COMMAND_ZOOM_OUT);
 	bind(bs, GDK_KEY_w,            0, FIV_VIEW_COMMAND_FIT_WIDTH);
@@ -1203,6 +1206,9 @@ fiv_view_command(FivView *self, FivViewCommand command)
 		return;
 
 	switch (command) {
+	break; case FIV_VIEW_COMMAND_RELOAD:
+		reload(self);
+
 	break; case FIV_VIEW_COMMAND_ROTATE_LEFT:
 		self->orientation = view_left[self->orientation];
 		gtk_widget_queue_resize(widget);

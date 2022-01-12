@@ -84,6 +84,7 @@ static struct key_group help_keys_browser[] = {
 	{"General", help_keys_general},
 	{"View", (struct key[]) {
 		{"F9", "Toggle navigation sidebar"},
+		{"F5 r <control>r", "Refresh"},
 		{"h <control>h", "Toggle hiding unsupported files"},
 		{}
 	}},
@@ -94,7 +95,7 @@ static struct key_group help_keys_browser[] = {
 		{"<alt>Right", "Go forward in history"},
 		{"<alt>Up", "Go to parent directory"},
 		{"<alt>Home", "Go home"},
-		{"F5 r <control>r", "Refresh"},
+		{"Return", "Open selected item"},
 		{}
 	}},
 	{}
@@ -104,6 +105,7 @@ static struct key_group help_keys_view[] = {
 	{"General", help_keys_general},
 	{"View", (struct key[]) {
 		{"F8", "Toggle toolbar"},
+		{"F5 r <control>r", "Reload"},
 		{}
 	}},
 	{"Navigation", (struct key[]) {
@@ -1044,10 +1046,6 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 		case GDK_KEY_o:
 			on_open();
 			return TRUE;
-		case GDK_KEY_r:
-			// TODO(p): Reload the image instead, if it's currently visible.
-			load_directory(NULL);
-			return TRUE;
 		case GDK_KEY_q:
 		case GDK_KEY_w:
 			gtk_widget_destroy(g.window);
@@ -1087,16 +1085,9 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 		case GDK_KEY_q:
 			gtk_widget_destroy(g.window);
 			return TRUE;
-
 		case GDK_KEY_o:
 			on_open();
 			return TRUE;
-		case GDK_KEY_F5:
-		case GDK_KEY_r:
-			// TODO(p): See the comment for C-r above.
-			load_directory(NULL);
-			return TRUE;
-
 		case GDK_KEY_F1:
 			show_help_shortcuts();
 			return TRUE;
@@ -1104,7 +1095,6 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 			gtk_widget_set_visible(g.browser_sidebar,
 				!gtk_widget_is_visible(g.browser_sidebar));
 			return TRUE;
-
 		case GDK_KEY_F11:
 		case GDK_KEY_f:
 			toggle_fullscreen();
@@ -1152,6 +1142,13 @@ on_key_press_browser_paned(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 {
 	// TODO(p): Consider replicating more GtkFileChooserWidget bindings.
 	switch (event->state & gtk_accelerator_get_default_mod_mask()) {
+	case GDK_CONTROL_MASK:
+		switch (event->keyval) {
+		case GDK_KEY_r:
+			load_directory(NULL);
+			return TRUE;
+		}
+		break;
 	case GDK_MOD1_MASK:
 		switch (event->keyval) {
 		case GDK_KEY_Up: {
@@ -1174,6 +1171,10 @@ on_key_press_browser_paned(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 		switch (event->keyval) {
 		case GDK_KEY_h:
 			gtk_button_clicked(GTK_BUTTON(g.funnel));
+			return TRUE;
+		case GDK_KEY_F5:
+		case GDK_KEY_r:
+			load_directory(NULL);
 			return TRUE;
 		}
 	}

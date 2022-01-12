@@ -28,6 +28,8 @@ gboolean fiv_view_open(FivView *self, const gchar *uri, GError **error);
 // And this is how you avoid glib-mkenums.
 typedef enum _FivViewCommand {
 #define FIV_VIEW_COMMANDS(XX)                                                  \
+	XX(FIV_VIEW_COMMAND_RELOAD,              "reload")                         \
+	\
 	XX(FIV_VIEW_COMMAND_ROTATE_LEFT,         "rotate-left")                    \
 	XX(FIV_VIEW_COMMAND_MIRROR,              "mirror")                         \
 	XX(FIV_VIEW_COMMAND_ROTATE_RIGHT,        "rotate-right")                   \
