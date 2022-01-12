@@ -1131,6 +1131,7 @@ on_key_press_view(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 
 		case GDK_KEY_Return:
 			switch_to_browser();
+			fiv_browser_select(FIV_BROWSER(g.browser), g.uri);
 			return TRUE;
 		}
 	}
