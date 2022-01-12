@@ -404,7 +404,7 @@ show_about_dialog(GtkWidget *parent)
 
 	GtkWidget *website = gtk_label_new(NULL);
 	gtk_label_set_selectable(GTK_LABEL(website), TRUE);
-	const char *url = "https://git.janouch.name/p/fiv";
+	const char *url = "https://git.janouch.name/p/" PROJECT_NAME;
 	gchar *link = g_strdup_printf("<a href='%s'>%s</a>", url, url);
 	gtk_label_set_markup(GTK_LABEL(website), link);
 	g_free(link);
