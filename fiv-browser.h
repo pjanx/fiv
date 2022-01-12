@@ -25,3 +25,4 @@
 G_DECLARE_FINAL_TYPE(FivBrowser, fiv_browser, FIV, BROWSER, GtkWidget)
 
 GtkWidget *fiv_browser_new(FivIoModel *model);
+void fiv_browser_select(FivBrowser *self, const char *uri);

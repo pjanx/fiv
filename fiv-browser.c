@@ -1550,12 +1550,9 @@ on_model_files_changed(FivIoModel *model, FivBrowser *self)
 {
 	g_return_if_fail(model == self->model);
 
-	int selected = -1;
 	gchar *selected_uri = NULL;
-	if (self->selected) {
+	if (self->selected)
 		selected_uri = g_strdup(self->selected->uri);
-		self->selected = NULL;
-	}
 
 	// TODO(p): Later implement arguments.
 	thumbnailers_abort(self);
@@ -1566,16 +1563,12 @@ on_model_files_changed(FivIoModel *model, FivBrowser *self)
 	for (guint i = 0; i < files->len; i++) {
 		g_array_append_val(self->entries,
 			((Entry) {.thumbnail = NULL, .uri = files->pdata[i]}));
-		if (!g_strcmp0(selected_uri, files->pdata[i]))
-			selected = i;
 		files->pdata[i] = NULL;
 	}
 	g_ptr_array_free(files, TRUE);
 
-	// Beware that the pointer may shift with the storage.
+	fiv_browser_select(self, selected_uri);
 	g_free(selected_uri);
-	if (selected >= 0)
-		self->selected = &g_array_index(self->entries, Entry, selected);
 
 	reload_thumbnails(self);
 	thumbnailers_start(self);
@@ -1593,4 +1586,25 @@ fiv_browser_new(FivIoModel *model)
 		self->model, "files-changed", G_CALLBACK(on_model_files_changed), self);
 	on_model_files_changed(self->model, self);
 	return GTK_WIDGET(self);
+}
+
+void
+fiv_browser_select(FivBrowser *self, const char *uri)
+{
+	g_return_if_fail(FIV_IS_BROWSER(self));
+
+	self->selected = NULL;
+	gtk_widget_queue_draw(GTK_WIDGET(self));
+	if (!uri)
+		return;
+
+	for (guint i = 0; i < self->entries->len; i++) {
+		const Entry *entry = &g_array_index(self->entries, Entry, i);
+		if (!g_strcmp0(entry->uri, uri)) {
+			self->selected = entry;
+			break;
+		}
+	}
+
+	// TODO(p): Scroll to selection.
 }

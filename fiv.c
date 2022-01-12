@@ -880,11 +880,12 @@ open_any_file(GFile *file, gboolean force_browser)
 	} else if (type == G_FILE_TYPE_DIRECTORY) {
 		load_directory(uri);
 	} else if (force_browser) {
-		// GNOME, e.g., invokes this as a hint to focus the particular file,
-		// which we can't currently do yet.
+		// GNOME, e.g., invokes this as a hint to focus the particular file.
 		gchar *parent = parent_uri(file);
 		load_directory(parent);
 		g_free(parent);
+
+		fiv_browser_select(FIV_BROWSER(g.browser), uri);
 	} else {
 		open(uri);
 	}
