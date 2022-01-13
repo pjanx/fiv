@@ -417,8 +417,8 @@ on_show_enter_location(
 	g_free(label);
 
 	GtkWidget *content = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
-	g_object_set(content, "margin", 5, NULL);
-	gtk_box_set_spacing(GTK_BOX(content), 5);
+	g_object_set(content, "margin", 12, NULL);
+	gtk_box_set_spacing(GTK_BOX(content), 6);
 	gtk_container_add(GTK_CONTAINER(content), entry);
 	gtk_container_add(GTK_CONTAINER(content), protocols);
 	gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_ACCEPT);

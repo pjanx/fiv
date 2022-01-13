@@ -437,7 +437,7 @@ show_about_dialog(GtkWidget *parent)
 	gtk_text_buffer_insert_markup(buffer, &iter, formatted, -1);
 	g_free(formatted);
 
-	enum { SUBBOX_MARGIN = 12 /* Roughly matches. */ };
+	enum { SUBBOX_MARGIN = 12 /* GNOME HIG 1.0 */ };
 	GtkWidget *subbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
 	gtk_widget_set_margin_start(subbox, SUBBOX_MARGIN);
 	gtk_widget_set_margin_end(subbox, SUBBOX_MARGIN);
