@@ -20,6 +20,7 @@
 #include <cairo.h>
 #include <gio/gio.h>
 #include <glib.h>
+#include <webp/encode.h>  // WebPConfig
 
 // --- Colour management -------------------------------------------------------
 
@@ -102,8 +103,6 @@ GPtrArray *fiv_io_model_get_files(FivIoModel *self);
 GPtrArray *fiv_io_model_get_subdirectories(FivIoModel *self);
 
 // --- Export ------------------------------------------------------------------
-
-typedef struct WebPConfig WebPConfig;
 
 /// Encodes a Cairo surface as a WebP bitstream, following the configuration.
 /// The result needs to be freed using WebPFree/WebPDataClear().
