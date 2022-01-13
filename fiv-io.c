@@ -768,6 +768,8 @@ open_wuffs(wuffs_base__image_decoder *dec, wuffs_base__io_buffer src,
 		.dec = dec, .src = &src, .target = profile};
 
 	// TODO(p): PNG text chunks (Wuffs #58).
+	// TODO(p): See if something could and should be done about
+	// https://www.w3.org/TR/png-hdr-pq/
 	wuffs_base__image_decoder__set_report_metadata(
 		ctx.dec, WUFFS_BASE__FOURCC__EXIF, true);
 	wuffs_base__image_decoder__set_report_metadata(
