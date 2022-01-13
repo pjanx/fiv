@@ -525,6 +525,7 @@ struct {
 	gint files_index;          ///< Where "uri" is within "files"
 
 	GtkWidget *window;
+	GtkWidget *menu;
 	GtkWidget *stack;
 
 	GtkWidget *browser_paned;
@@ -1102,6 +1103,26 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 			return TRUE;
 		}
 	}
+
+	gchar *accelerator = NULL;
+	g_object_get(gtk_widget_get_settings(g.window), "gtk-menu-bar-accel",
+		&accelerator, NULL);
+	if (!accelerator)
+		return FALSE;
+
+	guint key = 0;
+	GdkModifierType mods = 0;
+	gtk_accelerator_parse(accelerator, &key, &mods);
+	g_free(accelerator);
+
+	guint mask = gtk_accelerator_get_default_mod_mask();
+	if (key && event->keyval == key && (event->state & mask) == mods) {
+		gtk_widget_show(g.menu);
+
+		// _gtk_menu_shell_set_keyboard_mode() is private.
+		// We've added a viewable menu bar, so calling this again will work.
+		return gtk_window_activate_key(GTK_WINDOW(g.window), event);
+	}
 	return FALSE;
 }
 
@@ -1566,6 +1587,44 @@ make_browser_sidebar(FivIoModel *model)
 	return sidebar;
 }
 
+static GtkWidget *
+make_menu_bar(void)
+{
+	g.menu = gtk_menu_bar_new();
+
+	GtkWidget *item_quit = gtk_menu_item_new_with_mnemonic("_Quit");
+	g_signal_connect_swapped(item_quit, "activate",
+		G_CALLBACK(gtk_widget_destroy), g.window);
+
+	GtkWidget *menu_file = gtk_menu_new();
+	gtk_menu_shell_append(GTK_MENU_SHELL(menu_file), item_quit);
+	GtkWidget *item_file = gtk_menu_item_new_with_mnemonic("_File");
+	gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_file), menu_file);
+	gtk_menu_shell_append(GTK_MENU_SHELL(g.menu), item_file);
+
+	GtkWidget *item_shortcuts =
+		gtk_menu_item_new_with_mnemonic("_Keyboard Shortcuts");
+	g_signal_connect_swapped(item_shortcuts, "activate",
+		G_CALLBACK(show_help_shortcuts), NULL);
+	GtkWidget *item_about = gtk_menu_item_new_with_mnemonic("_About");
+	g_signal_connect_swapped(item_about, "activate",
+		G_CALLBACK(show_about_dialog), g.window);
+
+	GtkWidget *menu_help = gtk_menu_new();
+	gtk_menu_shell_append(GTK_MENU_SHELL(menu_help), item_shortcuts);
+	gtk_menu_shell_append(GTK_MENU_SHELL(menu_help), item_about);
+	GtkWidget *item_help = gtk_menu_item_new_with_mnemonic("_Help");
+	gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_help), menu_help);
+	gtk_menu_shell_append(GTK_MENU_SHELL(g.menu), item_help);
+
+	// Don't let it take up space by default. Firefox sets a precedent here.
+	gtk_widget_show_all(g.menu);
+	gtk_widget_set_no_show_all(g.menu, TRUE);
+	gtk_widget_hide(g.menu);
+	g_signal_connect(g.menu, "deactivate", G_CALLBACK(gtk_widget_hide), NULL);
+	return g.menu;
+}
+
 // This is incredibly broken https://stackoverflow.com/a/51054396/76313
 // thus resolving the problem using overlaps.
 // We're trying to be universal for light and dark themes both. It's hard.
@@ -1760,7 +1819,11 @@ main(int argc, char *argv[])
 		G_CALLBACK(on_key_press), NULL);
 	g_signal_connect(g.window, "window-state-event",
 		G_CALLBACK(on_window_state_event), NULL);
-	gtk_container_add(GTK_CONTAINER(g.window), g.stack);
+
+	GtkWidget *menu_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	gtk_container_add(GTK_CONTAINER(menu_box), make_menu_bar());
+	gtk_container_add(GTK_CONTAINER(menu_box), g.stack);
+	gtk_container_add(GTK_CONTAINER(g.window), menu_box);
 
 	// Try to get half of the screen vertically, in 4:3 aspect ratio.
 	//
