@@ -1696,7 +1696,7 @@ main(int argc, char *argv[])
 	gchar **path_args = NULL, *thumbnail_size = NULL;
 	const GOptionEntry options[] = {
 		{G_OPTION_REMAINING, 0, 0, G_OPTION_ARG_FILENAME_ARRAY, &path_args,
-			NULL, "[FILE | DIRECTORY]"},
+			NULL, "[FILE | DIRECTORY | URI]"},
 		{"list-supported-media-types", 0, G_OPTION_FLAG_IN_MAIN,
 			G_OPTION_ARG_NONE, &show_supported_media_types,
 			"Output supported media types and exit", NULL},
