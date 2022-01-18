@@ -1,6 +1,6 @@
 option('lcms2', type : 'feature', value : 'auto',
 	description : 'Build with Little CMS colour management')
-option('jpeg-qs', type : 'feature', value : 'enabled',
+option('libjpegqs', type : 'feature', value : 'auto',
 	description : 'Build with JPEG Quant Smooth integration')
 option('libraw', type : 'feature', value : 'auto',
 	description : 'Build with raw photo support, requires LibRaw')

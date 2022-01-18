@@ -17,6 +17,12 @@ add_project_arguments(
 #	add_project_link_arguments(flags, language : ['c'])
 #endif
 
+# The likelihood of this being installed is nearly zero. Enable the wrap.
+libjpegqs = dependency('libjpegqs',
+	required : get_option('libjpegqs'),
+	allow_fallback : true,
+)
+
 lcms2 = dependency('lcms2', required : get_option('lcms2'))
 # Note that only libraw_r is thread-safe, but we'll just run it out-of process.
 libraw = dependency('libraw', required : get_option('libraw'))
@@ -30,7 +36,6 @@ dependencies = [
 	dependency('pixman-1'),
 
 	dependency('libturbojpeg'),
-	dependency('libjpeg', required : get_option('jpeg-qs')),
 	dependency('libwebp'),
 	dependency('libwebpdemux'),
 	dependency('libwebpdecoder', required : false),
@@ -42,6 +47,7 @@ dependencies = [
 	),
 
 	lcms2,
+	libjpegqs,
 	libraw,
 	librsvg,
 	xcursor,
@@ -54,8 +60,7 @@ dependencies = [
 conf = configuration_data()
 conf.set_quoted('PROJECT_NAME', meson.project_name())
 conf.set_quoted('PROJECT_VERSION', meson.project_version())
-# TODO(p): Wrap it in a Meson subproject, try to enable SIMD.
-conf.set('HAVE_JPEG_QS', get_option('jpeg-qs').enabled())
+conf.set('HAVE_JPEG_QS', libjpegqs.found())
 conf.set('HAVE_LCMS2', lcms2.found())
 conf.set('HAVE_LIBRAW', libraw.found())
 conf.set('HAVE_LIBRSVG', librsvg.found())

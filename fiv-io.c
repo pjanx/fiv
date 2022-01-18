@@ -32,10 +32,7 @@
 #include <stdio.h>
 
 #include <jpeglib.h>
-// This library is tricky to build, simply make it work at all.
-#define NO_SIMD
-#include <jpeg-quantsmooth/quantsmooth.h>
-#undef NO_SIMD
+#include <libjpegqs.h>
 #endif  // HAVE_JPEG_QS
 
 // Colour management must be handled before RGB conversions.

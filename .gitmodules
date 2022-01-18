@@ -1,6 +1,3 @@
 [submodule "wuffs-mirror-release-c"]
 	path = wuffs-mirror-release-c
 	url = https://github.com/google/wuffs-mirror-release-c
-[submodule "jpeg-quantsmooth"]
-	path = jpeg-quantsmooth
-	url = https://github.com/ilyakurdyukov/jpeg-quantsmooth.git
