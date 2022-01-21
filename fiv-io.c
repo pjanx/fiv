@@ -43,6 +43,9 @@
 #ifdef HAVE_LIBRAW
 #include <libraw.h>
 #endif  // HAVE_LIBRAW
+#ifdef HAVE_RESVG
+#include <resvg.h>
+#endif  // HAVE_RESVG
 #ifdef HAVE_LIBRSVG
 #include <librsvg/rsvg.h>
 #endif  // HAVE_LIBRSVG
@@ -92,9 +95,9 @@ const char *fiv_io_supported_media_types[] = {
 #ifdef HAVE_LIBRAW
 	"image/x-dcraw",
 #endif  // HAVE_LIBRAW
-#ifdef HAVE_LIBRSVG
+#if defined HAVE_RESVG || defined HAVE_LIBRSVG
 	"image/svg+xml",
-#endif  // HAVE_LIBRSVG
+#endif  // HAVE_RESVG || HAVE_LIBRSVG
 #ifdef HAVE_XCURSOR
 	"image/x-xcursor",
 #endif  // HAVE_XCURSOR
@@ -1320,6 +1323,85 @@ open_libraw(const gchar *data, gsize len, GError **error)
 }
 
 #endif  // HAVE_LIBRAW ---------------------------------------------------------
+#ifdef HAVE_RESVG  // ----------------------------------------------------------
+
+static const char *
+load_resvg_error(int err)
+{
+	switch (err) {
+	case RESVG_ERROR_NOT_AN_UTF8_STR:
+		return "not a UTF-8 string";
+	case RESVG_ERROR_FILE_OPEN_FAILED:
+		return "I/O failure";
+	case RESVG_ERROR_MALFORMED_GZIP:
+		return "malformed gzip";
+	case RESVG_ERROR_ELEMENTS_LIMIT_REACHED:
+		return "element limit reached";
+	case RESVG_ERROR_INVALID_SIZE:
+		return "invalid or unspecified image size";
+	case RESVG_ERROR_PARSING_FAILED:
+		return "parsing failed";
+	default:
+		return "general failure";
+	}
+}
+
+static cairo_surface_t *
+open_resvg(const gchar *data, gsize len, const gchar *uri, GError **error)
+{
+	GFile *file = g_file_new_for_uri(uri);
+	GFile *base_file = g_file_get_parent(file);
+	g_object_unref(file);
+
+	resvg_options *opt = resvg_options_create();
+	resvg_options_load_system_fonts(opt);
+	resvg_options_set_resources_dir(opt, g_file_peek_path(base_file));
+	resvg_render_tree *tree = NULL;
+	int err = resvg_parse_tree_from_data(data, len, opt, &tree);
+	resvg_options_destroy(opt);
+	g_object_unref(base_file);
+	if (err != RESVG_OK) {
+		set_error(error, load_resvg_error(err));
+		return NULL;
+	}
+
+	// TODO(p): Support retrieving a scaled-up/down version.
+	// TODO(p): See if there is a situation for resvg_get_image_viewbox().
+	resvg_size size = resvg_get_image_size(tree);
+	int w = ceil(size.width), h = ceil(size.height);
+	if (w > SHRT_MAX || h > SHRT_MAX) {
+		set_error(error, "image dimensions overflow");
+		resvg_tree_destroy(tree);
+		return NULL;
+	}
+
+	cairo_surface_t *surface =
+		cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+	cairo_status_t surface_status = cairo_surface_status(surface);
+	if (surface_status != CAIRO_STATUS_SUCCESS) {
+		set_error(error, cairo_status_to_string(surface_status));
+		cairo_surface_destroy(surface);
+		return NULL;
+	}
+
+	uint32_t *pixels = (uint32_t *) cairo_image_surface_get_data(surface);
+	resvg_fit_to fit_to = { RESVG_FIT_TO_TYPE_ORIGINAL, 1. };
+	resvg_render(tree, fit_to, resvg_transform_identity(),
+		cairo_image_surface_get_width(surface),
+		cairo_image_surface_get_height(surface), (char *) pixels);
+	resvg_tree_destroy(tree);
+
+	// TODO(p): Also apply colour management, we'll need to un-premultiply.
+	for (int i = 0; i < w * h; i++) {
+		uint32_t rgba = g_ntohl(pixels[i]);
+		pixels[i] = rgba << 24 | rgba >> 8;
+	}
+
+	cairo_surface_mark_dirty(surface);
+	return surface;
+}
+
+#endif  // HAVE_RESVG ----------------------------------------------------------
 #ifdef HAVE_LIBRSVG  // --------------------------------------------------------
 
 #ifdef FIV_RSVG_DEBUG
@@ -2391,6 +2473,14 @@ fiv_io_open_from_data(const char *data, size_t len, const gchar *uri,
 			g_clear_error(error);
 		}
 #endif  // HAVE_LIBRAW ---------------------------------------------------------
+#ifdef HAVE_RESVG  // ----------------------------------------------------------
+		if ((surface = open_resvg(data, len, uri, error)))
+			break;
+		if (error) {
+			g_debug("%s", (*error)->message);
+			g_clear_error(error);
+		}
+#endif  // HAVE_RESVG ----------------------------------------------------------
 #ifdef HAVE_LIBRSVG  // --------------------------------------------------------
 		if ((surface = open_librsvg(data, len, uri, error)))
 			break;

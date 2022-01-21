@@ -4,6 +4,8 @@ option('libjpegqs', type : 'feature', value : 'auto',
 	description : 'Build with JPEG Quant Smooth integration')
 option('libraw', type : 'feature', value : 'auto',
 	description : 'Build with raw photo support, requires LibRaw')
+option('resvg', type : 'feature', value : 'disabled',
+	description : 'Build with SVG support via resvg (pre-1.0 unstable API)')
 option('librsvg', type : 'feature', value : 'auto',
 	description : 'Build with SVG support, requires librsvg')
 option('xcursor', type : 'feature', value : 'auto',

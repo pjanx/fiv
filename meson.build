@@ -2,17 +2,16 @@
 project('fiv', 'c',
 	default_options : ['c_std=gnu99', 'warning_level=2'],
 	version : '0.1.0')
+
+cc = meson.get_compiler('c')
 add_project_arguments(
-	meson.get_compiler('c').get_supported_arguments('-Wno-cast-function-type'),
-	language : 'c',
-)
+	cc.get_supported_arguments('-Wno-cast-function-type'), language : 'c')
 
 # This, annoyingly, enables the leak sanitizer by default,
 # which requires some tuning to not stand in the way.
 # Use -Db_sanitize=address,undefined and adjust LSAN_OPTIONS yourself.
 #if get_option('buildtype').startswith('debug')
-#	flags = meson.get_compiler('c').get_supported_arguments(
-#		'-fsanitize=address,undefined')
+#	flags = cc.get_supported_arguments('-fsanitize=address,undefined')
 #	add_project_arguments(flags, language : ['c'])
 #	add_project_link_arguments(flags, language : ['c'])
 #endif
@@ -22,6 +21,19 @@ libjpegqs = dependency('libjpegqs',
 	required : get_option('libjpegqs'),
 	allow_fallback : true,
 )
+
+# As of writing, the API is unstable, and no pkg-config file is produced.
+# Trying to wrap Cargo in Meson is a recipe for pain, so no version pinning.
+resvg = disabler()
+if not get_option('resvg').disabled()
+	resvg = dependency('resvg', required : false)
+	if not resvg.found()
+		resvg = cc.find_library('libresvg', required : get_option('resvg'))
+		if resvg.found() and not cc.has_header('resvg.h')
+			error('resvg.h not found')
+		endif
+	endif
+endif
 
 lcms2 = dependency('lcms2', required : get_option('lcms2'))
 # Note that only libraw_r is thread-safe, but we'll just run it out-of process.
@@ -35,6 +47,7 @@ dependencies = [
 	dependency('gtk+-3.0'),
 	dependency('pixman-1'),
 
+	# Wuffs is included as a submodule.
 	dependency('libturbojpeg'),
 	dependency('libwebp'),
 	dependency('libwebpdemux'),
@@ -49,12 +62,14 @@ dependencies = [
 	lcms2,
 	libjpegqs,
 	libraw,
+	resvg,
 	librsvg,
 	xcursor,
 	libheif,
 	libtiff,
 	gdkpixbuf,
-	meson.get_compiler('c').find_library('m', required : false),
+
+	cc.find_library('m', required : false),
 ]
 
 conf = configuration_data()
@@ -63,6 +78,7 @@ conf.set_quoted('PROJECT_VERSION', meson.project_version())
 conf.set('HAVE_JPEG_QS', libjpegqs.found())
 conf.set('HAVE_LCMS2', lcms2.found())
 conf.set('HAVE_LIBRAW', libraw.found())
+conf.set('HAVE_RESVG', resvg.found())
 conf.set('HAVE_LIBRSVG', librsvg.found())
 conf.set('HAVE_XCURSOR', xcursor.found())
 conf.set('HAVE_LIBHEIF', libheif.found())
