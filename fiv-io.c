@@ -1368,7 +1368,7 @@ open_resvg(const gchar *data, gsize len, const gchar *uri, GError **error)
 	// TODO(p): Support retrieving a scaled-up/down version.
 	// TODO(p): See if there is a situation for resvg_get_image_viewbox().
 	resvg_size size = resvg_get_image_size(tree);
-	int w = ceil(size.width), h = ceil(size.height);
+	double w = ceil(size.width), h = ceil(size.height);
 	if (w > SHRT_MAX || h > SHRT_MAX) {
 		set_error(error, "image dimensions overflow");
 		resvg_tree_destroy(tree);
@@ -1381,6 +1381,7 @@ open_resvg(const gchar *data, gsize len, const gchar *uri, GError **error)
 	if (surface_status != CAIRO_STATUS_SUCCESS) {
 		set_error(error, cairo_status_to_string(surface_status));
 		cairo_surface_destroy(surface);
+		resvg_tree_destroy(tree);
 		return NULL;
 	}
 
