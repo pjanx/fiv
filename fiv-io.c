@@ -2517,21 +2517,25 @@ fiv_io_open_from_data(const char *data, size_t len, const gchar *uri,
 			g_clear_error(error);
 		}
 #endif  // HAVE_LIBTIFF --------------------------------------------------------
-#ifdef HAVE_GDKPIXBUF  // ------------------------------------------------------
-		// This is only used as a last resort, the rest above is special-cased.
-		if ((surface = open_gdkpixbuf(data, len, profile, error)))
-			break;
-		if (error && (*error)->code != GDK_PIXBUF_ERROR_UNKNOWN_TYPE)
-			break;
-
-		if (error) {
-			g_debug("%s", (*error)->message);
-			g_clear_error(error);
-		}
-#endif  // HAVE_GDKPIXBUF ------------------------------------------------------
 
 		set_error(error, "unsupported file type");
 	}
+
+#ifdef HAVE_GDKPIXBUF  // ------------------------------------------------------
+	// This is used as a last resort, the rest above is special-cased.
+	// Wuffs #71 and similar concerns make us default to it in all cases.
+	if (!surface) {
+		GError *err = NULL;
+		if ((surface = open_gdkpixbuf(data, len, profile, &err))) {
+			g_clear_error(error);
+		} else if (err->code == GDK_PIXBUF_ERROR_UNKNOWN_TYPE) {
+			g_error_free(err);
+		} else {
+			g_clear_error(error);
+			g_propagate_error(error, err);
+		}
+	}
+#endif  // HAVE_GDKPIXBUF ------------------------------------------------------
 
 	// gdk-pixbuf only gives out this single field--cater to its limitations,
 	// since we'd really like to have it.
