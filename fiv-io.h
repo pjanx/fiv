@@ -73,6 +73,16 @@ extern cairo_user_data_key_t fiv_io_key_page_next;
 /// There is no wrap-around. This is a weak pointer.
 extern cairo_user_data_key_t fiv_io_key_page_previous;
 
+typedef struct _FivIoRenderClosure {
+	/// The rendering is allowed to fail.
+	cairo_surface_t *(*render)(struct _FivIoRenderClosure *, double scale);
+} FivIoRenderClosure;
+
+/// A FivIoRenderClosure for parametrized re-rendering of vector formats.
+/// This is attached at the page level.
+/// The rendered image will not have this key.
+extern cairo_user_data_key_t fiv_io_key_render;
+
 cairo_surface_t *fiv_io_open(
 	const gchar *uri, FivIoProfile profile, gboolean enhance, GError **error);
 cairo_surface_t *fiv_io_open_from_data(const char *data, size_t len,

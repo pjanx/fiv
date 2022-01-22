@@ -1596,6 +1596,65 @@ open_libraw(const gchar *data, gsize len, GError **error)
 #endif  // HAVE_LIBRAW ---------------------------------------------------------
 #ifdef HAVE_RESVG  // ----------------------------------------------------------
 
+typedef struct {
+	FivIoRenderClosure parent;
+	resvg_render_tree *tree;            ///< Loaded resvg tree
+	double width;                       ///< Normal width
+	double height;                      ///< Normal height
+} FivIoRenderClosureResvg;
+
+static void
+load_resvg_destroy(void *closure)
+{
+	FivIoRenderClosureResvg *self = closure;
+	resvg_tree_destroy(self->tree);
+	g_free(self);
+}
+
+static cairo_surface_t *
+load_resvg_render_internal(
+	FivIoRenderClosureResvg *self, double scale, GError **error)
+{
+	double w = ceil(self->width * scale), h = ceil(self->height * scale);
+	if (w > SHRT_MAX || h > SHRT_MAX) {
+		set_error(error, "image dimensions overflow");
+		return NULL;
+	}
+
+	cairo_surface_t *surface =
+		cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+	cairo_status_t surface_status = cairo_surface_status(surface);
+	if (surface_status != CAIRO_STATUS_SUCCESS) {
+		set_error(error, cairo_status_to_string(surface_status));
+		cairo_surface_destroy(surface);
+		return NULL;
+	}
+
+	uint32_t *pixels = (uint32_t *) cairo_image_surface_get_data(surface);
+	resvg_fit_to fit_to = {
+		scale == 1 ? RESVG_FIT_TO_TYPE_ORIGINAL : RESVG_FIT_TO_TYPE_ZOOM,
+		scale};
+	resvg_render(self->tree, fit_to, resvg_transform_identity(),
+		cairo_image_surface_get_width(surface),
+		cairo_image_surface_get_height(surface), (char *) pixels);
+
+	// TODO(p): Also apply colour management, we'll need to un-premultiply.
+	for (int i = 0; i < w * h; i++) {
+		uint32_t rgba = g_ntohl(pixels[i]);
+		pixels[i] = rgba << 24 | rgba >> 8;
+	}
+
+	cairo_surface_mark_dirty(surface);
+	return surface;
+}
+
+static cairo_surface_t *
+load_resvg_render(FivIoRenderClosure *closure, double scale)
+{
+	FivIoRenderClosureResvg *self = (FivIoRenderClosureResvg *) closure;
+	return load_resvg_render_internal(self, scale, NULL);
+}
+
 static const char *
 load_resvg_error(int err)
 {
@@ -1627,6 +1686,7 @@ open_resvg(const gchar *data, gsize len, const gchar *uri, GError **error)
 	resvg_options *opt = resvg_options_create();
 	resvg_options_load_system_fonts(opt);
 	resvg_options_set_resources_dir(opt, g_file_peek_path(base_file));
+	// TODO(p): Acquire and set the right DPI for use.
 	resvg_render_tree *tree = NULL;
 	int err = resvg_parse_tree_from_data(data, len, opt, &tree);
 	resvg_options_destroy(opt);
@@ -1636,40 +1696,23 @@ open_resvg(const gchar *data, gsize len, const gchar *uri, GError **error)
 		return NULL;
 	}
 
-	// TODO(p): Support retrieving a scaled-up/down version.
 	// TODO(p): See if there is a situation for resvg_get_image_viewbox().
 	resvg_size size = resvg_get_image_size(tree);
-	double w = ceil(size.width), h = ceil(size.height);
-	if (w > SHRT_MAX || h > SHRT_MAX) {
-		set_error(error, "image dimensions overflow");
-		resvg_tree_destroy(tree);
+
+	FivIoRenderClosureResvg *closure = g_malloc0(sizeof *closure);
+	closure->parent.render = load_resvg_render;
+	closure->tree = tree;
+	closure->width = size.width;
+	closure->height = size.height;
+
+	cairo_surface_t *surface = load_resvg_render_internal(closure, 1., error);
+	if (!surface) {
+		load_resvg_destroy(closure);
 		return NULL;
 	}
 
-	cairo_surface_t *surface =
-		cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
-	cairo_status_t surface_status = cairo_surface_status(surface);
-	if (surface_status != CAIRO_STATUS_SUCCESS) {
-		set_error(error, cairo_status_to_string(surface_status));
-		cairo_surface_destroy(surface);
-		resvg_tree_destroy(tree);
-		return NULL;
-	}
-
-	uint32_t *pixels = (uint32_t *) cairo_image_surface_get_data(surface);
-	resvg_fit_to fit_to = { RESVG_FIT_TO_TYPE_ORIGINAL, 1. };
-	resvg_render(tree, fit_to, resvg_transform_identity(),
-		cairo_image_surface_get_width(surface),
-		cairo_image_surface_get_height(surface), (char *) pixels);
-	resvg_tree_destroy(tree);
-
-	// TODO(p): Also apply colour management, we'll need to un-premultiply.
-	for (int i = 0; i < w * h; i++) {
-		uint32_t rgba = g_ntohl(pixels[i]);
-		pixels[i] = rgba << 24 | rgba >> 8;
-	}
-
-	cairo_surface_mark_dirty(surface);
+	cairo_surface_set_user_data(
+		surface, &fiv_io_key_render, closure, load_resvg_destroy);
 	return surface;
 }
 
@@ -1680,6 +1723,50 @@ open_resvg(const gchar *data, gsize len, const gchar *uri, GError **error)
 #include <cairo/cairo-script.h>
 #include <cairo/cairo-svg.h>
 #endif
+
+typedef struct {
+	FivIoRenderClosure parent;
+	RsvgHandle *handle;                 ///< Loaded rsvg handle
+	double width;                       ///< Normal width
+	double height;                      ///< Normal height
+} FivIoRenderClosureLibrsvg;
+
+static void
+load_librsvg_destroy(void *closure)
+{
+	FivIoRenderClosureLibrsvg *self = closure;
+	g_object_unref(self->handle);
+	g_free(self);
+}
+
+static cairo_surface_t *
+load_librsvg_render(FivIoRenderClosure *closure, double scale)
+{
+	FivIoRenderClosureLibrsvg *self = (FivIoRenderClosureLibrsvg *) closure;
+	RsvgRectangle viewport = {.x = 0, .y = 0,
+		.width = self->width * scale, .height = self->height * scale};
+	cairo_surface_t *surface = cairo_image_surface_create(
+		CAIRO_FORMAT_ARGB32, ceil(viewport.width), ceil(viewport.height));
+
+	GError *error = NULL;
+	cairo_t *cr = cairo_create(surface);
+	(void) rsvg_handle_render_document(self->handle, cr, &viewport, &error);
+	cairo_destroy(cr);
+	if (error) {
+		g_debug("%s", error->message);
+		g_error_free(error);
+		cairo_surface_destroy(surface);
+		return NULL;
+	}
+
+	cairo_status_t surface_status = cairo_surface_status(surface);
+	if (surface_status != CAIRO_STATUS_SUCCESS) {
+		g_debug("%s", cairo_status_to_string(surface_status));
+		cairo_surface_destroy(surface);
+		return NULL;
+	}
+	return surface;
+}
 
 // FIXME: librsvg rasterizes filters, so this method isn't fully appropriate.
 static cairo_surface_t *
@@ -1744,7 +1831,14 @@ open_librsvg(const gchar *data, gsize len, const gchar *uri, GError **error)
 	}
 
 	cairo_destroy(cr);
-	g_object_unref(handle);
+
+	FivIoRenderClosureLibrsvg *closure = g_malloc0(sizeof *closure);
+	closure->parent.render = load_librsvg_render;
+	closure->handle = handle;
+	closure->width = w;
+	closure->height = h;
+	cairo_surface_set_user_data(
+		surface, &fiv_io_key_render, closure, load_librsvg_destroy);
 
 #ifdef FIV_RSVG_DEBUG
 	cairo_surface_t *svg = cairo_svg_surface_create("cairo.svg", w, h);
@@ -2438,6 +2532,7 @@ open_gdkpixbuf(
 
 #endif  // HAVE_GDKPIXBUF ------------------------------------------------------
 
+// TODO(p): Check that all cairo_surface_set_user_data() calls succeed.
 cairo_user_data_key_t fiv_io_key_exif;
 cairo_user_data_key_t fiv_io_key_orientation;
 cairo_user_data_key_t fiv_io_key_icc;
@@ -2451,6 +2546,8 @@ cairo_user_data_key_t fiv_io_key_loops;
 
 cairo_user_data_key_t fiv_io_key_page_next;
 cairo_user_data_key_t fiv_io_key_page_previous;
+
+cairo_user_data_key_t fiv_io_key_render;
 
 cairo_surface_t *
 fiv_io_open(
