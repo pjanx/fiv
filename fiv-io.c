@@ -1223,6 +1223,8 @@ static const char *
 load_libwebp_error(VP8StatusCode err)
 {
 	switch (err) {
+	case VP8_STATUS_OK:
+		return "OK";
 	case VP8_STATUS_OUT_OF_MEMORY:
 		return "out of memory";
 	case VP8_STATUS_INVALID_PARAM:
@@ -1271,10 +1273,20 @@ load_libwebp_nonanimated(WebPDecoderConfig *config, const WebPData *wd,
 	else
 		config->output.colorspace = premultiply ? MODE_Argb : MODE_ARGB;
 
-	VP8StatusCode err = 0;
-	if ((err = WebPDecode(wd->bytes, wd->size, config))) {
-		g_set_error(error, FIV_IO_ERROR, FIV_IO_ERROR_OPEN,
-			"%s: %s", "WebP decoding error", load_libwebp_error(err));
+	WebPIDecoder *idec = WebPIDecode(NULL, 0, config);
+	if (!idec) {
+		set_error(error, "WebP decoding error");
+		cairo_surface_destroy(surface);
+		return NULL;
+	}
+
+	VP8StatusCode err = WebPIUpdate(idec, wd->bytes, wd->size);
+	WebPIDelete(idec);
+	if (err == VP8_STATUS_SUSPENDED) {
+		g_warning("partial WebP");
+	} else if (err) {
+		g_set_error(error, FIV_IO_ERROR, FIV_IO_ERROR_OPEN, "%s: %s",
+			"WebP decoding error", load_libwebp_error(err));
 		cairo_surface_destroy(surface);
 		return NULL;
 	}
@@ -1388,7 +1400,6 @@ open_libwebp(const gchar *data, gsize len, const gchar *uri,
 	}
 
 	// TODO(p): Differentiate between a bad WebP, and not a WebP.
-	// TODO(p): Make sure partial WebPs load with a non-fatal error.
 	VP8StatusCode err = 0;
 	WebPData wd = {.bytes = (const uint8_t *) data, .size = len};
 	if ((err = WebPGetFeatures(wd.bytes, wd.size, &config.input))) {
