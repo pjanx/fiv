@@ -1281,18 +1281,35 @@ load_libwebp_nonanimated(WebPDecoderConfig *config, const WebPData *wd,
 	}
 
 	VP8StatusCode err = WebPIUpdate(idec, wd->bytes, wd->size);
+	cairo_surface_mark_dirty(surface);
+	int x = 0, y = 0, w = 0, h = 0;
+	(void) WebPIDecodedArea(idec, &x, &y, &w, &h);
 	WebPIDelete(idec);
-	if (err == VP8_STATUS_SUSPENDED) {
-		g_warning("partial WebP");
-	} else if (err) {
+	if (err == VP8_STATUS_OK)
+		return surface;
+
+	if (err != VP8_STATUS_SUSPENDED) {
 		g_set_error(error, FIV_IO_ERROR, FIV_IO_ERROR_OPEN, "%s: %s",
 			"WebP decoding error", load_libwebp_error(err));
 		cairo_surface_destroy(surface);
 		return NULL;
 	}
 
-	cairo_surface_mark_dirty(surface);
-	return surface;
+	g_warning("partial WebP");
+	if (config->input.has_alpha)
+		return surface;
+
+	// Always use transparent black, rather than opaque black.
+	cairo_surface_t *masked = cairo_image_surface_create(
+		CAIRO_FORMAT_ARGB32, config->input.width, config->input.height);
+	cairo_t *cr = cairo_create(masked);
+	cairo_set_source_surface(cr, surface, 0, 0);
+	cairo_rectangle(cr, x, y, w, h);
+	cairo_clip(cr);
+	cairo_paint(cr);
+	cairo_destroy(cr);
+	cairo_surface_destroy(surface);
+	return masked;
 }
 
 static cairo_surface_t *
