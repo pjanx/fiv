@@ -1644,6 +1644,29 @@ open_xcursor(const gchar *data, gsize len, GError **error)
 
 #endif  // HAVE_XCURSOR --------------------------------------------------------
 
+static const char *
+load_libwebp_error(VP8StatusCode err)
+{
+	switch (err) {
+	case VP8_STATUS_OUT_OF_MEMORY:
+		return "out of memory";
+	case VP8_STATUS_INVALID_PARAM:
+		return "invalid parameter";
+	case VP8_STATUS_BITSTREAM_ERROR:
+		return "bitstream error";
+	case VP8_STATUS_UNSUPPORTED_FEATURE:
+		return "unsupported feature";
+	case VP8_STATUS_SUSPENDED:
+		return "suspended";
+	case VP8_STATUS_USER_ABORT:
+		return "user abort";
+	case VP8_STATUS_NOT_ENOUGH_DATA:
+		return "not enough data";
+	default:
+		return "general failure";
+	}
+}
+
 static cairo_surface_t *
 load_libwebp_nonanimated(WebPDecoderConfig *config, const WebPData *wd,
 	bool premultiply, GError **error)
@@ -1675,7 +1698,8 @@ load_libwebp_nonanimated(WebPDecoderConfig *config, const WebPData *wd,
 
 	VP8StatusCode err = 0;
 	if ((err = WebPDecode(wd->bytes, wd->size, config))) {
-		set_error(error, "WebP decoding error");
+		g_set_error(error, FIV_IO_ERROR, FIV_IO_ERROR_OPEN,
+			"%s: %s", "WebP decoding error", load_libwebp_error(err));
 		cairo_surface_destroy(surface);
 		return NULL;
 	}
@@ -1793,7 +1817,8 @@ open_libwebp(const gchar *data, gsize len, const gchar *uri,
 	VP8StatusCode err = 0;
 	WebPData wd = {.bytes = (const uint8_t *) data, .size = len};
 	if ((err = WebPGetFeatures(wd.bytes, wd.size, &config.input))) {
-		set_error(error, "WebP decoding error");
+		g_set_error(error, FIV_IO_ERROR, FIV_IO_ERROR_OPEN,
+			"%s: %s", "WebP decoding error", load_libwebp_error(err));
 		return NULL;
 	}
 
