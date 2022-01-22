@@ -8,8 +8,9 @@ image::fiv.webp["Screenshot of both the browser and the viewer"]
 Features
 --------
  - Uses a compact thumbnail view, helping you browse collections comfortably.
- - Supports BMP, (A)PNG, GIF, JPEG, WebP directly, plus optionally raw photos,
-   HEIC, AVIF, SVG, X11 cursors and TIFF, or whatever gdk-pixbuf loads.
+ - Supports BMP, (A)PNG, GIF, TGA, JPEG, WebP directly, plus optionally raw
+   photos, HEIC, AVIF, SVG, X11 cursors and TIFF, or whatever your gdk-pixbuf
+   modules manage to load.
  - Employs high-performance file format libraries: Wuffs and libjpeg-turbo.
  - Makes use of 30-bit X.org visuals, whenever it's possible and appropriate.
  - Has a notion of pages, and tries to load all included content within files.

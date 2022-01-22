@@ -74,6 +74,7 @@
 #define WUFFS_CONFIG__MODULE__GIF
 #define WUFFS_CONFIG__MODULE__LZW
 #define WUFFS_CONFIG__MODULE__PNG
+#define WUFFS_CONFIG__MODULE__TGA
 #define WUFFS_CONFIG__MODULE__ZLIB
 #include "wuffs-mirror-release-c/release/c/wuffs-v0.3.c"
 
@@ -2403,7 +2404,7 @@ fiv_io_open(
 {
 	// TODO(p): Don't always load everything into memory, test type first,
 	// so that we can reject non-pictures early.  Wuffs only needs the first
-	// 16 bytes (soon 12) to make a guess right now.
+	// 17 bytes to make a guess right now.
 	//
 	// LibRaw poses an issue--there is no good registry for identification
 	// of supported files.  Many of them are compliant TIFF files.
@@ -2436,7 +2437,7 @@ fiv_io_open_from_data(const char *data, size_t len, const gchar *uri,
 		wuffs_base__make_slice_u8((uint8_t *) data, len);
 
 	cairo_surface_t *surface = NULL;
-	switch (wuffs_base__magic_number_guess_fourcc(prefix)) {
+	switch (wuffs_base__magic_number_guess_fourcc(prefix, true /* closed */)) {
 	case WUFFS_BASE__FOURCC__BMP:
 		// Note that BMP can redirect into another format,
 		// which is so far unsupported here.
@@ -2452,6 +2453,11 @@ fiv_io_open_from_data(const char *data, size_t len, const gchar *uri,
 	case WUFFS_BASE__FOURCC__PNG:
 		surface = open_wuffs_using(
 			wuffs_png__decoder__alloc_as__wuffs_base__image_decoder, data, len,
+			profile, error);
+		break;
+	case WUFFS_BASE__FOURCC__TGA:
+		surface = open_wuffs_using(
+			wuffs_tga__decoder__alloc_as__wuffs_base__image_decoder, data, len,
 			profile, error);
 		break;
 	case WUFFS_BASE__FOURCC__JPEG:
