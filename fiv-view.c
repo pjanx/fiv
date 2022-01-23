@@ -96,7 +96,7 @@ static FivIoOrientation view_mirror[9] = {
 	[FivIoOrientation180]       = FivIoOrientationMirror180,
 	[FivIoOrientationMirror180] = FivIoOrientation180,
 	[FivIoOrientationMirror270] = FivIoOrientation270,
-	[FivIoOrientation90]        = FivIoOrientationMirror270,
+	[FivIoOrientation90]        = FivIoOrientationMirror90,
 	[FivIoOrientationMirror90]  = FivIoOrientation90,
 	[FivIoOrientation270]       = FivIoOrientationMirror270,
 };
