@@ -1321,7 +1321,8 @@ static gboolean
 fiv_browser_key_press_event(GtkWidget *widget, GdkEventKey *event)
 {
 	FivBrowser *self = FIV_BROWSER(widget);
-	if (!(event->state & gtk_accelerator_get_default_mod_mask())) {
+	switch ((event->state & gtk_accelerator_get_default_mod_mask())) {
+	case 0:
 		switch (event->keyval) {
 		case GDK_KEY_Return:
 			if (self->selected)
@@ -1344,6 +1345,17 @@ fiv_browser_key_press_event(GtkWidget *widget, GdkEventKey *event)
 			return TRUE;
 		case GDK_KEY_End:
 			move_selection_end(self);
+			return TRUE;
+		}
+		break;
+	case GDK_CONTROL_MASK:
+	case GDK_CONTROL_MASK | GDK_SHIFT_MASK:
+		switch (event->keyval) {
+		case GDK_KEY_plus:
+			set_item_size(self, self->item_size + 1);
+			return TRUE;
+		case GDK_KEY_minus:
+			set_item_size(self, self->item_size - 1);
 			return TRUE;
 		}
 	}

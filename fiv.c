@@ -86,6 +86,8 @@ static struct key_group help_keys_browser[] = {
 		{"F9", "Toggle navigation sidebar"},
 		{"F5 r <control>r", "Refresh"},
 		{"h <control>h", "Toggle hiding unsupported files"},
+		{"<control>plus", "Larger thumbnails"},
+		{"<control>minus", "Smaller thumbnails"},
 		{}
 	}},
 	{"Navigation", (struct key[]) {
