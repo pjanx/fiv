@@ -1719,11 +1719,6 @@ open_resvg(const gchar *data, gsize len, const gchar *uri, GError **error)
 #endif  // HAVE_RESVG ----------------------------------------------------------
 #ifdef HAVE_LIBRSVG  // --------------------------------------------------------
 
-#ifdef FIV_RSVG_DEBUG
-#include <cairo/cairo-script.h>
-#include <cairo/cairo-svg.h>
-#endif
-
 typedef struct {
 	FivIoRenderClosure parent;
 	RsvgHandle *handle;                 ///< Loaded rsvg handle
@@ -1768,7 +1763,6 @@ load_librsvg_render(FivIoRenderClosure *closure, double scale)
 	return surface;
 }
 
-// FIXME: librsvg rasterizes filters, so this method isn't fully appropriate.
 static cairo_surface_t *
 open_librsvg(const gchar *data, gsize len, const gchar *uri, GError **error)
 {
@@ -1806,22 +1800,14 @@ open_librsvg(const gchar *data, gsize len, const gchar *uri, GError **error)
 		h = viewbox.height;
 	}
 
+	// librsvg rasterizes filters, so this method isn't fully appropriate.
+	// It might be worth removing altogether.
 	cairo_rectangle_t extents = {
 		.x = 0, .y = 0, .width = ceil(w), .height = ceil(h)};
 	cairo_surface_t *surface =
 		cairo_recording_surface_create(CAIRO_CONTENT_COLOR_ALPHA, &extents);
 
-#ifdef FIV_RSVG_DEBUG
-	cairo_device_t *script = cairo_script_create("cairo.script");
-	cairo_surface_t *tee =
-		cairo_script_surface_create_for_target(script, surface);
-	cairo_t *cr = cairo_create(tee);
-	cairo_device_destroy(script);
-	cairo_surface_destroy(tee);
-#else
 	cairo_t *cr = cairo_create(surface);
-#endif
-
 	RsvgRectangle viewport = {.x = 0, .y = 0, .width = w, .height = h};
 	if (!rsvg_handle_render_document(handle, cr, &viewport, error)) {
 		cairo_surface_destroy(surface);
@@ -1839,25 +1825,6 @@ open_librsvg(const gchar *data, gsize len, const gchar *uri, GError **error)
 	closure->height = h;
 	cairo_surface_set_user_data(
 		surface, &fiv_io_key_render, closure, load_librsvg_destroy);
-
-#ifdef FIV_RSVG_DEBUG
-	cairo_surface_t *svg = cairo_svg_surface_create("cairo.svg", w, h);
-	cr = cairo_create(svg);
-	cairo_set_source_surface(cr, surface, 0, 0);
-	cairo_paint(cr);
-	cairo_destroy(cr);
-	cairo_surface_destroy(svg);
-
-	cairo_surface_t *png =
-		cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w * 10, h * 10);
-	cr = cairo_create(png);
-	cairo_scale(cr, 10, 10);
-	cairo_set_source_surface(cr, surface, 0, 0);
-	cairo_paint(cr);
-	cairo_destroy(cr);
-	cairo_surface_write_to_png(png, "cairo.png");
-	cairo_surface_destroy(png);
-#endif
 	return surface;
 }
 
