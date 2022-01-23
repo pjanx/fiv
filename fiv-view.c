@@ -53,6 +53,7 @@ struct _FivView {
 	gchar *uri;                         ///< Path to the current image (if any)
 	cairo_surface_t *image;             ///< The loaded image (sequence)
 	cairo_surface_t *page;              ///< Current page within image, weak
+	cairo_surface_t *page_scaled;       ///< Current page within image, scaled
 	cairo_surface_t *frame;             ///< Current frame within page, weak
 	FivIoOrientation orientation;       ///< Current page orientation
 	bool enable_cms : 1;                ///< Smooth scaling toggle
@@ -144,6 +145,7 @@ fiv_view_finalize(GObject *gobject)
 	g_clear_pointer(&self->screen_cms_profile, fiv_io_profile_free);
 	g_clear_pointer(&self->enhance_swap, cairo_surface_destroy);
 	g_clear_pointer(&self->image, cairo_surface_destroy);
+	g_clear_pointer(&self->page_scaled, cairo_surface_destroy);
 	g_free(self->uri);
 
 	G_OBJECT_CLASS(fiv_view_parent_class)->finalize(gobject);
@@ -275,6 +277,24 @@ fiv_view_get_preferred_width(GtkWidget *widget, gint *minimum, gint *natural)
 }
 
 static void
+prescale_page(FivView *self)
+{
+	FivIoRenderClosure *closure =
+		cairo_surface_get_user_data(self->page, &fiv_io_key_render);
+	if (!closure)
+		return;
+
+	// TODO(p): Restart the animation. No vector formats currently animate.
+	g_return_if_fail(!self->frame_update_connection);
+
+	// If it fails, the previous frame pointer may become invalid.
+	g_clear_pointer(&self->page_scaled, cairo_surface_destroy);
+	self->frame = self->page_scaled = closure->render(closure, self->scale);
+	if (!self->page_scaled)
+		self->frame = self->page;
+}
+
+static void
 fiv_view_size_allocate(GtkWidget *widget, GtkAllocation *allocation)
 {
 	GTK_WIDGET_CLASS(fiv_view_parent_class)->size_allocate(widget, allocation);
@@ -284,13 +304,17 @@ fiv_view_size_allocate(GtkWidget *widget, GtkAllocation *allocation)
 		return;
 
 	Dimensions surface_dimensions = get_surface_dimensions(self);
-	self->scale = 1;
+	double scale = 1;
+	if (ceil(surface_dimensions.width * scale) > allocation->width)
+		scale = allocation->width / surface_dimensions.width;
+	if (ceil(surface_dimensions.height * scale) > allocation->height)
+		scale = allocation->height / surface_dimensions.height;
 
-	if (ceil(surface_dimensions.width * self->scale) > allocation->width)
-		self->scale = allocation->width / surface_dimensions.width;
-	if (ceil(surface_dimensions.height * self->scale) > allocation->height)
-		self->scale = allocation->height / surface_dimensions.height;
-	g_object_notify_by_pspec(G_OBJECT(widget), view_properties[PROP_SCALE]);
+	if (self->scale != scale) {
+		self->scale = scale;
+		g_object_notify_by_pspec(G_OBJECT(widget), view_properties[PROP_SCALE]);
+		prescale_page(self);
+	}
 }
 
 // https://www.freedesktop.org/wiki/OpenIcc/ICC_Profiles_in_X_Specification_0.4
@@ -409,9 +433,9 @@ fiv_view_draw(GtkWidget *widget, cairo_t *cr)
 		y = round((allocation.height - h) / 2.);
 
 	Dimensions surface_dimensions = {};
-	cairo_matrix_t matrix =
-		fiv_io_orientation_apply(self->page, self->orientation,
-			&surface_dimensions.width, &surface_dimensions.height);
+	cairo_matrix_t matrix = fiv_io_orientation_apply(
+		self->page_scaled ? self->page_scaled : self->page, self->orientation,
+		&surface_dimensions.width, &surface_dimensions.height);
 
 	cairo_translate(cr, x, y);
 	if (self->checkerboard) {
@@ -419,6 +443,14 @@ fiv_view_draw(GtkWidget *widget, cairo_t *cr)
 		gtk_style_context_add_class(style, "checkerboard");
 		gtk_render_background(style, cr, 0, 0, w, h);
 		gtk_style_context_restore(style);
+	}
+
+	// Then all frames are pre-scaled.
+	if (self->page_scaled) {
+		cairo_set_source_surface(cr, self->frame, 0, 0);
+		cairo_pattern_set_matrix(cairo_get_source(cr), &matrix);
+		cairo_paint(cr);
+		return TRUE;
 	}
 
 	// FIXME: Recording surfaces do not work well with CAIRO_SURFACE_TYPE_XLIB,
@@ -497,9 +529,13 @@ set_scale_to_fit(FivView *self, bool scale_to_fit)
 static gboolean
 set_scale(FivView *self, double scale)
 {
-	self->scale = scale;
-	g_object_notify_by_pspec(G_OBJECT(self), view_properties[PROP_SCALE]);
-	gtk_widget_queue_resize(GTK_WIDGET(self));
+	if (self->scale != scale) {
+		self->scale = scale;
+		g_object_notify_by_pspec(G_OBJECT(self), view_properties[PROP_SCALE]);
+		prescale_page(self);
+
+		gtk_widget_queue_resize(GTK_WIDGET(self));
+	}
 	return set_scale_to_fit(self, false);
 }
 
@@ -638,7 +674,10 @@ start_animating(FivView *self)
 static void
 switch_page(FivView *self, cairo_surface_t *page)
 {
+	g_clear_pointer(&self->page_scaled, cairo_surface_destroy);
 	self->frame = self->page = page;
+	prescale_page(self);
+
 	if ((self->orientation = (uintptr_t) cairo_surface_get_user_data(
 			self->page, &fiv_io_key_orientation)) == FivIoOrientationUnknown)
 		self->orientation = FivIoOrientation0;
