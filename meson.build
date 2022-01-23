@@ -17,23 +17,8 @@ add_project_arguments(
 #endif
 
 # The likelihood of this being installed is nearly zero. Enable the wrap.
-libjpegqs = dependency('libjpegqs',
-	required : get_option('libjpegqs'),
-	allow_fallback : true,
-)
-
-# As of writing, the API is unstable, and no pkg-config file is produced.
-# Trying to wrap Cargo in Meson is a recipe for pain, so no version pinning.
-resvg = disabler()
-if not get_option('resvg').disabled()
-	resvg = dependency('resvg', required : false)
-	if not resvg.found()
-		resvg = cc.find_library('libresvg', required : get_option('resvg'))
-		if resvg.found() and not cc.has_header('resvg.h')
-			error('resvg.h not found')
-		endif
-	endif
-endif
+libjpegqs = dependency('libjpegqs', required : get_option('libjpegqs'),
+	allow_fallback : true)
 
 lcms2 = dependency('lcms2', required : get_option('lcms2'))
 # Note that only libraw_r is thread-safe, but we'll just run it out-of process.
@@ -62,7 +47,6 @@ dependencies = [
 	lcms2,
 	libjpegqs,
 	libraw,
-	resvg,
 	librsvg,
 	xcursor,
 	libheif,
@@ -72,13 +56,30 @@ dependencies = [
 	cc.find_library('m', required : false),
 ]
 
+# As of writing, the API is unstable, and no pkg-config file is produced.
+# Trying to wrap Cargo in Meson is a recipe for pain, so no version pinning.
+have_resvg = false
+if not get_option('resvg').disabled()
+	resvg = dependency('resvg', required : false)
+	if not resvg.found()
+		resvg = cc.find_library('libresvg', required : get_option('resvg'))
+		if resvg.found() and not cc.has_header('resvg.h')
+			error('resvg.h not found')
+		endif
+	endif
+	if resvg.found()
+		dependencies += resvg
+		have_resvg = true
+	endif
+endif
+
 conf = configuration_data()
 conf.set_quoted('PROJECT_NAME', meson.project_name())
 conf.set_quoted('PROJECT_VERSION', meson.project_version())
 conf.set('HAVE_JPEG_QS', libjpegqs.found())
 conf.set('HAVE_LCMS2', lcms2.found())
 conf.set('HAVE_LIBRAW', libraw.found())
-conf.set('HAVE_RESVG', resvg.found())
+conf.set('HAVE_RESVG', have_resvg)
 conf.set('HAVE_LIBRSVG', librsvg.found())
 conf.set('HAVE_XCURSOR', xcursor.found())
 conf.set('HAVE_LIBHEIF', libheif.found())
