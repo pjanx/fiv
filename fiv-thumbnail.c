@@ -126,6 +126,16 @@ adjust_thumbnail(cairo_surface_t *thumbnail, double row_height)
 		scale_x = round(scale_y * w) / w;
 	}
 
+	// Vector images should not have orientation, this should handle them all.
+	FivIoRenderClosure *closure =
+		cairo_surface_get_user_data(thumbnail, &fiv_io_key_render);
+	if (closure && orientation <= FivIoOrientation0) {
+		// This API doesn't accept non-uniform scaling; prefer a vertical fit.
+		cairo_surface_t *scaled = closure->render(closure, scale_y);
+		if (scaled)
+			return scaled;
+	}
+
 	// This will be CAIRO_FORMAT_INVALID with non-image surfaces, which is fine.
 	cairo_format_t format = cairo_image_surface_get_format(thumbnail);
 	if (format != CAIRO_FORMAT_INVALID &&
