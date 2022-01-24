@@ -1,7 +1,7 @@
 //
-// fiv-io-benchmark.c: see if we're worth the name
+// fiv-io-benchmark.c: see if we suck
 //
-// Copyright (c) 2021, Přemysl Eric Janouch <p@janouch.name>
+// Copyright (c) 2021 - 2022, Přemysl Eric Janouch <p@janouch.name>
 //
 // Permission to use, copy, modify, and/or distribute this software for any
 // purpose with or without fee is hereby granted.
@@ -33,9 +33,16 @@ static void
 one_file(const char *filename)
 {
 	double since_us = timestamp();
-	gchar *uri = g_filename_to_uri(filename, NULL, NULL);
-	cairo_surface_t *loaded_by_us = fiv_io_open(uri, NULL, FALSE, NULL);
-	g_free(uri);
+	FivIoOpenContext ctx = {
+		.uri = g_filename_to_uri(filename, NULL, NULL),
+		.screen_dpi = 96,
+		// Only using this array as a redirect.
+		.warnings = g_ptr_array_new_with_free_func(g_free),
+	};
+
+	cairo_surface_t *loaded_by_us = fiv_io_open(&ctx, NULL);
+	g_free((char *) ctx.uri);
+	g_ptr_array_free(ctx.warnings, TRUE);
 	if (!loaded_by_us)
 		return;
 

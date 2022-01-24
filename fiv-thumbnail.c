@@ -252,15 +252,24 @@ fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size, GError **error)
 		return FALSE;
 	}
 
-	// TODO(p): Add a flag to avoid loading all pages and frames.
-	FivIoProfile sRGB = fiv_io_profile_new_sRGB();
+	FivIoOpenContext ctx = {
+		.uri = g_file_get_uri(target),
+		.screen_profile = fiv_io_profile_new_sRGB(),
+		.screen_dpi = 96,
+		.first_frame_only = TRUE,
+		// Only using this array as a redirect.
+		.warnings = g_ptr_array_new_with_free_func(g_free),
+	};
+
 	gsize filesize = g_mapped_file_get_length(mf);
 	cairo_surface_t *surface = fiv_io_open_from_data(
-		g_mapped_file_get_contents(mf), filesize, path, sRGB, FALSE, error);
-
+		g_mapped_file_get_contents(mf), filesize, &ctx, error);
 	g_mapped_file_unref(mf);
-	if (sRGB)
-		fiv_io_profile_free(sRGB);
+
+	g_free((gchar *) ctx.uri);
+	g_ptr_array_free(ctx.warnings, TRUE);
+	if (ctx.screen_profile)
+		fiv_io_profile_free(ctx.screen_profile);
 	if (!surface)
 		return FALSE;
 
@@ -285,7 +294,7 @@ fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size, GError **error)
 	}
 
 	// Without a CMM, no conversion is attempted.
-	if (sRGB) {
+	if (ctx.screen_profile) {
 		g_string_append_printf(
 			thum, "%s%c%s%c", THUMB_COLORSPACE, 0, THUMB_COLORSPACE_SRGB, 0);
 	}
@@ -347,7 +356,8 @@ read_wide_thumbnail(
 	if (!thumbnail_uri)
 		return NULL;
 
-	cairo_surface_t *surface = fiv_io_open(thumbnail_uri, NULL, FALSE, error);
+	cairo_surface_t *surface =
+		fiv_io_open(&(FivIoOpenContext){.uri = thumbnail_uri}, error);
 	g_free(thumbnail_uri);
 	if (!surface)
 		return NULL;

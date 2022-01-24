@@ -74,7 +74,7 @@ extern cairo_user_data_key_t fiv_io_key_page_next;
 extern cairo_user_data_key_t fiv_io_key_page_previous;
 
 typedef struct _FivIoRenderClosure {
-	/// The rendering is allowed to fail.
+	/// The rendering is allowed to fail, returning NULL.
 	cairo_surface_t *(*render)(struct _FivIoRenderClosure *, double scale);
 } FivIoRenderClosure;
 
@@ -83,10 +83,18 @@ typedef struct _FivIoRenderClosure {
 /// The rendered image will not have this key.
 extern cairo_user_data_key_t fiv_io_key_render;
 
-cairo_surface_t *fiv_io_open(
-	const gchar *uri, FivIoProfile profile, gboolean enhance, GError **error);
-cairo_surface_t *fiv_io_open_from_data(const char *data, size_t len,
-	const gchar *uri, FivIoProfile profile, gboolean enhance, GError **error);
+typedef struct {
+	const char *uri;                    ///< Source URI
+	FivIoProfile screen_profile;        ///< Target colour space or NULL
+	int screen_dpi;                     ///< Target DPI
+	gboolean enhance;                   ///< Enhance JPEG (currently)
+	gboolean first_frame_only;          ///< Only interested in the 1st frame
+	GPtrArray *warnings;                ///< String vector for non-fatal errors
+} FivIoOpenContext;
+
+cairo_surface_t *fiv_io_open(const FivIoOpenContext *ctx, GError **error);
+cairo_surface_t *fiv_io_open_from_data(
+	const char *data, size_t len, const FivIoOpenContext *ctx, GError **error);
 
 // --- Filesystem --------------------------------------------------------------
 

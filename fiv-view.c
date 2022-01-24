@@ -1160,6 +1160,34 @@ fiv_view_init(FivView *self)
 
 // --- Public interface --------------------------------------------------------
 
+static cairo_surface_t *
+open_without_swapping_in(FivView *self, const gchar *uri)
+{
+	FivIoOpenContext ctx = {
+		.uri = uri,
+		.screen_profile = self->enable_cms ? self->screen_cms_profile : NULL,
+		.screen_dpi = 96,  // TODO(p): Try to retrieve it from the screen.
+		.enhance = self->enhance,
+		.warnings = g_ptr_array_new_with_free_func(g_free),
+	};
+
+	GError *error = NULL;
+	cairo_surface_t *surface = fiv_io_open(&ctx, &error);
+	if (error) {
+		g_ptr_array_add(ctx.warnings, g_strdup(error->message));
+		g_error_free(error);
+	}
+
+	g_clear_pointer(&self->messages, g_free);
+	if (ctx.warnings->len) {
+		g_ptr_array_add(ctx.warnings, NULL);
+		self->messages = g_strjoinv("\n", (gchar **) ctx.warnings->pdata);
+	}
+
+	g_ptr_array_free(ctx.warnings, TRUE);
+	return surface;
+}
+
 // TODO(p): Progressive picture loading, or at least async/cancellable.
 gboolean
 fiv_view_set_uri(FivView *self, const gchar *uri)
@@ -1172,16 +1200,8 @@ fiv_view_set_uri(FivView *self, const gchar *uri)
 			G_OBJECT(self), view_properties[PROP_ENHANCE]);
 	}
 
-	GError *error = NULL;
-	cairo_surface_t *surface = fiv_io_open(
-		uri, self->enable_cms ? self->screen_cms_profile : NULL, FALSE, &error);
-
-	g_clear_pointer(&self->messages, g_free);
+	cairo_surface_t *surface = open_without_swapping_in(self, uri);
 	g_clear_pointer(&self->image, cairo_surface_destroy);
-	if (error) {
-		self->messages = g_strdup(error->message);
-		g_error_free(error);
-	}
 
 	self->frame = self->page = NULL;
 	self->image = surface;
@@ -1220,19 +1240,9 @@ frame_step(FivView *self, int step)
 static gboolean
 reload(FivView *self)
 {
-	GError *error = NULL;
-	cairo_surface_t *surface = fiv_io_open(self->uri,
-		self->enable_cms ? self->screen_cms_profile : NULL, self->enhance,
-		&error);
-
-	g_clear_pointer(&self->messages, g_free);
-	if (error) {
-		self->messages = g_strdup(error->message);
-		g_error_free(error);
-	}
-
+	cairo_surface_t *surface = open_without_swapping_in(self, self->uri);
 	g_object_notify_by_pspec(G_OBJECT(self), view_properties[PROP_MESSAGES]);
-	if (error)
+	if (!surface)
 		return FALSE;
 
 	g_clear_pointer(&self->image, cairo_surface_destroy);
