@@ -994,6 +994,22 @@ on_window_state_event(G_GNUC_UNUSED GtkWidget *widget,
 }
 
 static void
+show_help_contents(void)
+{
+	gchar *filename = g_strdup_printf("%s.html", PROJECT_NAME);
+	gchar *path = g_build_filename(PROJECT_DOCDIR, filename, NULL);
+	g_free(filename);
+	GError *error = NULL;
+	gchar *uri = g_filename_to_uri(path, NULL, &error);
+	g_free(path);
+
+	// For some reason, it doesn't work with a parent window.
+	if (!uri || !gtk_show_uri_on_window(NULL, uri, GDK_CURRENT_TIME, &error))
+		show_error_dialog(error);
+	g_free(uri);
+}
+
+static void
 on_help_destroyed(GtkWidget *window, GtkWidget **storage)
 {
 	g_return_if_fail(*storage == window);
@@ -1101,7 +1117,7 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 			on_open();
 			return TRUE;
 		case GDK_KEY_F1:
-			show_help_shortcuts();
+			show_help_contents();
 			return TRUE;
 		case GDK_KEY_F9:
 			gtk_widget_set_visible(g.browser_sidebar,
@@ -1612,6 +1628,9 @@ make_menu_bar(void)
 	gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_file), menu_file);
 	gtk_menu_shell_append(GTK_MENU_SHELL(g.menu), item_file);
 
+	GtkWidget *item_contents = gtk_menu_item_new_with_mnemonic("_Contents");
+	g_signal_connect_swapped(item_contents, "activate",
+		G_CALLBACK(show_help_contents), NULL);
 	GtkWidget *item_shortcuts =
 		gtk_menu_item_new_with_mnemonic("_Keyboard Shortcuts");
 	g_signal_connect_swapped(item_shortcuts, "activate",
@@ -1621,6 +1640,7 @@ make_menu_bar(void)
 		G_CALLBACK(show_about_dialog), g.window);
 
 	GtkWidget *menu_help = gtk_menu_new();
+	gtk_menu_shell_append(GTK_MENU_SHELL(menu_help), item_contents);
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu_help), item_shortcuts);
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu_help), item_about);
 	GtkWidget *item_help = gtk_menu_item_new_with_mnemonic("_Help");

@@ -3,7 +3,7 @@ fiv
 
 'fiv' is a slightly unconventional, general-purpose image browser and viewer.
 
-image::fiv.webp["Screenshot of both the browser and the viewer"]
+image::docs/fiv.webp["Screenshot of both the browser and the viewer"]
 
 Features
 --------
@@ -22,7 +22,7 @@ Explicit non-goals
  - Following the latest GNOME HIG to the letter--header bars are deliberately
    avoided, for their general user hostility.
  - Portability to non-UNIXy systems, although patches are welcome.
- - Memory efficiency is secondary to both performance and development time.
+ - Memory efficiency is secondary to both performance and development effort.
 
 Aspirations
 -----------
@@ -40,7 +40,7 @@ Build dependencies: Meson, pkg-config +
 Runtime dependencies: gtk+-3.0, glib>=2.64, pixman-1, shared-mime-info,
 libturbojpeg, libwebp, spng>=0.7.0 +
 Optional dependencies: lcms2, LibRaw, librsvg-2.0, xcursor, libheif, libtiff,
-gdk-pixbuf-2.0, ExifTool
+gdk-pixbuf-2.0, ExifTool, resvg (unstable API, needs to be requested explicitly)
 
  $ git clone --recursive https://git.janouch.name/p/fiv.git
  $ meson builddir
@@ -52,23 +52,10 @@ direct installations.  To test the program, help it find its custom thumbnailer:
 
  $ PATH=$(pwd):$PATH ./fiv
 
-Pressing F1 will give you a convenient list of keyboard shortcuts.
-
-Configuration
+Documentation
 -------------
-The standard means to adjust the looks of the program is through GTK+ 3 CSS.
-As an example, to tightly pack browser items, put the following in your
-_~/.config/gtk-3.0/gtk.css_:
-
- fiv-browser { -FivBrowser-spacing: 0; padding: 0; border: 0; margin: 0; }
-
-Similarly, you can adjust some of the key bindings, as per the command table
-in link:fiv-view.h[]:
-
- @binding-set ViewBindings { bind 'p' { 'command' (print) }; }
- fiv-view { -gtk-key-bindings: ViewBindings; }
-
-Should you want to experiment, you will find the GTK+ inspector very helpful.
+For information concerning usage, refer to link:docs/fiv.html[the user guide],
+which can be invoked from within the program by pressing F1.
 
 Contributing and Support
 ------------------------

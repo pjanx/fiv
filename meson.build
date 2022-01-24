@@ -73,9 +73,13 @@ if not get_option('resvg').disabled()
 	endif
 endif
 
+# XXX: https://github.com/mesonbuild/meson/issues/825
+docdir = get_option('datadir') / 'doc' / meson.project_name()
+
 conf = configuration_data()
 conf.set_quoted('PROJECT_NAME', meson.project_name())
 conf.set_quoted('PROJECT_VERSION', meson.project_version())
+conf.set_quoted('PROJECT_DOCDIR', get_option('prefix') / docdir)
 conf.set('HAVE_JPEG_QS', libjpegqs.found())
 conf.set('HAVE_LCMS2', lcms2.found())
 conf.set('HAVE_LIBRAW', libraw.found())
@@ -111,7 +115,7 @@ endif
 # XXX: With gdk-pixbuf, this even depends on currently installed modules.
 if meson.is_cross_build()
 	install_data('fiv.desktop',
-		install_dir : get_option('datadir') + '/applications')
+		install_dir : get_option('datadir') / 'applications')
 else
 	# XXX: The exe path may not contain spaces--quoting is a bitch in Meson.
 	desktop = custom_target('desktop',
@@ -122,11 +126,12 @@ else
 				$0 = $0 type ";" } 1' "exe=$1" "$2"''', 'sh', exe, '@INPUT@'],
 		capture : true,
 		install : true,
-		install_dir : get_option('datadir') + '/applications',
+		install_dir : get_option('datadir') / 'applications',
 	)
 endif
 
 install_data('fiv-browse.desktop',
-	install_dir : get_option('datadir') + '/applications')
+	install_dir : get_option('datadir') / 'applications')
 install_data('fiv.svg',
-	install_dir : get_option('datadir') + '/icons/hicolor/scalable/apps')
+	install_dir : get_option('datadir') / 'icons/hicolor/scalable/apps')
+install_subdir('docs', install_dir : docdir, strip_directory : true)

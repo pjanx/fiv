@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>fiv: User Guide</title>
+<link rel="stylesheet" href="stylesheet.css">
+<style>
+q:lang(en):before { content: "‘"; }
+q:lang(en):after { content: "’"; }
+</style>
+</head>
+<body>
+
+<h1>fiv: User Guide</h1>
+
+<p class="details">
+<span id="author">Přemysl Eric Janouch</span><br>
+<span id="email"><a href="mailto:p@janouch.name">p@janouch.name</a></span><br>
+<span id="revnumber">version 0.0.0,</span>
+<span id="revdate">2022-01-25</span>
+
+<p class="figure"><img src="fiv.webp" alt="fiv's browser and viewer">
+
+<h2>Introduction</h2>
+
+<p><i>fiv</i> is a general-purpose image browser and viewer. This document will
+guide you through the application and help to familiarize you with it.
+
+<h2>Controls</h2>
+
+<p><i>fiv</i> is designed with computer mice having dedicated forwards/backwards
+and page up/down buttons in mind, such as SteelSeries Sensei series. Ozone Neon
+series may also be mapped this way. Your experience may be degraded with other
+kinds of devices.
+
+<p>Controls should generally be accessible through the keyboard. Pressing Ctrl+?
+will give you a convenient overview of all shortcuts. In addition to these,
+remember that you may often use Ctrl+Tab and F6 to navigate to different groups
+of widgets.
+
+<h2>Browser</h2>
+
+<p><i>fiv</i> normally starts in a file browser view. On the left side of the
+window, you'll find your GTK+ bookmarks, mounted locations as recognized by
+GVfs, an item for entering arbitrary filesystem paths or URIs, view controls,
+and finally breadcrumbs leading to the currently opened directory, as well as
+its descendants.
+
+<p>You can open items in a new window either by middle clicking on them either
+directly, or with the Ctrl key pressed down. Right clicking the directory view
+offers a context menu for opening files, or even the directory itself,
+in a different application.
+
+<h2>Viewer</h2>
+
+<p>The image viewer may be both entered (so long as you have a file selected)
+and exited using the Enter key. This way you may easily switch between the two
+modes. When using the mouse, the forwards and backwards buttons will fulfill
+the same function.
+
+<p>Double clicking the image switches full-screen view, and the mouse wheel
+adjusts the zoom level.
+
+<p>Files are iterated in the same order, and using the same filtering as in
+the browser.
+
+<p>
+
+<h2>File formats</h2>
+
+<p>The list of all supported file formats may be obtained by running:
+
+<pre>
+fiv --list-supported-media-types
+</pre>
+
+Unless it has been turned off in your installation, you may extend it through
+gdk-pixbuf modules.
+
+<h2>Thumbnails</h2>
+
+<p><i>fiv</i> uses a custom way of storing thumbnails, and doesn't currently
+provide any means of invalidating this cache. Should you find out that your
+<i>~/.cache/thumbnails</i> directory is taking up too much space, run:
+
+<pre>
+rm -rf ~/.cache/thumbnails/wide-*
+</pre>
+
+<h2>Configuration</h2>
+
+<p>The standard means to adjust the looks of the program is through GTK+ 3 CSS.
+As an example, to tightly pack browser items, put the following in your
+<i>~/.config/gtk-3.0/gtk.css</i>:
+
+<pre>
+fiv-browser { -FivBrowser-spacing: 0; padding: 0; border: 0; margin: 0; }
+</pre>
+
+<p>Similarly, you can adjust some of the key bindings, as per the command table
+in the <i>fiv-view.h</i> source file:
+
+<pre>
+@binding-set ViewBindings { bind 'p' { 'command' (print) }; }
+fiv-view { -gtk-key-bindings: ViewBindings; }
+</pre>
+
+<p>Should you want to experiment, you will find the GTK+ inspector very helpful.
+
+<script>
+var toc = '', all = document.querySelectorAll('h2')
+for (var i = 0; i < all.length; i++) {
+	var name = all[i].innerHTML.replace(/[^0-9a-z]/ig, '-')
+	toc += '<li><p><a href="#' + name + '">' + all[i].innerHTML + '</a></li>'
+	all[i].id = name
+	all[i].innerHTML = (i + 1) + '. ' + all[i].innerHTML
+}
+all[0].insertAdjacentHTML('beforebegin',
+	'<h2>Table of Contents</h2><ol>' + toc + '</ol>')
+</script>
