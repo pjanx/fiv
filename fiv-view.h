@@ -23,7 +23,8 @@
 G_DECLARE_FINAL_TYPE(FivView, fiv_view, FIV, VIEW, GtkWidget)
 
 /// Try to open the given file, synchronously, to be displayed by the widget.
-gboolean fiv_view_open(FivView *self, const gchar *uri, GError **error);
+/// The current image is cleared on failure.
+gboolean fiv_view_set_uri(FivView *self, const gchar *uri);
 
 // And this is how you avoid glib-mkenums.
 typedef enum _FivViewCommand {

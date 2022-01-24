@@ -50,6 +50,8 @@ fiv_view_command_get_type(void)
 
 struct _FivView {
 	GtkWidget parent_instance;
+
+	gchar *messages;                    ///< Image load information
 	gchar *uri;                         ///< Path to the current image (if any)
 	cairo_surface_t *image;             ///< The loaded image (sequence)
 	cairo_surface_t *page;              ///< Current page within image, weak
@@ -114,7 +116,8 @@ static FivIoOrientation view_right[9] = {
 };
 
 enum {
-	PROP_SCALE = 1,
+	PROP_MESSAGES = 1,
+	PROP_SCALE,
 	PROP_SCALE_TO_FIT,
 	PROP_ENABLE_CMS,
 	PROP_FILTER,
@@ -147,6 +150,7 @@ fiv_view_finalize(GObject *gobject)
 	g_clear_pointer(&self->image, cairo_surface_destroy);
 	g_clear_pointer(&self->page_scaled, cairo_surface_destroy);
 	g_free(self->uri);
+	g_free(self->messages);
 
 	G_OBJECT_CLASS(fiv_view_parent_class)->finalize(gobject);
 }
@@ -157,6 +161,9 @@ fiv_view_get_property(
 {
 	FivView *self = FIV_VIEW(object);
 	switch (property_id) {
+	case PROP_MESSAGES:
+		g_value_set_string(value, self->messages);
+		break;
 	case PROP_SCALE:
 		g_value_set_double(value, self->scale);
 		break;
@@ -253,8 +260,8 @@ fiv_view_get_preferred_height(GtkWidget *widget, gint *minimum, gint *natural)
 {
 	FivView *self = FIV_VIEW(widget);
 	if (self->scale_to_fit) {
-		*natural = ceil(get_surface_dimensions(self).height);
 		*minimum = 1;
+		*natural = MAX(*minimum, ceil(get_surface_dimensions(self).height));
 	} else {
 		int dw, dh;
 		get_display_dimensions(self, &dw, &dh);
@@ -267,8 +274,8 @@ fiv_view_get_preferred_width(GtkWidget *widget, gint *minimum, gint *natural)
 {
 	FivView *self = FIV_VIEW(widget);
 	if (self->scale_to_fit) {
-		*natural = ceil(get_surface_dimensions(self).width);
 		*minimum = 1;
+		*natural = MAX(*minimum, ceil(get_surface_dimensions(self).width));
 	} else {
 		int dw, dh;
 		get_display_dimensions(self, &dw, &dh);
@@ -279,9 +286,9 @@ fiv_view_get_preferred_width(GtkWidget *widget, gint *minimum, gint *natural)
 static void
 prescale_page(FivView *self)
 {
-	FivIoRenderClosure *closure =
-		cairo_surface_get_user_data(self->page, &fiv_io_key_render);
-	if (!closure)
+	FivIoRenderClosure *closure = NULL;
+	if (!self->image || !(closure =
+			cairo_surface_get_user_data(self->page, &fiv_io_key_render)))
 		return;
 
 	// TODO(p): Restart the animation. No vector formats currently animate.
@@ -678,8 +685,9 @@ switch_page(FivView *self, cairo_surface_t *page)
 	self->frame = self->page = page;
 	prescale_page(self);
 
-	if ((self->orientation = (uintptr_t) cairo_surface_get_user_data(
-			self->page, &fiv_io_key_orientation)) == FivIoOrientationUnknown)
+	if (!self->page ||
+		(self->orientation = (uintptr_t) cairo_surface_get_user_data(
+			 self->page, &fiv_io_key_orientation)) == FivIoOrientationUnknown)
 		self->orientation = FivIoOrientation0;
 
 	start_animating(self);
@@ -1044,6 +1052,9 @@ fiv_view_class_init(FivViewClass *klass)
 	object_class->get_property = fiv_view_get_property;
 	object_class->set_property = fiv_view_set_property;
 
+	view_properties[PROP_MESSAGES] = g_param_spec_string(
+		"messages", "Messages", "Informative messages from the last image load",
+		NULL, G_PARAM_READABLE);
 	view_properties[PROP_SCALE] = g_param_spec_double(
 		"scale", "Scale", "Zoom level",
 		0, G_MAXDOUBLE, 1.0, G_PARAM_READABLE);
@@ -1151,21 +1162,25 @@ fiv_view_init(FivView *self)
 
 // TODO(p): Progressive picture loading, or at least async/cancellable.
 gboolean
-fiv_view_open(FivView *self, const gchar *uri, GError **error)
+fiv_view_set_uri(FivView *self, const gchar *uri)
 {
-	cairo_surface_t *surface = fiv_io_open(
-		uri, self->enable_cms ? self->screen_cms_profile : NULL, FALSE, error);
-	if (!surface)
-		return FALSE;
-	if (self->image)
-		cairo_surface_destroy(self->image);
-
 	// This is extremely expensive, and only works sometimes.
 	g_clear_pointer(&self->enhance_swap, cairo_surface_destroy);
 	if (self->enhance) {
 		self->enhance = FALSE;
 		g_object_notify_by_pspec(
 			G_OBJECT(self), view_properties[PROP_ENHANCE]);
+	}
+
+	GError *error = NULL;
+	cairo_surface_t *surface = fiv_io_open(
+		uri, self->enable_cms ? self->screen_cms_profile : NULL, FALSE, &error);
+
+	g_clear_pointer(&self->messages, g_free);
+	g_clear_pointer(&self->image, cairo_surface_destroy);
+	if (error) {
+		self->messages = g_strdup(error->message);
+		g_error_free(error);
 	}
 
 	self->frame = self->page = NULL;
@@ -1176,8 +1191,9 @@ fiv_view_open(FivView *self, const gchar *uri, GError **error)
 	g_free(self->uri);
 	self->uri = g_strdup(uri);
 
+	g_object_notify_by_pspec(G_OBJECT(self), view_properties[PROP_MESSAGES]);
 	g_object_notify_by_pspec(G_OBJECT(self), view_properties[PROP_HAS_IMAGE]);
-	return TRUE;
+	return surface != NULL;
 }
 
 static void
@@ -1208,10 +1224,16 @@ reload(FivView *self)
 	cairo_surface_t *surface = fiv_io_open(self->uri,
 		self->enable_cms ? self->screen_cms_profile : NULL, self->enhance,
 		&error);
-	if (!surface) {
-		show_error_dialog(get_toplevel(GTK_WIDGET(self)), error);
-		return FALSE;
+
+	g_clear_pointer(&self->messages, g_free);
+	if (error) {
+		self->messages = g_strdup(error->message);
+		g_error_free(error);
 	}
+
+	g_object_notify_by_pspec(G_OBJECT(self), view_properties[PROP_MESSAGES]);
+	if (error)
+		return FALSE;
 
 	g_clear_pointer(&self->image, cairo_surface_destroy);
 	g_clear_pointer(&self->enhance_swap, cairo_surface_destroy);

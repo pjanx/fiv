@@ -542,6 +542,8 @@ struct {
 
 	GtkWidget *view_box;
 	GtkWidget *view_toolbar;
+	GtkWidget *view_info;
+	GtkWidget *view_info_label;
 	GtkWidget *toolbar[TOOLBAR_COUNT];
 	GtkWidget *view;
 } g;
@@ -718,32 +720,38 @@ on_sort_direction(G_GNUC_UNUSED GtkMenuItem *item, gpointer data)
 }
 
 static void
+on_notify_view_messages(FivView *view, G_GNUC_UNUSED gpointer user_data)
+{
+	gchar *messages = NULL;
+	g_object_get(view, "messages", &messages, NULL);
+	if (messages) {
+		gchar *escaped = g_markup_escape_text(messages, -1);
+		g_free(messages);
+		gchar *message = g_strdup_printf("<b>Error:</b> %s", escaped);
+		g_free(escaped);
+		gtk_label_set_markup(GTK_LABEL(g.view_info_label), message);
+		g_free(message);
+		gtk_widget_show(g.view_info);
+	} else {
+		gtk_widget_hide(g.view_info);
+	}
+}
+
+static void
 open(const gchar *uri)
 {
 	GFile *file = g_file_new_for_uri(uri);
+	if (fiv_view_set_uri(FIV_VIEW(g.view), uri))
+		gtk_recent_manager_add_item(gtk_recent_manager_get_default(), uri);
 
-	GError *error = NULL;
-	if (!fiv_view_open(FIV_VIEW(g.view), uri, &error)) {
-		const char *path = g_file_peek_path(file);
-		// TODO(p): Use g_file_info_get_display_name().
-		gchar *base = g_filename_display_basename(path ? path : uri);
-		g_object_unref(file);
-
-		g_prefix_error(&error, "%s: ", base);
-		show_error_dialog(error);
-		g_free(base);
-		return;
-	}
-
-	gtk_recent_manager_add_item(gtk_recent_manager_get_default(), uri);
 	g_list_free_full(g.directory_forward, g_free);
 	g.directory_forward = NULL;
-
 	g_free(g.uri);
 	g.uri = g_strdup(uri);
 
 	// So that load_directory() itself can be used for reloading.
 	gchar *parent = parent_uri(file);
+	g_object_unref(file);
 	if (!g.files->len /* hack to always load the directory after launch */ ||
 		!g.directory || strcmp(parent, g.directory))
 		load_directory_without_switching(parent);
@@ -1785,9 +1793,26 @@ main(int argc, char *argv[])
 	gtk_box_pack_start(GTK_BOX(g.view_toolbar),
 		gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, 0);
 
+	g.view_info = gtk_info_bar_new();
+	// The button cannot be made flat or reflect the message type under Adwaita.
+	gtk_info_bar_set_show_close_button(GTK_INFO_BAR(g.view_info), TRUE);
+	// Do not use gtk_info_bar_set_revealed(), as it animates.
+	gtk_info_bar_set_message_type(GTK_INFO_BAR(g.view_info), GTK_MESSAGE_ERROR);
+	g_signal_connect(g.view_info, "response",
+		G_CALLBACK(gtk_widget_hide), NULL);
+
+	g.view_info_label = gtk_label_new(NULL);
+	gtk_label_set_line_wrap(GTK_LABEL(g.view_info_label), TRUE);
+	gtk_container_add(
+		GTK_CONTAINER(gtk_info_bar_get_content_area(GTK_INFO_BAR(g.view_info))),
+		g.view_info_label);
+	g_signal_connect(g.view, "notify::messages",
+		G_CALLBACK(on_notify_view_messages), NULL);
+
 	// Need to put the toolbar at the top, because of the horizontal scrollbar.
 	g.view_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	gtk_box_pack_start(GTK_BOX(g.view_box), g.view_toolbar, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(g.view_box), g.view_info, FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(g.view_box), view_scroller, TRUE, TRUE, 0);
 
 	g.browser_scroller = gtk_scrolled_window_new(NULL, NULL);
