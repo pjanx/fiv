@@ -91,6 +91,7 @@ const char *fiv_io_supported_media_types[] = {
 	"image/bmp",
 	"image/gif",
 	"image/png",
+	"image/x-tga",
 	"image/jpeg",
 	"image/webp",
 #ifdef HAVE_LIBRAW

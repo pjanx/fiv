@@ -7,4 +7,4 @@ Exec=fiv -- %u
 Terminal=false
 StartupNotify=true
 Categories=Graphics;2DGraphics;Viewer;
-MimeType=image/png;image/bmp;image/gif;image/jpeg;image/webp;
+MimeType=image/png;image/bmp;image/gif;image/x-tga;image/jpeg;image/webp;
