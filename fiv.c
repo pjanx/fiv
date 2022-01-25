@@ -1828,6 +1828,9 @@ main(int argc, char *argv[])
 		g.view_info_label);
 	g_signal_connect(g.view, "notify::messages",
 		G_CALLBACK(on_notify_view_messages), NULL);
+	gtk_widget_show_all(g.view_info);
+	gtk_widget_set_no_show_all(g.view_info, TRUE);
+	gtk_widget_hide(g.view_info);
 
 	// Need to put the toolbar at the top, because of the horizontal scrollbar.
 	g.view_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
