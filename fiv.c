@@ -72,50 +72,62 @@ struct key_section {
 };
 
 static struct key help_keys_general[] = {
-	{"F1 <control>question", "Show this list of shortcuts"},
-	{"F11 f", "Toggle fullscreen view"},
+	{"F1", "Show help"},
+	{"F10", "Open menu"},
+	{"<control>question", "Keyboard shortcuts"},
+	{"q <control>q", "Quit"},
+	{"<control>w", "Quit"},
+	{}
+};
+
+static struct key help_keys_navigation[] = {
+	{"<control>l", "Open location..."},
+	{"<control>n", "Open a new window"},
+	{"<alt>Left", "Go back in history"},
+	{"<alt>Right", "Go forward in history"},
+	{}
+};
+
+static struct key help_keys_view[] = {
+	{"F11 f", "Toggle fullscreen"},
 	{"<alt><shift>d", "Toggle dark theme variant"},
-	{"q <control>q", "Exit the program"},
-	{"Escape <control>w", "Exit the program"},
 	{}
 };
 
 static struct key_group help_keys_browser[] = {
 	{"General", help_keys_general},
-	{"View", (struct key[]) {
-		{"F9", "Toggle navigation sidebar"},
-		{"F5 r <control>r", "Refresh"},
-		{"h <control>h", "Toggle hiding unsupported files"},
-		{"<control>plus", "Larger thumbnails"},
-		{"<control>minus", "Smaller thumbnails"},
-		{}
-	}},
+	{"General: Navigation", help_keys_navigation},
+	{"General: View", help_keys_view},
 	{"Navigation", (struct key[]) {
-		{"<control>l", "Open location..."},
-		{"<control>n", "Open a new window"},
-		{"<alt>Left", "Go back in history"},
-		{"<alt>Right", "Go forward in history"},
 		{"<alt>Up", "Go to parent directory"},
 		{"<alt>Home", "Go home"},
 		{"Return", "Open selected item"},
 		{}
 	}},
+	{"View", (struct key[]) {
+		{"F9", "Toggle navigation sidebar"},
+		{"F5 r <control>r", "Reload"},
+		{"h <control>h", "Toggle hiding unsupported files"},
+		{"<control>plus", "Larger thumbnails"},
+		{"<control>minus", "Smaller thumbnails"},
+		{}
+	}},
 	{}
 };
 
-static struct key_group help_keys_view[] = {
+static struct key_group help_keys_viewer[] = {
 	{"General", help_keys_general},
+	{"General: Navigation", help_keys_navigation},
+	{"General: View", help_keys_view},
+	{"Navigation", (struct key[]) {
+		{"Left Up Page_Up", "Previous image"},
+		{"Right Down Page_Down", "Next image"},
+		{"Escape Return", "Return to browser"},
+		{}
+	}},
 	{"View", (struct key[]) {
 		{"F8", "Toggle toolbar"},
 		{"F5 r <control>r", "Reload"},
-		{}
-	}},
-	{"Navigation", (struct key[]) {
-		{"<control>l", "Open location..."},
-		{"<control>n", "Open a new window"},
-		{"Left Up Page_Up", "Previous image"},
-		{"Right Down Page_Down", "Next image"},
-		{"Return <alt>Left", "Return to browser"},
 		{}
 	}},
 	{"Zoom", (struct key[]) {
@@ -165,7 +177,7 @@ static struct key_group help_keys_view[] = {
 
 static struct key_section help_keys[] = {
 	{"Browser", "browser", help_keys_browser},
-	{"View", "view", help_keys_view},
+	{"Viewer", "viewer", help_keys_viewer},
 	{}
 };
 
@@ -1028,7 +1040,7 @@ show_help_shortcuts(void)
 
 	g_object_set(window, "section-name",
 		gtk_stack_get_visible_child(GTK_STACK(g.stack)) == g.view_box
-			? "view"
+			? "viewer"
 			: "browser",
 		NULL);
 	gtk_widget_show(window);
@@ -1069,7 +1081,10 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 			fiv_sidebar_show_enter_location(FIV_SIDEBAR(g.browser_sidebar));
 			return TRUE;
 		case GDK_KEY_n:
-			spawn_uri(g.directory);
+			if (gtk_stack_get_visible_child(GTK_STACK(g.stack)) == g.view_box)
+				spawn_uri(g.uri);
+			else
+				spawn_uri(g.directory);
 			return TRUE;
 		case GDK_KEY_o:
 			on_open();
@@ -1109,7 +1124,6 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 		break;
 	case 0:
 		switch (event->keyval) {
-		case GDK_KEY_Escape:
 		case GDK_KEY_q:
 			gtk_widget_destroy(g.window);
 			return TRUE;
@@ -1176,6 +1190,7 @@ on_key_press_view(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 			on_next();
 			return TRUE;
 
+		case GDK_KEY_Escape:
 		case GDK_KEY_Return:
 			switch_to_browser();
 			fiv_browser_select(FIV_BROWSER(g.browser), g.uri);
@@ -1218,6 +1233,9 @@ on_key_press_browser_paned(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 		break;
 	case 0:
 		switch (event->keyval) {
+		case GDK_KEY_Escape:
+			fiv_browser_select(FIV_BROWSER(g.browser), NULL);
+			return TRUE;
 		case GDK_KEY_h:
 			gtk_button_clicked(GTK_BUTTON(g.funnel));
 			return TRUE;
