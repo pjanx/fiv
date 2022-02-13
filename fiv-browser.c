@@ -1603,6 +1603,20 @@ fiv_browser_new(FivIoModel *model)
 	return GTK_WIDGET(self);
 }
 
+static void
+scroll_to_selection(FivBrowser *self)
+{
+	for (gsize y = 0; y < self->layouted_rows->len; y++) {
+		const Row *row = &g_array_index(self->layouted_rows, Row, y);
+		for (gsize x = 0; x < row->len; x++) {
+			if (row->items[x].entry == self->selected) {
+				scroll_to_row(self, row);
+				return;
+			}
+		}
+	}
+}
+
 void
 fiv_browser_select(FivBrowser *self, const char *uri)
 {
@@ -1617,9 +1631,8 @@ fiv_browser_select(FivBrowser *self, const char *uri)
 		const Entry *entry = &g_array_index(self->entries, Entry, i);
 		if (!g_strcmp0(entry->uri, uri)) {
 			self->selected = entry;
+			scroll_to_selection(self);
 			break;
 		}
 	}
-
-	// TODO(p): Scroll to selection.
 }
