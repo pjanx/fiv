@@ -604,6 +604,8 @@ static void
 thumbnailers_start(FivBrowser *self)
 {
 	thumbnailers_abort(self);
+	if (!self->model)
+		return;
 
 	// TODO(p): Leave out all paths containing .cache/thumbnails altogether.
 	gchar *thumbnails_dir = fiv_thumbnail_get_root();
@@ -909,6 +911,7 @@ set_item_size(FivBrowser *self, FivThumbnailSize size)
 		self->item_size = size;
 		self->item_height = fiv_thumbnail_sizes[self->item_size].size;
 		reload_thumbnails(self);
+		thumbnailers_start(self);
 
 		g_object_notify_by_pspec(
 			G_OBJECT(self), browser_properties[PROP_THUMBNAIL_SIZE]);
