@@ -189,12 +189,9 @@ create_row(FivSidebar *self, GFile *file, const char *icon_name)
 		GTK_REVEALER(revealer), GTK_REVEALER_TRANSITION_TYPE_NONE);
 	gtk_container_add(GTK_CONTAINER(revealer), rowbox);
 
-	GtkTargetList *target_list = gtk_target_list_new(NULL, 0);
-	gtk_target_list_add_uri_targets(target_list, 0);
 	gtk_drag_source_set(revealer, GDK_BUTTON1_MASK, NULL, 0, GDK_ACTION_LINK);
-	gtk_drag_source_set_target_list(revealer, target_list);
+	gtk_drag_source_add_uri_targets(revealer);
 	gtk_drag_source_set_icon_name(revealer, "inode-directory-symbolic");
-	gtk_target_list_unref(target_list);
 
 	GtkWidget *row = gtk_list_box_row_new();
 	g_object_set_qdata_full(G_OBJECT(row), fiv_sidebar_location_quark(),
