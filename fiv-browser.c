@@ -1001,8 +1001,9 @@ fiv_browser_realize(GtkWidget *widget)
 		.wclass = GDK_INPUT_OUTPUT,
 
 		.visual = gtk_widget_get_visual(widget),
-		.event_mask = gtk_widget_get_events(widget) | GDK_KEY_PRESS_MASK |
-			GDK_POINTER_MOTION_MASK | GDK_BUTTON_PRESS_MASK | GDK_SCROLL_MASK,
+		.event_mask = gtk_widget_get_events(widget) | GDK_POINTER_MOTION_MASK |
+			GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK | GDK_SCROLL_MASK |
+			GDK_KEY_PRESS_MASK,
 	};
 
 	// We need this window to receive input events at all.
@@ -1099,15 +1100,10 @@ fiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 
 	const Entry *entry = entry_at(self, event->x, event->y);
 	if (!entry && state == 0) {
-		switch (event->button) {
-		case GDK_BUTTON_PRIMARY:
-			break;
-		case GDK_BUTTON_SECONDARY:
+		if (event->button == GDK_BUTTON_SECONDARY)
 			show_context_menu(widget, fiv_io_model_get_location(self->model));
-			break;
-		default:
+		else if (event->button != GDK_BUTTON_PRIMARY)
 			return FALSE;
-		}
 
 		if (self->selected) {
 			self->selected = NULL;
@@ -1115,21 +1111,11 @@ fiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 		}
 		return TRUE;
 	}
-	if (!entry)
-		return FALSE;
 
-	switch (event->button) {
-	case GDK_BUTTON_PRIMARY:
-		if (state == 0)
-			return open_entry(widget, entry, FALSE);
-		if (state == GDK_CONTROL_MASK)
-			return open_entry(widget, entry, TRUE);
-		return FALSE;
-	case GDK_BUTTON_MIDDLE:
-		if (state == 0)
-			return open_entry(widget, entry, TRUE);
-		return FALSE;
-	case GDK_BUTTON_SECONDARY:
+	// In accordance with Nautilus, Thunar, and the mildly confusing
+	// Apple Human Interface Guidelines, but not with the ugly Windows User
+	// Experience Interaction Guidelines, open the context menu on button press.
+	if (entry && event->button == GDK_BUTTON_SECONDARY) {
 		self->selected = entry;
 		gtk_widget_queue_draw(widget);
 
@@ -1141,9 +1127,28 @@ fiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 		show_context_menu(widget, file);
 		g_object_unref(file);
 		return TRUE;
-	default:
-		return FALSE;
 	}
+	return FALSE;
+}
+
+static gboolean
+fiv_browser_button_release_event(GtkWidget *widget, GdkEventButton *event)
+{
+	GTK_WIDGET_CLASS(fiv_browser_parent_class)
+		->button_release_event(widget, event);
+
+	FivBrowser *self = FIV_BROWSER(widget);
+	const Entry *entry = entry_at(self, event->x, event->y);
+	if (!entry)
+		return FALSE;
+
+	guint state = event->state & gtk_accelerator_get_default_mod_mask();
+	if ((event->button == GDK_BUTTON_PRIMARY && state == 0))
+		return open_entry(widget, entry, FALSE);
+	if ((event->button == GDK_BUTTON_PRIMARY && state == GDK_CONTROL_MASK) ||
+		(event->button == GDK_BUTTON_MIDDLE && state == 0))
+		return open_entry(widget, entry, TRUE);
+	return FALSE;
 }
 
 static gboolean
@@ -1516,6 +1521,7 @@ fiv_browser_class_init(FivBrowserClass *klass)
 	widget_class->draw = fiv_browser_draw;
 	widget_class->size_allocate = fiv_browser_size_allocate;
 	widget_class->button_press_event = fiv_browser_button_press_event;
+	widget_class->button_release_event = fiv_browser_button_release_event;
 	widget_class->motion_notify_event = fiv_browser_motion_notify_event;
 	widget_class->scroll_event = fiv_browser_scroll_event;
 	widget_class->key_press_event = fiv_browser_key_press_event;
