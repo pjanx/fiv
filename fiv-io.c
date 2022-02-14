@@ -17,10 +17,11 @@
 
 #include "config.h"
 
-#include <cairo.h>
 #include <errno.h>
-#include <glib.h>
+#include <math.h>
 
+#include <cairo.h>
+#include <glib.h>
 #include <turbojpeg.h>
 #include <webp/decode.h>
 #include <webp/demux.h>
