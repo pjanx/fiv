@@ -928,6 +928,26 @@ on_open_location(G_GNUC_UNUSED GtkPlacesSidebar *sidebar, GFile *location,
 }
 
 static void
+on_view_drag_data_received(G_GNUC_UNUSED GtkWidget *widget,
+	GdkDragContext *context, G_GNUC_UNUSED gint x, G_GNUC_UNUSED gint y,
+	GtkSelectionData *data, G_GNUC_UNUSED guint info, guint time,
+	G_GNUC_UNUSED gpointer user_data)
+{
+	gchar **uris = gtk_selection_data_get_uris(data);
+	if (!uris) {
+		gtk_drag_finish(context, FALSE, FALSE, time);
+		return;
+	}
+
+	// TODO(p): Once we're able to open a virtual directory, open all of them.
+	GFile *file = g_file_new_for_uri(uris[0]);
+	open_any_file(file, FALSE);
+	g_object_unref(file);
+	gtk_drag_finish(context, TRUE, FALSE, time);
+	g_strfreev(uris);
+}
+
+static void
 on_toolbar_zoom(G_GNUC_UNUSED GtkButton *button, gpointer user_data)
 {
 	FivThumbnailSize size = FIV_THUMBNAIL_SIZE_COUNT;
@@ -1818,10 +1838,14 @@ main(int argc, char *argv[])
 
 	GtkWidget *view_scroller = gtk_scrolled_window_new(NULL, NULL);
 	g.view = g_object_new(FIV_TYPE_VIEW, NULL);
+	gtk_drag_dest_set(g.view, GTK_DEST_DEFAULT_ALL, NULL, 0, GDK_ACTION_COPY);
+	gtk_drag_dest_add_uri_targets(g.view);
 	g_signal_connect(g.view, "key-press-event",
 		G_CALLBACK(on_key_press_view), NULL);
 	g_signal_connect(g.view, "button-press-event",
 		G_CALLBACK(on_button_press_view), NULL);
+	g_signal_connect(g.view, "drag-data-received",
+		G_CALLBACK(on_view_drag_data_received), NULL);
 	gtk_container_add(GTK_CONTAINER(view_scroller), g.view);
 
 	// We need to hide it together with the separator.
