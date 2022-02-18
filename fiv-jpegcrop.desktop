@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=fiv JPEG Cropper
+GenericName=Lossless JPEG Cropper
+Icon=fiv
+Exec=fiv-jpegcrop %u
+NoDisplay=true
+Terminal=false
+StartupNotify=true
+Categories=Graphics;2DGraphics;
+MimeType=image/jpeg;

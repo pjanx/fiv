@@ -105,12 +105,20 @@ exe = executable('fiv', 'fiv.c', 'fiv-view.c', 'fiv-io.c',
 	'fiv-browser.c', 'fiv-sidebar.c', 'fiv-thumbnail.c', 'xdg.c', resources,
 	install : true,
 	dependencies : [dependencies])
-
 if gdkpixbuf.found()
 	executable('io-benchmark', 'fiv-io-benchmark.c', 'fiv-io.c', 'xdg.c',
 		build_by_default : false,
 		dependencies : [dependencies, gdkpixbuf])
 endif
+
+jpegcrop = executable('fiv-jpegcrop', 'fiv-jpegcrop.c',
+	install : true,
+	dependencies : [
+		dependency('gtk+-3.0'),
+		dependency('libturbojpeg'),
+	])
+install_data('fiv-jpegcrop.desktop',
+	install_dir : get_option('datadir') / 'applications')
 
 # XXX: With gdk-pixbuf, this even depends on currently installed modules.
 if meson.is_cross_build()

@@ -52,6 +52,8 @@ direct installations.  To test the program, help it find its custom thumbnailer:
 
  $ PATH=$(pwd):$PATH ./fiv
 
+The lossless JPEG cropper is intended to be invoked from a context menu.
+
 Documentation
 -------------
 For information concerning usage, refer to link:docs/fiv.html[the user guide],
