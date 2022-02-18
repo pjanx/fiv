@@ -3098,6 +3098,7 @@ fiv_io_encode_webp(
 		for (int i = h * picture.argb_stride; i-- > 0; argb++)
 			*argb |= 0xFF000000;
 
+	// TODO(p): Prevent or propagate VP8_ENC_ERROR_BAD_DIMENSION.
 	picture.writer = WebPMemoryWrite;
 	picture.custom_ptr = &writer;
 	if (!WebPEncode(config, &picture))
