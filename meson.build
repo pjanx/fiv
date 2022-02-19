@@ -27,6 +27,7 @@ librsvg = dependency('librsvg-2.0', required : get_option('librsvg'))
 xcursor = dependency('xcursor', required : get_option('xcursor'))
 libheif = dependency('libheif', required : get_option('libheif'))
 libtiff = dependency('libtiff-4', required : get_option('libtiff'))
+# This is a direct dependency of GTK+, but its usage may be disabled.
 gdkpixbuf = dependency('gdk-pixbuf-2.0', required : get_option('gdk-pixbuf'))
 dependencies = [
 	dependency('gtk+-3.0'),
@@ -51,7 +52,6 @@ dependencies = [
 	xcursor,
 	libheif,
 	libtiff,
-	gdkpixbuf,
 
 	cc.find_library('m', required : false),
 ]
