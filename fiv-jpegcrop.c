@@ -214,13 +214,14 @@ on_mouse(guint state, guint button, gdouble x, gdouble y)
 
 	switch (button) {
 	case GDK_BUTTON_PRIMARY:
-		g.left = MAX(0, (int) (x - 1)) / g.mcu_width * g.mcu_width;
-		g.top = MAX(0, (int) (y - 1)) / g.mcu_height * g.mcu_height;
+		g.left = CLAMP((int) (x - 1), 0, g.right) / g.mcu_width * g.mcu_width;
+		g.top = CLAMP((int) (y - 1), 0, g.bottom) / g.mcu_height * g.mcu_height;
 		update();
 		return TRUE;
 	case GDK_BUTTON_SECONDARY:
-		g.right = MIN(x, g.width);  // Inclusive of pointer position.
-		g.bottom = MIN(y, g.height);  // Inclusive of pointer position.
+		// Inclusive of pointer position.
+		g.right = CLAMP(x, g.left, g.width);
+		g.bottom = CLAMP(y, g.top, g.height);
 		update();
 		return TRUE;
 	default:
