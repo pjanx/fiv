@@ -2711,6 +2711,7 @@ fiv_io_open_from_data(
 
 typedef struct _ModelEntry {
 	gchar *uri;                         ///< GIO URI
+	gchar *collate_key;                 ///< Collate key for the filename
 	gint64 mtime_msec;                  ///< Modification time in milliseconds
 } ModelEntry;
 
@@ -2718,6 +2719,7 @@ static void
 model_entry_finalize(ModelEntry *entry)
 {
 	g_free(entry->uri);
+	g_free(entry->collate_key);
 }
 
 struct _FivIoModel {
@@ -2779,17 +2781,6 @@ model_supports(FivIoModel *self, const gchar *filename)
 }
 
 static inline int
-model_compare_name(GFile *location1, GFile *location2)
-{
-	gchar *name1 = g_file_get_parse_name(location1);
-	gchar *name2 = g_file_get_parse_name(location2);
-	int result = g_utf8_collate(name1, name2);
-	g_free(name1);
-	g_free(name2);
-	return result;
-}
-
-static inline int
 model_compare_entries(FivIoModel *self, const ModelEntry *entry1, GFile *file1,
 	const ModelEntry *entry2, GFile *file2)
 {
@@ -2809,7 +2800,7 @@ model_compare_entries(FivIoModel *self, const ModelEntry *entry1, GFile *file1,
 		// Fall-through
 	case FIV_IO_MODEL_SORT_NAME:
 	case FIV_IO_MODEL_SORT_COUNT:
-		result = model_compare_name(file1, file2);
+		result = strcmp(entry1->collate_key, entry2->collate_key);
 	}
 	return self->sort_descending ? -result : +result;
 }
@@ -2869,6 +2860,12 @@ model_reload(FivIoModel *self, GError **error)
 				g_date_time_get_microsecond(mtime) / 1000;
 			g_date_time_unref(mtime);
 		}
+
+		gchar *parse_name = g_file_get_parse_name(child);
+		// TODO(p): Make it possible to use g_utf8_collate_key() instead,
+		// which does not use natural sorting.
+		entry.collate_key = g_utf8_collate_key_for_filename(parse_name, -1);
+		g_free(parse_name);
 
 		const char *name = g_file_info_get_name(info);
 		if (g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY) {
