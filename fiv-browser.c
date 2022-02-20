@@ -535,6 +535,7 @@ on_thumbnailer_ready(GObject *object, GAsyncResult *res, gpointer user_data)
 	// 2. it enables thumbnailing things that cannot be placed in the cache.
 	GError *error = NULL;
 	GBytes *out = NULL;
+	gboolean succeeded = FALSE;
 	if (!g_subprocess_communicate_finish(subprocess, res, &out, NULL, &error)) {
 		if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
 			g_error_free(error);
@@ -543,6 +544,8 @@ on_thumbnailer_ready(GObject *object, GAsyncResult *res, gpointer user_data)
 	} else if (!g_subprocess_get_if_exited(subprocess)) {
 		// If it exited, it probably printed its own message.
 		g_spawn_check_wait_status(g_subprocess_get_status(subprocess), &error);
+	} else {
+		succeeded = g_subprocess_get_exit_status(subprocess) == EXIT_SUCCESS;
 	}
 
 	if (error) {
@@ -551,9 +554,6 @@ on_thumbnailer_ready(GObject *object, GAsyncResult *res, gpointer user_data)
 	}
 
 	g_return_if_fail(subprocess == t->minion);
-
-	gboolean succeeded = g_subprocess_get_if_exited(subprocess) &&
-		g_subprocess_get_exit_status(subprocess) == EXIT_SUCCESS;
 	g_clear_object(&t->minion);
 	if (!t->target) {
 		g_warning("finished thumbnailing an unknown image");
