@@ -62,3 +62,6 @@ gboolean fiv_thumbnail_produce(
 /// Retrieves a thumbnail of the most appropriate quality and resolution
 /// for the target file.
 cairo_surface_t *fiv_thumbnail_lookup(GFile *target, FivThumbnailSize size);
+
+/// Invalidate the wide thumbnail cache. May write to standard streams.
+void fiv_thumbnail_invalidate(void);

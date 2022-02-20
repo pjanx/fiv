@@ -77,9 +77,16 @@ gdk-pixbuf modules.
 
 <h2>Thumbnails</h2>
 
-<p><i>fiv</i> uses a custom way of storing thumbnails, and doesn't currently
-provide any means of invalidating this cache. Should you find out that your
+<p><i>fiv</i> uses a custom means of storing thumbnails, and doesn't currently
+invalidate this cache automatically. Should you find out that your
 <i>~/.cache/thumbnails</i> directory is taking up too much space, run:
+
+<pre>
+fiv --invalidate-cache
+</pre>
+
+<p>to trim it down. Alternatively, if you want to get rid of _all_ thumbnails,
+even for existing images:
 
 <pre>
 rm -rf ~/.cache/thumbnails/wide-*

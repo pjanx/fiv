@@ -1760,7 +1760,7 @@ int
 main(int argc, char *argv[])
 {
 	gboolean show_version = FALSE, show_supported_media_types = FALSE,
-		browse = FALSE;
+		invalidate_cache = FALSE, browse = FALSE;
 	gchar **path_args = NULL, *thumbnail_size = NULL;
 	const GOptionEntry options[] = {
 		{G_OPTION_REMAINING, 0, 0, G_OPTION_ARG_FILENAME_ARRAY, &path_args,
@@ -1774,6 +1774,9 @@ main(int argc, char *argv[])
 		{"thumbnail", 0, G_OPTION_FLAG_IN_MAIN,
 			G_OPTION_ARG_STRING, &thumbnail_size,
 			"Generate thumbnails for an image, up to the given size", "SIZE"},
+		{"invalidate-cache", 0, G_OPTION_FLAG_IN_MAIN,
+			G_OPTION_ARG_NONE, &invalidate_cache,
+			"Invalidate the wide thumbnail cache", NULL},
 		{"version", 'V', G_OPTION_FLAG_IN_MAIN, G_OPTION_ARG_NONE,
 			&show_version, "Output version information and exit", NULL},
 		{},
@@ -1789,6 +1792,10 @@ main(int argc, char *argv[])
 	if (show_supported_media_types) {
 		for (char **types = fiv_io_all_supported_media_types(); *types; )
 			g_print("%s\n", *types++);
+		return 0;
+	}
+	if (invalidate_cache) {
+		fiv_thumbnail_invalidate();
 		return 0;
 	}
 	if (!initialized)

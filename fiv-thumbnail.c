@@ -17,10 +17,11 @@
 
 #include "config.h"
 
+#include <glib/gstdio.h>
 #include <spng.h>
+#include <webp/demux.h>
 #include <webp/encode.h>
 #include <webp/mux.h>
-#include <glib/gstdio.h>
 
 #include <errno.h>
 #include <math.h>
@@ -581,4 +582,180 @@ fiv_thumbnail_lookup(GFile *target, FivThumbnailSize size)
 	g_free(sum);
 	g_free(uri);
 	return result;
+}
+
+// --- Invalidation ------------------------------------------------------------
+
+static void
+print_error(GFile *file, GError *error)
+{
+	gchar *name = g_file_get_parse_name(file);
+	g_printerr("%s: %s\n", name, error->message);
+	g_free(name);
+	g_error_free(error);
+}
+
+static gchar *
+identify_wide_thumbnail(GMappedFile *mf, time_t *mtime, GError **error)
+{
+	WebPDemuxer *demux = WebPDemux(&(WebPData) {
+		.bytes = (const uint8_t *) g_mapped_file_get_contents(mf),
+		.size = g_mapped_file_get_length(mf),
+	});
+	if (!demux) {
+		set_error(error, "demux failure while reading metadata");
+		return NULL;
+	}
+
+	WebPChunkIterator chunk_iter = {};
+	gchar *uri = NULL;
+	if (!WebPDemuxGetChunk(demux, "THUM", 1, &chunk_iter)) {
+		set_error(error, "missing THUM chunk");
+		goto fail;
+	}
+
+	// Similar to check_wide_thumbnail_texts(), but with a different purpose.
+	const char *p = (const char *) chunk_iter.chunk.bytes,
+		*end = p + chunk_iter.chunk.size, *key = NULL, *nul = NULL;
+	for (; (nul = memchr(p, '\0', end - p)); p = ++nul)
+		if (key) {
+			if (!strcmp(key, THUMB_URI) && !uri)
+				uri = g_strdup(p);
+			if (!strcmp(key, THUMB_MTIME))
+				*mtime = atol(p);
+			key = NULL;
+		} else {
+			key = p;
+		}
+	if (!uri)
+		set_error(error, "missing target URI");
+
+	WebPDemuxReleaseChunkIterator(&chunk_iter);
+fail:
+	WebPDemuxDelete(demux);
+	return uri;
+}
+
+static void
+check_wide_thumbnail(GFile *thumbnail, GError **error)
+{
+	// Not all errors are enough of a reason for us to delete something.
+	GError *tolerable = NULL;
+	const char *path = g_file_peek_path(thumbnail);
+	GMappedFile *mf = g_mapped_file_new(path, FALSE, &tolerable);
+	if (!mf) {
+		print_error(thumbnail, tolerable);
+		return;
+	}
+
+	time_t target_mtime = 0;
+	gchar *target_uri = identify_wide_thumbnail(mf, &target_mtime, error);
+	g_mapped_file_unref(mf);
+	if (!target_uri)
+		return;
+
+	// This should not occur at all, we're being pedantic.
+	gchar *sum = g_compute_checksum_for_string(G_CHECKSUM_MD5, target_uri, -1);
+	gchar *expected_basename = g_strdup_printf("%s.webp", sum);
+	gchar *basename = g_path_get_basename(path);
+	gboolean match = !strcmp(basename, expected_basename);
+	g_free(basename);
+	g_free(expected_basename);
+	g_free(sum);
+	if (!match) {
+		set_error(error, "URI checksum mismatch");
+		g_free(target_uri);
+		return;
+	}
+
+	GFile *target = g_file_new_for_uri(target_uri);
+	g_free(target_uri);
+	GFileInfo *info = g_file_query_info(target,
+		G_FILE_ATTRIBUTE_STANDARD_NAME "," G_FILE_ATTRIBUTE_TIME_MODIFIED,
+		G_FILE_QUERY_INFO_NONE, NULL, &tolerable);
+	g_object_unref(target);
+	if (g_error_matches(tolerable, G_IO_ERROR, G_IO_ERROR_NOT_FOUND)) {
+		g_propagate_error(error, tolerable);
+		return;
+	} else if (tolerable) {
+		print_error(thumbnail, tolerable);
+		return;
+	}
+
+	GDateTime *mdatetime = g_file_info_get_modification_date_time(info);
+	g_object_unref(info);
+	if (!mdatetime) {
+		set_error(&tolerable, "cannot retrieve file modification time");
+		print_error(thumbnail, tolerable);
+		return;
+	}
+	if (g_date_time_to_unix(mdatetime) != target_mtime)
+		set_error(error, "mtime mismatch");
+	g_date_time_unref(mdatetime);
+}
+
+static void
+invalidate_wide_thumbnail(GFile *thumbnail)
+{
+	// It's possible to lift that restriction in the future,
+	// but we need to codify how the modification time should be checked.
+	const char *path = g_file_peek_path(thumbnail);
+	if (!path) {
+		print_error(thumbnail,
+			g_error_new_literal(G_IO_ERROR, G_IO_ERROR_FAILED,
+				"thumbnails are expected to be local files"));
+		return;
+	}
+
+	// You cannot kill what you did not create.
+	if (!g_str_has_suffix(path, ".webp"))
+		return;
+
+	GError *error = NULL;
+	check_wide_thumbnail(thumbnail, &error);
+	if (error) {
+		g_debug("Deleting %s: %s", path, error->message);
+		g_clear_error(&error);
+		if (!g_file_delete(thumbnail, NULL, &error))
+			print_error(thumbnail, error);
+	}
+}
+
+static void
+invalidate_wide_thumbnail_directory(GFile *directory)
+{
+	GError *error = NULL;
+	GFileEnumerator *enumerator = g_file_enumerate_children(directory,
+		G_FILE_ATTRIBUTE_STANDARD_NAME "," G_FILE_ATTRIBUTE_STANDARD_TYPE,
+		G_FILE_QUERY_INFO_NONE, NULL, &error);
+	if (!enumerator) {
+		print_error(directory, error);
+		return;
+	}
+
+	GFileInfo *info = NULL;
+	GFile *child = NULL;
+	while (g_file_enumerator_iterate(enumerator, &info, &child, NULL, &error) &&
+		info != NULL) {
+		if (g_file_info_get_file_type(info) == G_FILE_TYPE_REGULAR)
+			invalidate_wide_thumbnail(child);
+	}
+	g_object_unref(enumerator);
+	if (error)
+		print_error(directory, error);
+}
+
+void
+fiv_thumbnail_invalidate(void)
+{
+	gchar *thumbnails_dir = fiv_thumbnail_get_root();
+	for (int i = 0; i < FIV_THUMBNAIL_SIZE_COUNT; i++) {
+		const char *name = fiv_thumbnail_sizes[i].thumbnail_spec_name;
+		gchar *dirname = g_strdup_printf("wide-%s", name);
+		GFile *dir = g_file_new_build_filename(thumbnails_dir, dirname, NULL);
+		g_free(dirname);
+		invalidate_wide_thumbnail_directory(dir);
+		g_object_unref(dir);
+	}
+	g_free(thumbnails_dir);
 }
