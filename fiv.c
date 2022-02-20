@@ -1822,9 +1822,14 @@ main(int argc, char *argv[])
 			exit_fatal("unknown thumbnail size: %s", thumbnail_size);
 
 		GFile *target = g_file_new_for_commandline_arg(path_arg);
-		if (!fiv_thumbnail_produce(target, size, &error))
+		cairo_surface_t *surface = NULL;
+		if (!fiv_thumbnail_produce(target, size, &surface, &error))
 			exit_fatal("%s", error->message);
 		g_object_unref(target);
+		if (surface) {
+			fiv_io_serialize_to_stdout(surface);
+			cairo_surface_destroy(surface);
+		}
 		return 0;
 	}
 

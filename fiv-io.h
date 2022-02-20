@@ -96,6 +96,11 @@ cairo_surface_t *fiv_io_open(const FivIoOpenContext *ctx, GError **error);
 cairo_surface_t *fiv_io_open_from_data(
 	const char *data, size_t len, const FivIoOpenContext *ctx, GError **error);
 
+// --- Thumbnail passing utilities ---------------------------------------------
+
+void fiv_io_serialize_to_stdout(cairo_surface_t *surface);
+cairo_surface_t *fiv_io_deserialize(GBytes *bytes);
+
 // --- Filesystem --------------------------------------------------------------
 
 typedef enum _FivIoModelSort {

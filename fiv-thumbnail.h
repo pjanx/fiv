@@ -56,8 +56,9 @@ extern cairo_user_data_key_t fiv_thumbnail_key_lq;
 gchar *fiv_thumbnail_get_root(void);
 
 /// Generates wide thumbnails of up to the specified size, saves them in cache.
-gboolean fiv_thumbnail_produce(
-	GFile *target, FivThumbnailSize max_size, GError **error);
+/// Returns the surface used for the maximum size (if the pointer was NULL).
+gboolean fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size,
+	cairo_surface_t **max_size_surface, GError **error);
 
 /// Retrieves a thumbnail of the most appropriate quality and resolution
 /// for the target file.

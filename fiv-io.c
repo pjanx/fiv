@@ -2703,13 +2703,77 @@ fiv_io_open_from_data(
 	return surface;
 }
 
+// --- Thumbnail passing utilities ---------------------------------------------
+
+typedef struct {
+	int width, height, stride, format;
+} CairoHeader;
+
+void
+fiv_io_serialize_to_stdout(cairo_surface_t *surface)
+{
+	if (!surface || cairo_surface_get_type(surface) != CAIRO_SURFACE_TYPE_IMAGE)
+		return;
+
+#ifdef G_OS_UNIX
+	// Common courtesy, this is never what the user wants.
+	if (isatty(fileno(stdout)))
+		return;
+#endif
+
+	CairoHeader h = {
+		.width = cairo_image_surface_get_width(surface),
+		.height = cairo_image_surface_get_height(surface),
+		.stride = cairo_image_surface_get_stride(surface),
+		.format = cairo_image_surface_get_format(surface),
+	};
+
+	// Cairo lets pixman initialize image surfaces.
+	// pixman allocates stride * height, not omitting those trailing bytes.
+	const unsigned char *data = cairo_image_surface_get_data(surface);
+	if (fwrite(&h, sizeof h, 1, stdout) == 1)
+		fwrite(data, 1, h.stride * h.height, stdout);
+}
+
+cairo_surface_t *
+fiv_io_deserialize(GBytes *bytes)
+{
+	CairoHeader h = {};
+	GByteArray *array = g_bytes_unref_to_array(bytes);
+	if (array->len < sizeof h) {
+		g_byte_array_unref(array);
+		return NULL;
+	}
+
+	h = *(CairoHeader *) array->data;
+	if (h.width < 1 || h.height < 1 || h.stride < h.width ||
+		G_MAXSIZE / (gsize) h.stride < (gsize) h.height ||
+		array->len - sizeof h < (gsize) h.stride * (gsize) h.height) {
+		g_byte_array_unref(array);
+		return NULL;
+	}
+
+	cairo_surface_t *surface = cairo_image_surface_create_for_data(
+		array->data + sizeof h, h.format, h.width, h.height, h.stride);
+	if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
+		cairo_surface_destroy(surface);
+		g_byte_array_unref(array);
+		return NULL;
+	}
+
+	static cairo_user_data_key_t key;
+	cairo_surface_set_user_data(
+		surface, &key, array, (cairo_destroy_func_t) g_byte_array_unref);
+	return surface;
+}
+
 // --- Filesystem --------------------------------------------------------------
 
 #include "xdg.h"
 
 #include <fnmatch.h>
 
-typedef struct _ModelEntry {
+typedef struct {
 	gchar *uri;                         ///< GIO URI
 	gchar *collate_key;                 ///< Collate key for the filename
 	gint64 mtime_msec;                  ///< Modification time in milliseconds

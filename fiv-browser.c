@@ -504,13 +504,23 @@ reload_thumbnails(FivBrowser *self)
 
 // --- Minion management -------------------------------------------------------
 
-static gboolean thumbnailer_next(Thumbnailer *thumbnailer);
+#if !GLIB_CHECK_VERSION(2, 70, 0)
+#define g_spawn_check_wait_status g_spawn_check_exit_status
+#endif
+
+static gboolean thumbnailer_next(Thumbnailer *t);
 
 static void
-thumbnailer_reprocess_entry(FivBrowser *self, Entry *entry)
+thumbnailer_reprocess_entry(FivBrowser *self, GBytes *output, Entry *entry)
 {
-	entry_add_thumbnail(entry, self);
-	materialize_icon(self, entry);
+	g_clear_object(&entry->icon);
+	g_clear_pointer(&entry->thumbnail, cairo_surface_destroy);
+	if (!output || !(entry->thumbnail = rescale_thumbnail(
+			fiv_io_deserialize(output), self->item_height))) {
+		entry_add_thumbnail(entry, self);
+		materialize_icon(self, entry);
+	}
+
 	gtk_widget_queue_resize(GTK_WIDGET(self));
 }
 
@@ -518,64 +528,75 @@ static void
 on_thumbnailer_ready(GObject *object, GAsyncResult *res, gpointer user_data)
 {
 	GSubprocess *subprocess = G_SUBPROCESS(object);
-	Thumbnailer *thumbnailer = user_data;
+	Thumbnailer *t = user_data;
 
+	// Reading out pixel data directly from a thumbnailer serves two purposes:
+	// 1. it avoids pointless delays with large thumbnail sizes,
+	// 2. it enables thumbnailing things that cannot be placed in the cache.
 	GError *error = NULL;
-	if (!g_subprocess_wait_check_finish(subprocess, res, &error)) {
+	GBytes *out = NULL;
+	if (!g_subprocess_communicate_finish(subprocess, res, &out, NULL, &error)) {
 		if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
 			g_error_free(error);
 			return;
 		}
-		if (!g_subprocess_get_if_exited(subprocess) ||
-			g_subprocess_get_exit_status(subprocess) != EXIT_FAILURE)
-			g_warning("%s", error->message);
+	} else if (!g_subprocess_get_if_exited(subprocess)) {
+		// If it exited, it probably printed its own message.
+		g_spawn_check_wait_status(g_subprocess_get_status(subprocess), &error);
+	}
+
+	if (error) {
+		g_warning("%s", error->message);
 		g_error_free(error);
 	}
 
-	g_return_if_fail(subprocess == thumbnailer->minion);
+	g_return_if_fail(subprocess == t->minion);
 
 	gboolean succeeded = g_subprocess_get_if_exited(subprocess) &&
 		g_subprocess_get_exit_status(subprocess) == EXIT_SUCCESS;
-	g_clear_object(&thumbnailer->minion);
-	if (!thumbnailer->target) {
+	g_clear_object(&t->minion);
+	if (!t->target) {
 		g_warning("finished thumbnailing an unknown image");
+		g_clear_pointer(&out, g_bytes_unref);
 		return;
 	}
 
 	if (succeeded)
-		thumbnailer_reprocess_entry(thumbnailer->self, thumbnailer->target);
+		thumbnailer_reprocess_entry(t->self, out, t->target);
+	else
+		g_clear_pointer(&out, g_bytes_unref);
 
-	thumbnailer->target = NULL;
-	thumbnailer_next(thumbnailer);
+	t->target = NULL;
+	thumbnailer_next(t);
 }
 
 static gboolean
-thumbnailer_next(Thumbnailer *thumbnailer)
+thumbnailer_next(Thumbnailer *t)
 {
-	// TODO(p): Ideally, try to keep the minions alive.
-	FivBrowser *self = thumbnailer->self;
+	// TODO(p): Try to keep the minions alive (stdout will be a problem).
+	FivBrowser *self = t->self;
 	GList *link = self->thumbnailers_queue;
 	if (!link)
 		return FALSE;
 
-	thumbnailer->target = link->data;
+	t->target = link->data;
 	self->thumbnailers_queue =
 		g_list_delete_link(self->thumbnailers_queue, self->thumbnailers_queue);
 
 	GError *error = NULL;
-	thumbnailer->minion = g_subprocess_new(G_SUBPROCESS_FLAGS_NONE, &error,
+	t->minion = g_subprocess_new(G_SUBPROCESS_FLAGS_STDOUT_PIPE, &error,
 		PROJECT_NAME, "--thumbnail",
 		fiv_thumbnail_sizes[self->item_size].thumbnail_spec_name, "--",
-		thumbnailer->target->uri, NULL);
+		t->target->uri, NULL);
 	if (error) {
 		g_warning("%s", error->message);
 		g_error_free(error);
 		return FALSE;
 	}
 
-	thumbnailer->cancel = g_cancellable_new();
-	g_subprocess_wait_check_async(thumbnailer->minion, thumbnailer->cancel,
-		on_thumbnailer_ready, thumbnailer);
+	t->cancel = g_cancellable_new();
+	g_subprocess_communicate_async(
+		t->minion, NULL, t->cancel, on_thumbnailer_ready, t);
 	return TRUE;
 }
 
@@ -588,15 +609,15 @@ thumbnailers_abort(FivBrowser *self)
 	self->thumbnailers_queue = NULL;
 
 	for (size_t i = 0; i < self->thumbnailers_len; i++) {
-		Thumbnailer *thumbnailer = self->thumbnailers + i;
-		if (thumbnailer->cancel) {
-			g_cancellable_cancel(thumbnailer->cancel);
-			g_clear_object(&thumbnailer->cancel);
+		Thumbnailer *t = self->thumbnailers + i;
+		if (t->cancel) {
+			g_cancellable_cancel(t->cancel);
+			g_clear_object(&t->cancel);
 		}
 
 		// Just let them exit on their own.
-		g_clear_object(&thumbnailer->minion);
-		thumbnailer->target = NULL;
+		g_clear_object(&t->minion);
+		t->target = NULL;
 	}
 }
 

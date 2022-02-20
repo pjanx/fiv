@@ -230,7 +230,8 @@ save_thumbnail(cairo_surface_t *thumbnail, const char *path, GString *thum)
 }
 
 gboolean
-fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size, GError **error)
+fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size,
+	cairo_surface_t **max_size_surface, GError **error)
 {
 	g_return_val_if_fail(max_size >= FIV_THUMBNAIL_SIZE_MIN &&
 		max_size <= FIV_THUMBNAIL_SIZE_MAX, FALSE);
@@ -306,8 +307,12 @@ fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size, GError **error)
 		gchar *path = g_strdup_printf("%s/wide-%s/%s.webp", thumbnails_dir,
 			fiv_thumbnail_sizes[use].thumbnail_spec_name, sum);
 		save_thumbnail(scaled, path, thum);
-		cairo_surface_destroy(scaled);
 		g_free(path);
+
+		if (!*max_size_surface)
+			*max_size_surface = scaled;
+		else
+			cairo_surface_destroy(scaled);
 	}
 
 	g_string_free(thum, TRUE);
