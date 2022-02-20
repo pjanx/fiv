@@ -229,31 +229,10 @@ save_thumbnail(cairo_surface_t *thumbnail, const char *path, GString *thum)
 	WebPDataClear(&assembled);
 }
 
-gboolean
-fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size,
-	cairo_surface_t **max_size_surface, GError **error)
+static cairo_surface_t *
+fiv_thumbnail_prepare(
+	GFile *target, GBytes *data, gboolean *color_managed, GError **error)
 {
-	g_return_val_if_fail(max_size >= FIV_THUMBNAIL_SIZE_MIN &&
-		max_size <= FIV_THUMBNAIL_SIZE_MAX, FALSE);
-
-	// Local files only, at least for now.
-	// TODO(p): Support thumbnailing the trash scheme.
-	const gchar *path = g_file_peek_path(target);
-	if (!path) {
-		set_error(error, "only local files are supported");
-		return FALSE;
-	}
-
-	GMappedFile *mf = g_mapped_file_new(path, FALSE, error);
-	if (!mf)
-		return FALSE;
-
-	GStatBuf st = {};
-	if (g_stat(path, &st)) {
-		set_error(error, g_strerror(errno));
-		return FALSE;
-	}
-
 	FivIoOpenContext ctx = {
 		.uri = g_file_get_uri(target),
 		.screen_profile = fiv_io_profile_new_sRGB(),
@@ -263,15 +242,86 @@ fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size,
 		.warnings = g_ptr_array_new_with_free_func(g_free),
 	};
 
-	gsize filesize = g_mapped_file_get_length(mf);
 	cairo_surface_t *surface = fiv_io_open_from_data(
-		g_mapped_file_get_contents(mf), filesize, &ctx, error);
-	g_mapped_file_unref(mf);
-
+		g_bytes_get_data(data, NULL), g_bytes_get_size(data), &ctx, error);
 	g_free((gchar *) ctx.uri);
 	g_ptr_array_free(ctx.warnings, TRUE);
-	if (ctx.screen_profile)
+	if ((*color_managed = !!ctx.screen_profile))
 		fiv_io_profile_free(ctx.screen_profile);
+	g_bytes_unref(data);
+	return surface;
+}
+
+static gboolean
+fiv_thumbnail_fallback(GFile *target, FivThumbnailSize size,
+	cairo_surface_t **surface, GError **error)
+{
+	goffset filesize = 0;
+	GFileInfo *info = g_file_query_info(target,
+		G_FILE_ATTRIBUTE_STANDARD_NAME "," G_FILE_ATTRIBUTE_STANDARD_SIZE,
+		G_FILE_QUERY_INFO_NONE, NULL, NULL);
+	if (info) {
+		filesize = g_file_info_get_size(info);
+		g_object_unref(info);
+	}
+
+	// TODO(p): Try to be a bit more intelligent about this.
+	// For example, we can employ magic checks.
+	if (filesize > 10 << 20) {
+		set_error(error, "oversize, not thumbnailing");
+		return FALSE;
+	}
+
+	GBytes *data = g_file_load_bytes(target, NULL, NULL, error);
+	if (!data)
+		return FALSE;
+
+	gboolean color_managed = FALSE;
+	cairo_surface_t *result =
+		fiv_thumbnail_prepare(target, data, &color_managed, error);
+	if (!result)
+		return FALSE;
+
+	if (!*surface)
+		*surface = adjust_thumbnail(result, fiv_thumbnail_sizes[size].size);
+	cairo_surface_destroy(result);
+	return TRUE;
+}
+
+gboolean
+fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size,
+	cairo_surface_t **max_size_surface, GError **error)
+{
+	g_return_val_if_fail(max_size >= FIV_THUMBNAIL_SIZE_MIN &&
+		max_size <= FIV_THUMBNAIL_SIZE_MAX, FALSE);
+
+	const gchar *path = g_file_peek_path(target);
+	if (!path || !g_file_is_native(target) /* Don't save sftp://. */) {
+		return fiv_thumbnail_fallback(
+			target, max_size, max_size_surface, error);
+	}
+
+	// Make the TOCTTOU issue favour unnecessary reloading.
+	GStatBuf st = {};
+	if (g_stat(path, &st)) {
+		set_error(error, g_strerror(errno));
+		return FALSE;
+	}
+
+	GError *e = NULL;
+	GMappedFile *mf = g_mapped_file_new(path, FALSE, &e);
+	if (!mf) {
+		g_debug("%s: %s", path, e->message);
+		g_error_free(e);
+		return fiv_thumbnail_fallback(
+			target, max_size, max_size_surface, error);
+	}
+
+	gsize filesize = g_mapped_file_get_length(mf);
+	gboolean color_managed = FALSE;
+	cairo_surface_t *surface = fiv_thumbnail_prepare(
+		target, g_mapped_file_get_bytes(mf), &color_managed, error);
+	g_mapped_file_unref(mf);
 	if (!surface)
 		return FALSE;
 
@@ -296,7 +346,7 @@ fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size,
 	}
 
 	// Without a CMM, no conversion is attempted.
-	if (ctx.screen_profile) {
+	if (color_managed) {
 		g_string_append_printf(
 			thum, "%s%c%s%c", THUMB_COLORSPACE, 0, THUMB_COLORSPACE_SRGB, 0);
 	}
