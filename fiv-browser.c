@@ -683,11 +683,29 @@ append_opener(GtkWidget *menu, GAppInfo *opener, const OpenContext *template)
 	ctx->content_type = g_strdup(template->content_type);
 	ctx->app_info = opener;
 
-	// It's documented that we can touch the child, if we want formatting:
-	// https://docs.gtk.org/gtk3/class.MenuItem.html
 	// XXX: Would g_app_info_get_display_name() be any better?
 	gchar *name = g_strdup_printf("Open With %s", g_app_info_get_name(opener));
+
+	// It's documented that we can touch the child, if we want to use markup.
+#if 0
 	GtkWidget *item = gtk_menu_item_new_with_label(name);
+#else
+	// GtkImageMenuItem overrides the toggle_size_request class method
+	// to get the image shown in the "margin"--too much work to duplicate.
+	G_GNUC_BEGIN_IGNORE_DEPRECATIONS;
+
+	GtkWidget *item = gtk_image_menu_item_new_with_label(name);
+	GIcon *icon = g_app_info_get_icon(opener);
+	if (icon) {
+		GtkWidget *image = gtk_image_new_from_gicon(icon, GTK_ICON_SIZE_MENU);
+		gtk_image_menu_item_set_image(GTK_IMAGE_MENU_ITEM(item), image);
+		gtk_image_menu_item_set_always_show_image(
+			GTK_IMAGE_MENU_ITEM(item), TRUE);
+	}
+
+	G_GNUC_END_IGNORE_DEPRECATIONS;
+#endif
+
 	g_free(name);
 	g_signal_connect_data(item, "activate", G_CALLBACK(open_context_launch),
 		ctx, open_context_notify, 0);
