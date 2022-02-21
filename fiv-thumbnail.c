@@ -230,8 +230,7 @@ save_thumbnail(cairo_surface_t *thumbnail, const char *path, GString *thum)
 }
 
 static cairo_surface_t *
-fiv_thumbnail_prepare(
-	GFile *target, GBytes *data, gboolean *color_managed, GError **error)
+render(GFile *target, GBytes *data, gboolean *color_managed, GError **error)
 {
 	FivIoOpenContext ctx = {
 		.uri = g_file_get_uri(target),
@@ -253,7 +252,7 @@ fiv_thumbnail_prepare(
 }
 
 static gboolean
-fiv_thumbnail_fallback(GFile *target, FivThumbnailSize size,
+produce_fallback(GFile *target, FivThumbnailSize size,
 	cairo_surface_t **surface, GError **error)
 {
 	goffset filesize = 0;
@@ -277,8 +276,7 @@ fiv_thumbnail_fallback(GFile *target, FivThumbnailSize size,
 		return FALSE;
 
 	gboolean color_managed = FALSE;
-	cairo_surface_t *result =
-		fiv_thumbnail_prepare(target, data, &color_managed, error);
+	cairo_surface_t *result = render(target, data, &color_managed, error);
 	if (!result)
 		return FALSE;
 
@@ -296,10 +294,8 @@ fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size,
 		max_size <= FIV_THUMBNAIL_SIZE_MAX, FALSE);
 
 	const gchar *path = g_file_peek_path(target);
-	if (!path || !g_file_is_native(target) /* Don't save sftp://. */) {
-		return fiv_thumbnail_fallback(
-			target, max_size, max_size_surface, error);
-	}
+	if (!path || !g_file_is_native(target) /* Don't save sftp://. */)
+		return produce_fallback(target, max_size, max_size_surface, error);
 
 	// Make the TOCTTOU issue favour unnecessary reloading.
 	GStatBuf st = {};
@@ -313,14 +309,13 @@ fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size,
 	if (!mf) {
 		g_debug("%s: %s", path, e->message);
 		g_error_free(e);
-		return fiv_thumbnail_fallback(
-			target, max_size, max_size_surface, error);
+		return produce_fallback(target, max_size, max_size_surface, error);
 	}
 
 	gsize filesize = g_mapped_file_get_length(mf);
 	gboolean color_managed = FALSE;
-	cairo_surface_t *surface = fiv_thumbnail_prepare(
-		target, g_mapped_file_get_bytes(mf), &color_managed, error);
+	cairo_surface_t *surface =
+		render(target, g_mapped_file_get_bytes(mf), &color_managed, error);
 	g_mapped_file_unref(mf);
 	if (!surface)
 		return FALSE;
