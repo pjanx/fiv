@@ -792,8 +792,7 @@ make_context_menu(GtkWidget *widget, GFile *file)
 	}
 
 	for (GList *iter = recommended; iter; iter = iter->next) {
-		if (g_app_info_should_show(iter->data) &&
-			(!default_ || !g_app_info_equal(iter->data, default_)))
+		if (!default_ || !g_app_info_equal(iter->data, default_))
 			append_opener(menu, iter->data, ctx);
 		else
 			g_object_unref(iter->data);
@@ -805,8 +804,7 @@ make_context_menu(GtkWidget *widget, GFile *file)
 	}
 
 	for (GList *iter = fallback; iter; iter = iter->next) {
-		if (g_app_info_should_show(iter->data) &&
-			(!default_ || !g_app_info_equal(iter->data, default_)))
+		if (!default_ || !g_app_info_equal(iter->data, default_))
 			append_opener(menu, iter->data, ctx);
 		else
 			g_object_unref(iter->data);
