@@ -2,6 +2,7 @@
 Type=Application
 Name=fiv
 GenericName=Image Viewer
+X-GNOME-FullName=fiv Image Viewer
 Icon=fiv
 Exec=fiv -- %u
 Terminal=false

@@ -704,8 +704,9 @@ append_opener(GtkWidget *menu, GAppInfo *opener, const OpenContext *template)
 	ctx->content_type = g_strdup(template->content_type);
 	ctx->app_info = opener;
 
-	// XXX: Would g_app_info_get_display_name() be any better?
-	gchar *name = g_strdup_printf("Open With %s", g_app_info_get_name(opener));
+	// On Linux, this prefers the obsoleted X-GNOME-FullName.
+	gchar *name =
+		g_strdup_printf("Open With %s", g_app_info_get_display_name(opener));
 
 	// It's documented that we can touch the child, if we want to use markup.
 #if 0
