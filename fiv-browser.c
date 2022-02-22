@@ -68,6 +68,10 @@ struct _FivBrowser {
 	GArray *layouted_rows;              ///< []Row
 	const Entry *selected;              ///< Selected entry or NULL
 
+	guint tracked_button;               ///< Pressed mouse button number or 0
+	double drag_begin_x;                ///< Viewport start X coordinate or -1
+	double drag_begin_y;                ///< Viewport start Y coordinate or -1
+
 	Thumbnailer *thumbnailers;          ///< Parallelized thumbnailers
 	size_t thumbnailers_len;            ///< Thumbnailers array size
 	GList *thumbnailers_queue;          ///< Queued up Entry pointers
@@ -132,6 +136,13 @@ append_row(FivBrowser *self, int *y, int x, GArray *items_array)
 	*y += self->item_border_y;
 }
 
+static void
+abort_button_tracking(FivBrowser *self)
+{
+	self->tracked_button = 0;
+	self->drag_begin_x = self->drag_begin_y = -1;
+}
+
 static int
 relayout(FivBrowser *self, int width)
 {
@@ -143,6 +154,8 @@ relayout(FivBrowser *self, int width)
 	int available_width = width - padding.left - padding.right;
 
 	g_array_set_size(self->layouted_rows, 0);
+	// Whatever these used to point at might no longer be there.
+	abort_button_tracking(self);
 
 	GArray *items = g_array_new(TRUE, TRUE, sizeof(Item));
 	int x = 0, y = padding.top;
@@ -242,6 +255,8 @@ item_extents(FivBrowser *self, const Item *item, const Row *row)
 static const Entry *
 entry_at(FivBrowser *self, int x, int y)
 {
+	if (self->hadjustment)
+		x += round(gtk_adjustment_get_value(self->hadjustment));
 	if (self->vadjustment)
 		y += round(gtk_adjustment_get_value(self->vadjustment));
 
@@ -272,6 +287,8 @@ entry_rect(FivBrowser *self, const Entry *entry)
 			}
 		}
 	}
+	if (self->hadjustment)
+		rect.x -= round(gtk_adjustment_get_value(self->hadjustment));
 	if (self->vadjustment)
 		rect.y -= round(gtk_adjustment_get_value(self->vadjustment));
 	return rect;
@@ -1088,11 +1105,12 @@ fiv_browser_draw(GtkWidget *widget, cairo_t *cr)
 	gtk_render_background(gtk_widget_get_style_context(widget), cr, 0, 0,
 		allocation.width, allocation.height);
 
-	// TODO(p): self->hadjustment as well, and test it.
-	if (self->vadjustment) {
-		gdouble y = round(gtk_adjustment_get_value(self->vadjustment));
-		cairo_translate(cr, 0, -y);
-	}
+	if (self->hadjustment)
+		cairo_translate(
+			cr, -round(gtk_adjustment_get_value(self->hadjustment)), 0);
+	if (self->vadjustment)
+		cairo_translate(
+			cr, 0, -round(gtk_adjustment_get_value(self->vadjustment)));
 
 	GdkRectangle clip = {};
 	gboolean have_clip = gdk_cairo_get_clip_rectangle(cr, &clip);
@@ -1124,10 +1142,15 @@ open_entry(GtkWidget *self, const Entry *entry, gboolean new_window)
 static gboolean
 fiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 {
+	FivBrowser *self = FIV_BROWSER(widget);
 	GTK_WIDGET_CLASS(fiv_browser_parent_class)
 		->button_press_event(widget, event);
 
-	FivBrowser *self = FIV_BROWSER(widget);
+	// Make pressing multiple mouse buttons at once cancel a click.
+	if (self->tracked_button) {
+		abort_button_tracking(self);
+		return TRUE;
+	}
 	if (event->type != GDK_BUTTON_PRESS)
 		return FALSE;
 
@@ -1166,18 +1189,33 @@ fiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 		g_object_unref(file);
 		return TRUE;
 	}
+
+	// gtk_drag_source_set() would span the whole widget area, we'd have to
+	// un/set it as needed, in particular to handle empty space.
+	// It might be a good idea to use GtkGestureDrag instead.
+	if (event->button == GDK_BUTTON_PRIMARY ||
+		event->button == GDK_BUTTON_MIDDLE) {
+		self->tracked_button = event->button;
+		self->drag_begin_x = event->x;
+		self->drag_begin_y = event->y;
+		return TRUE;
+	}
 	return FALSE;
 }
 
 static gboolean
 fiv_browser_button_release_event(GtkWidget *widget, GdkEventButton *event)
 {
+	FivBrowser *self = FIV_BROWSER(widget);
 	GTK_WIDGET_CLASS(fiv_browser_parent_class)
 		->button_release_event(widget, event);
+	if (event->button != self->tracked_button)
+		return FALSE;
 
-	FivBrowser *self = FIV_BROWSER(widget);
-	const Entry *entry = entry_at(self, event->x, event->y);
-	if (!entry)
+	// Middle clicks should only work on the starting entry.
+	const Entry *entry = entry_at(self, self->drag_begin_x, self->drag_begin_y);
+	abort_button_tracking(self);
+	if (!entry || entry != entry_at(self, event->x, event->y))
 		return FALSE;
 
 	guint state = event->state & gtk_accelerator_get_default_mod_mask();
@@ -1192,16 +1230,37 @@ fiv_browser_button_release_event(GtkWidget *widget, GdkEventButton *event)
 static gboolean
 fiv_browser_motion_notify_event(GtkWidget *widget, GdkEventMotion *event)
 {
+	FivBrowser *self = FIV_BROWSER(widget);
 	GTK_WIDGET_CLASS(fiv_browser_parent_class)
 		->motion_notify_event(widget, event);
 
-	FivBrowser *self = FIV_BROWSER(widget);
-	if (event->state != 0)
+	guint state = event->state & gtk_accelerator_get_default_mod_mask();
+	if (state != 0 || self->tracked_button != GDK_BUTTON_PRIMARY ||
+		!gtk_drag_check_threshold(widget, self->drag_begin_x,
+			self->drag_begin_y, event->x, event->y)) {
+		const Entry *entry = entry_at(self, event->x, event->y);
+		GdkWindow *window = gtk_widget_get_window(widget);
+		gdk_window_set_cursor(window, entry ? self->pointer : NULL);
 		return FALSE;
+	}
 
-	const Entry *entry = entry_at(self, event->x, event->y);
-	GdkWindow *window = gtk_widget_get_window(widget);
-	gdk_window_set_cursor(window, entry ? self->pointer : NULL);
+	// The "correct" behaviour is to set the selection on a left mouse button
+	// press immediately, but that is regarded as visual noise.
+	const Entry *entry = entry_at(self, self->drag_begin_x, self->drag_begin_y);
+	abort_button_tracking(self);
+	if (!entry)
+		return TRUE;
+
+	self->selected = entry;
+	gtk_widget_queue_draw(widget);
+
+	GtkTargetList *target_list = gtk_target_list_new(NULL, 0);
+	gtk_target_list_add_uri_targets(target_list, 0);
+	GdkDragAction actions = GDK_ACTION_COPY | GDK_ACTION_MOVE |
+		GDK_ACTION_LINK | GDK_ACTION_ASK;
+	gtk_drag_begin_with_coordinates(widget, target_list, actions,
+		self->tracked_button, (GdkEvent *) event, event->x, event->y);
+	gtk_target_list_unref(target_list);
 	return TRUE;
 }
 
@@ -1209,6 +1268,7 @@ static gboolean
 fiv_browser_scroll_event(GtkWidget *widget, GdkEventScroll *event)
 {
 	FivBrowser *self = FIV_BROWSER(widget);
+	abort_button_tracking(self);
 	if ((event->state & gtk_accelerator_get_default_mod_mask()) !=
 		GDK_CONTROL_MASK)
 		return FALSE;
@@ -1224,6 +1284,28 @@ fiv_browser_scroll_event(GtkWidget *widget, GdkEventScroll *event)
 		// For some reason, we can also get GDK_SCROLL_SMOOTH.
 		// Left/right are good to steal from GtkScrolledWindow for consistency.
 		return TRUE;
+	}
+}
+
+static void
+fiv_browser_drag_begin(GtkWidget *widget, GdkDragContext *context)
+{
+	FivBrowser *self = FIV_BROWSER(widget);
+	if (self->selected) {
+		// There doesn't seem to be a size limit.
+		gtk_drag_set_icon_surface(context, self->selected->thumbnail);
+	}
+}
+
+static void
+fiv_browser_drag_data_get(GtkWidget *widget,
+	G_GNUC_UNUSED GdkDragContext *context, GtkSelectionData *data,
+	G_GNUC_UNUSED guint info, G_GNUC_UNUSED guint time)
+{
+	FivBrowser *self = FIV_BROWSER(widget);
+	if (self->selected) {
+		(void) gtk_selection_data_set_uris(
+			data, (gchar *[]){self->selected->uri, NULL});
 	}
 }
 
@@ -1561,6 +1643,8 @@ fiv_browser_class_init(FivBrowserClass *klass)
 	widget_class->button_press_event = fiv_browser_button_press_event;
 	widget_class->button_release_event = fiv_browser_button_release_event;
 	widget_class->motion_notify_event = fiv_browser_motion_notify_event;
+	widget_class->drag_begin = fiv_browser_drag_begin;
+	widget_class->drag_data_get = fiv_browser_drag_data_get;
 	widget_class->scroll_event = fiv_browser_scroll_event;
 	widget_class->key_press_event = fiv_browser_key_press_event;
 	widget_class->query_tooltip = fiv_browser_query_tooltip;
@@ -1588,6 +1672,7 @@ fiv_browser_init(FivBrowser *self)
 	g_array_set_clear_func(self->entries, (GDestroyNotify) entry_free);
 	self->layouted_rows = g_array_new(FALSE, TRUE, sizeof(Row));
 	g_array_set_clear_func(self->layouted_rows, (GDestroyNotify) row_free);
+	abort_button_tracking(self);
 
 	self->thumbnailers_len = g_get_num_processors();
 	self->thumbnailers =
