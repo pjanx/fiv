@@ -136,13 +136,6 @@ append_row(FivBrowser *self, int *y, int x, GArray *items_array)
 	*y += self->item_border_y;
 }
 
-static void
-abort_button_tracking(FivBrowser *self)
-{
-	self->tracked_button = 0;
-	self->drag_begin_x = self->drag_begin_y = -1;
-}
-
 static int
 relayout(FivBrowser *self, int width)
 {
@@ -154,8 +147,8 @@ relayout(FivBrowser *self, int width)
 	int available_width = width - padding.left - padding.right;
 
 	g_array_set_size(self->layouted_rows, 0);
-	// Whatever these used to point at might no longer be there.
-	abort_button_tracking(self);
+	// Whatever self->drag_begin_* used to point at might no longer be there,
+	// but thumbnail reloading would disrupt mouse clicks if we cleared them.
 
 	GArray *items = g_array_new(TRUE, TRUE, sizeof(Item));
 	int x = 0, y = padding.top;
@@ -1137,6 +1130,13 @@ open_entry(GtkWidget *self, const Entry *entry, gboolean new_window)
 		new_window ? GTK_PLACES_OPEN_NEW_WINDOW : GTK_PLACES_OPEN_NORMAL);
 	g_object_unref(location);
 	return TRUE;
+}
+
+static void
+abort_button_tracking(FivBrowser *self)
+{
+	self->tracked_button = 0;
+	self->drag_begin_x = self->drag_begin_y = -1;
 }
 
 static gboolean
