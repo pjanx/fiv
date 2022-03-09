@@ -1112,6 +1112,28 @@ open_libjpeg_turbo(
 		? TJPF_CMYK
 		: (G_BYTE_ORDER == G_LITTLE_ENDIAN ? TJPF_BGRX : TJPF_XRGB);
 
+	// The limit of Cairo/pixman is 32767. but JPEG can go as high as 65535.
+	// Prevent Cairo from throwing an error, and make use of libjpeg's scaling.
+	// gdk-pixbuf circumvents this check, producing unrenderable surfaces.
+	const int max = 32767;
+
+	int nfs = 0;
+	tjscalingfactor *fs = tjGetScalingFactors(&nfs), f = {0, 1};
+	if (fs && (width > max || height > max)) {
+		for (int i = 0; i < nfs; i++) {
+			if (TJSCALED(width, fs[i]) <= max &&
+				TJSCALED(height, fs[i]) <= max &&
+				fs[i].num * f.denom > f.num * fs[i].denom)
+				f = fs[i];
+		}
+
+		add_warning(ctx,
+			"the image is too large, and had to be scaled by %d/%d",
+			f.num, f.denom);
+		width = TJSCALED(width, f);
+		height = TJSCALED(height, f);
+	}
+
 	cairo_surface_t *surface =
 		cairo_image_surface_create(CAIRO_FORMAT_RGB24, width, height);
 	cairo_status_t surface_status = cairo_surface_status(surface);

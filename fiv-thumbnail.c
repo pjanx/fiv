@@ -163,6 +163,15 @@ adjust_thumbnail(cairo_surface_t *thumbnail, double row_height)
 
 	cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
 	cairo_paint(cr);
+
+	// Note that this doesn't get triggered with oversize input surfaces,
+	// even though nothing will be rendered.
+	if (cairo_surface_status(thumbnail) != CAIRO_STATUS_SUCCESS ||
+		cairo_surface_status(scaled) != CAIRO_STATUS_SUCCESS ||
+		cairo_pattern_status(pattern) != CAIRO_STATUS_SUCCESS ||
+		cairo_status(cr) != CAIRO_STATUS_SUCCESS)
+		g_warning("thumbnail scaling failed");
+
 	cairo_destroy(cr);
 	return scaled;
 }
