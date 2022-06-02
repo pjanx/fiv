@@ -722,13 +722,19 @@ on_filtering_toggled(GtkToggleButton *button, G_GNUC_UNUSED gpointer user_data)
 static void
 on_sort_field(G_GNUC_UNUSED GtkMenuItem *item, gpointer data)
 {
-	g_object_set(g.model, "sort-field", (gint) (intptr_t) data, NULL);
+	int old = -1, new = (int) (intptr_t) data;
+	g_object_get(g.model, "sort-field", &old, NULL);
+	if (old != new)
+		g_object_set(g.model, "sort-field", new, NULL);
 }
 
 static void
 on_sort_direction(G_GNUC_UNUSED GtkMenuItem *item, gpointer data)
 {
-	g_object_set(g.model, "sort-descending", (gboolean) (intptr_t) data, NULL);
+	gboolean old = FALSE, new = (gboolean) (intptr_t) data;
+	g_object_get(g.model, "sort-descending", &old, NULL);
+	if (old != new)
+		g_object_set(g.model, "sort-descending", new, NULL);
 }
 
 static void
