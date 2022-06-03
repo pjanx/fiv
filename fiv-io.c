@@ -2939,7 +2939,7 @@ model_reload(FivIoModel *self, GError **error)
 		if (self->filtering && g_file_info_get_is_hidden(info))
 			continue;
 
-		ModelEntry entry = {};
+		ModelEntry entry = {.uri = g_file_get_uri(child)};
 		GDateTime *mtime = g_file_info_get_modification_date_time(info);
 		if (mtime) {
 			entry.mtime_msec = g_date_time_to_unix(mtime) * 1000 +
@@ -2954,13 +2954,12 @@ model_reload(FivIoModel *self, GError **error)
 		g_free(parse_name);
 
 		const char *name = g_file_info_get_name(info);
-		if (g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY) {
-			entry.uri = g_file_get_uri(child);
+		if (g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY)
 			g_array_append_val(self->subdirs, entry);
-		} else if (!self->filtering || model_supports(self, name)) {
-			entry.uri = g_file_get_uri(child);
+		else if (!self->filtering || model_supports(self, name))
 			g_array_append_val(self->files, entry);
-		}
+		else
+			model_entry_finalize(&entry);
 	}
 	g_object_unref(enumerator);
 

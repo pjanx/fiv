@@ -209,6 +209,7 @@ create_row(FivSidebar *self, GFile *file, const char *icon_name)
 
 	gtk_container_add(GTK_CONTAINER(row), revealer);
 	gtk_widget_show_all(row);
+	g_object_unref(info);
 	return row;
 }
 
