@@ -1698,18 +1698,18 @@ on_model_files_changed(FivIoModel *model, FivBrowser *self)
 	if (self->selected)
 		selected_uri = g_strdup(self->selected->uri);
 
-	// TODO(p): Later implement arguments.
+	// TODO(p): Later implement arguments of this FivIoModel signal.
+	// Or ensure somehow else that thumbnails won't be reloaded unnecessarily.
 	thumbnailers_abort(self);
 	g_array_set_size(self->entries, 0);
 	g_array_set_size(self->layouted_rows, 0);
 
-	GPtrArray *files = fiv_io_model_get_files(self->model);
-	for (guint i = 0; i < files->len; i++) {
+	gsize len = 0;
+	const FivIoModelEntry *files = fiv_io_model_get_files(self->model, &len);
+	for (gsize i = 0; i < len; i++) {
 		g_array_append_val(self->entries,
-			((Entry) {.thumbnail = NULL, .uri = files->pdata[i]}));
-		files->pdata[i] = NULL;
+			((Entry) {.thumbnail = NULL, .uri = g_strdup(files[i].uri)}));
 	}
-	g_ptr_array_free(files, TRUE);
 
 	fiv_browser_select(self, selected_uri);
 	g_free(selected_uri);

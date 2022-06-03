@@ -122,8 +122,14 @@ gboolean fiv_io_model_open(FivIoModel *self, GFile *directory, GError **error);
 /// There is no ownership transfer, and the object may be NULL.
 GFile *fiv_io_model_get_location(FivIoModel *self);
 
-GPtrArray *fiv_io_model_get_files(FivIoModel *self);
-GPtrArray *fiv_io_model_get_subdirectories(FivIoModel *self);
+typedef struct {
+	gchar *uri;                         ///< GIO URI
+	gchar *collate_key;                 ///< Collate key for the filename
+	gint64 mtime_msec;                  ///< Modification time in milliseconds
+} FivIoModelEntry;
+
+const FivIoModelEntry *fiv_io_model_get_files(FivIoModel *self, gsize *len);
+const FivIoModelEntry *fiv_io_model_get_subdirs(FivIoModel *self, gsize *len);
 
 // --- Export ------------------------------------------------------------------
 

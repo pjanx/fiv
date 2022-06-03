@@ -241,14 +241,15 @@ update_location(FivSidebar *self)
 	if ((row = create_row(self, location, "circle-filled-symbolic")))
 		gtk_container_add(GTK_CONTAINER(self->listbox), row);
 
-	GPtrArray *subdirs = fiv_io_model_get_subdirectories(self->model);
-	for (guint i = 0; i < subdirs->len; i++) {
-		GFile *file = g_file_new_for_uri(subdirs->pdata[i]);
+	gsize len = 0;
+	const FivIoModelEntry *subdirs =
+		fiv_io_model_get_subdirs(self->model, &len);
+	for (gsize i = 0; i < len; i++) {
+		GFile *file = g_file_new_for_uri(subdirs[i].uri);
 		if ((row = create_row(self, file, "go-down-symbolic")))
 			gtk_container_add(GTK_CONTAINER(self->listbox), row);
 		g_object_unref(file);
 	}
-	g_ptr_array_free(subdirs, TRUE);
 }
 
 static void
