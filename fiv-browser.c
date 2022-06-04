@@ -84,6 +84,9 @@ struct _FivBrowser {
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+/// The "last modified" timestamp of source images for thumbnails.
+static cairo_user_data_key_t fiv_browser_key_mtime_msec;
+
 struct entry {
 	char *uri;                          ///< GIO URI
 	gint64 mtime_msec;                  ///< Modification time in milliseconds
@@ -431,8 +434,13 @@ entry_add_thumbnail(gpointer data, gpointer user_data)
 	self->thumbnail = rescale_thumbnail(
 		fiv_thumbnail_lookup(self->uri, self->mtime_msec, browser->item_size),
 		browser->item_height);
-	if (self->thumbnail)
+	if (self->thumbnail) {
+		// This choice of mtime favours unnecessary thumbnail reloading.
+		cairo_surface_set_user_data(self->thumbnail,
+			&fiv_browser_key_mtime_msec, (void *) (intptr_t) self->mtime_msec,
+			NULL);
 		return;
+	}
 
 	// Fall back to symbolic icons, though there's only so much we can do
 	// in parallel--GTK+ isn't thread-safe.
@@ -530,6 +538,11 @@ thumbnailer_reprocess_entry(FivBrowser *self, GBytes *output, Entry *entry)
 			fiv_io_deserialize(output), self->item_height))) {
 		entry_add_thumbnail(entry, self);
 		materialize_icon(self, entry);
+	} else {
+		// This choice of mtime favours unnecessary thumbnail reloading.
+		cairo_surface_set_user_data(entry->thumbnail,
+			&fiv_browser_key_mtime_msec, (void *) (intptr_t) entry->mtime_msec,
+			NULL);
 	}
 
 	gtk_widget_queue_resize(GTK_WIDGET(self));
