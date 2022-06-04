@@ -72,6 +72,8 @@ struct _FivBrowser {
 	double drag_begin_x;                ///< Viewport start X coordinate or -1
 	double drag_begin_y;                ///< Viewport start Y coordinate or -1
 
+	GHashTable *thumbnail_cache;        ///< [URI]cairo_surface_t, for item_size
+
 	Thumbnailer *thumbnailers;          ///< Parallelized thumbnailers
 	size_t thumbnailers_len;            ///< Thumbnailers array size
 	GList *thumbnailers_queue;          ///< Queued up Entry pointers
@@ -431,9 +433,18 @@ entry_add_thumbnail(gpointer data, gpointer user_data)
 	g_clear_pointer(&self->thumbnail, cairo_surface_destroy);
 
 	FivBrowser *browser = FIV_BROWSER(user_data);
-	self->thumbnail = rescale_thumbnail(
-		fiv_thumbnail_lookup(self->uri, self->mtime_msec, browser->item_size),
-		browser->item_height);
+	cairo_surface_t *cached =
+		g_hash_table_lookup(browser->thumbnail_cache, self->uri);
+	if (cached &&
+		(intptr_t) cairo_surface_get_user_data(
+			cached, &fiv_browser_key_mtime_msec) == self->mtime_msec) {
+		self->thumbnail = cairo_surface_reference(cached);
+	} else {
+		cairo_surface_t *found = fiv_thumbnail_lookup(
+			self->uri, self->mtime_msec, browser->item_size);
+		self->thumbnail = rescale_thumbnail(found, browser->item_height);
+	}
+
 	if (self->thumbnail) {
 		// This choice of mtime favours unnecessary thumbnail reloading.
 		cairo_surface_set_user_data(self->thumbnail,
@@ -515,8 +526,18 @@ reload_thumbnails(FivBrowser *self)
 		g_thread_pool_push(pool, &g_array_index(self->entries, Entry, i), NULL);
 	g_thread_pool_free(pool, FALSE, TRUE);
 
-	for (guint i = 0; i < self->entries->len; i++)
-		materialize_icon(self, &g_array_index(self->entries, Entry, i));
+	// Once a URI disappears from the model, its thumbnail is forgotten.
+	g_hash_table_remove_all(self->thumbnail_cache);
+
+	for (guint i = 0; i < self->entries->len; i++) {
+		Entry *entry = &g_array_index(self->entries, Entry, i);
+		if (entry->thumbnail) {
+			g_hash_table_insert(self->thumbnail_cache, g_strdup(entry->uri),
+				cairo_surface_reference(entry->thumbnail));
+		}
+
+		materialize_icon(self, entry);
+	}
 
 	gtk_widget_queue_resize(GTK_WIDGET(self));
 }
@@ -928,6 +949,8 @@ fiv_browser_finalize(GObject *gobject)
 		g_clear_object(&self->model);
 	}
 
+	g_hash_table_destroy(self->thumbnail_cache);
+
 	cairo_surface_destroy(self->glow);
 	g_clear_object(&self->pointer);
 
@@ -972,6 +995,8 @@ set_item_size(FivBrowser *self, FivThumbnailSize size)
 	if (size != self->item_size) {
 		self->item_size = size;
 		self->item_height = fiv_thumbnail_sizes[self->item_size].size;
+
+		g_hash_table_remove_all(self->thumbnail_cache);
 		reload_thumbnails(self);
 		thumbnailers_start(self);
 
@@ -1688,6 +1713,9 @@ fiv_browser_init(FivBrowser *self)
 	g_array_set_clear_func(self->layouted_rows, (GDestroyNotify) row_free);
 	abort_button_tracking(self);
 
+	self->thumbnail_cache = g_hash_table_new_full(g_str_hash, g_str_equal,
+		g_free, (GDestroyNotify) cairo_surface_destroy);
+
 	self->thumbnailers_len = g_get_num_processors();
 	self->thumbnailers =
 		g_malloc0_n(self->thumbnailers_len, sizeof *self->thumbnailers);
@@ -1703,6 +1731,7 @@ fiv_browser_init(FivBrowser *self)
 
 // --- Public interface --------------------------------------------------------
 
+// TODO(p): Later implement any arguments of this FivIoModel signal.
 static void
 on_model_files_changed(FivIoModel *model, FivBrowser *self)
 {
@@ -1712,8 +1741,6 @@ on_model_files_changed(FivIoModel *model, FivBrowser *self)
 	if (self->selected)
 		selected_uri = g_strdup(self->selected->uri);
 
-	// TODO(p): Later implement arguments of this FivIoModel signal.
-	// Or ensure somehow else that thumbnails won't be reloaded unnecessarily.
 	thumbnailers_abort(self);
 	g_array_set_size(self->entries, 0);
 	g_array_set_size(self->layouted_rows, 0);
