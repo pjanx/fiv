@@ -86,6 +86,7 @@ struct _FivBrowser {
 
 struct entry {
 	char *uri;                          ///< GIO URI
+	gint64 mtime_msec;                  ///< Modification time in milliseconds
 	cairo_surface_t *thumbnail;         ///< Prescaled thumbnail
 	GIcon *icon;                        ///< If no thumbnail, use this icon
 };
@@ -427,18 +428,20 @@ entry_add_thumbnail(gpointer data, gpointer user_data)
 	g_clear_pointer(&self->thumbnail, cairo_surface_destroy);
 
 	FivBrowser *browser = FIV_BROWSER(user_data);
-	GFile *file = g_file_new_for_uri(self->uri);
 	self->thumbnail = rescale_thumbnail(
-		fiv_thumbnail_lookup(file, browser->item_size), browser->item_height);
+		fiv_thumbnail_lookup(self->uri, self->mtime_msec, browser->item_size),
+		browser->item_height);
 	if (self->thumbnail)
-		goto out;
+		return;
 
 	// Fall back to symbolic icons, though there's only so much we can do
 	// in parallel--GTK+ isn't thread-safe.
+	GFile *file = g_file_new_for_uri(self->uri);
 	GFileInfo *info = g_file_query_info(file,
 		G_FILE_ATTRIBUTE_STANDARD_NAME
 		"," G_FILE_ATTRIBUTE_STANDARD_SYMBOLIC_ICON,
 		G_FILE_QUERY_INFO_NONE, NULL, NULL);
+	g_object_unref(file);
 	if (info) {
 		GIcon *icon = g_file_info_get_symbolic_icon(info);
 		if (icon)
@@ -449,8 +452,6 @@ entry_add_thumbnail(gpointer data, gpointer user_data)
 	// The GVfs backend may not be friendly.
 	if (!self->icon)
 		self->icon = g_icon_new_for_string("text-x-generic-symbolic", NULL);
-out:
-	g_object_unref(file);
 }
 
 static void
@@ -1707,8 +1708,8 @@ on_model_files_changed(FivIoModel *model, FivBrowser *self)
 	gsize len = 0;
 	const FivIoModelEntry *files = fiv_io_model_get_files(self->model, &len);
 	for (gsize i = 0; i < len; i++) {
-		g_array_append_val(self->entries,
-			((Entry) {.thumbnail = NULL, .uri = g_strdup(files[i].uri)}));
+		g_array_append_val(self->entries, ((Entry) {.thumbnail = NULL,
+			.uri = g_strdup(files[i].uri), .mtime_msec = files[i].mtime_msec}));
 	}
 
 	fiv_browser_select(self, selected_uri);

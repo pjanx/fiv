@@ -579,18 +579,11 @@ fail_init:
 }
 
 cairo_surface_t *
-fiv_thumbnail_lookup(GFile *target, FivThumbnailSize size)
+fiv_thumbnail_lookup(char *uri, gint64 mtime_msec, FivThumbnailSize size)
 {
 	g_return_val_if_fail(size >= FIV_THUMBNAIL_SIZE_MIN &&
 		size <= FIV_THUMBNAIL_SIZE_MAX, NULL);
 
-	// Local files only, at least for now.
-	GStatBuf st = {};
-	const gchar *path = g_file_peek_path(target);
-	if (!path || g_stat(path, &st))
-		return NULL;
-
-	gchar *uri = g_file_get_uri(target);
 	gchar *sum = g_compute_checksum_for_string(G_CHECKSUM_MD5, uri, -1);
 	gchar *thumbnails_dir = fiv_thumbnail_get_root();
 
@@ -605,7 +598,7 @@ fiv_thumbnail_lookup(GFile *target, FivThumbnailSize size)
 		const char *name = fiv_thumbnail_sizes[use].thumbnail_spec_name;
 		gchar *wide =
 			g_strdup_printf("%s/wide-%s/%s.webp", thumbnails_dir, name, sum);
-		result = read_wide_thumbnail(wide, uri, st.st_mtim.tv_sec, &error);
+		result = read_wide_thumbnail(wide, uri, mtime_msec / 1000, &error);
 		if (error) {
 			g_debug("%s: %s", wide, error->message);
 			g_clear_error(&error);
@@ -621,7 +614,7 @@ fiv_thumbnail_lookup(GFile *target, FivThumbnailSize size)
 
 		gchar *path =
 			g_strdup_printf("%s/%s/%s.png", thumbnails_dir, name, sum);
-		result = read_spng_thumbnail(path, uri, st.st_mtim.tv_sec, &error);
+		result = read_spng_thumbnail(path, uri, mtime_msec / 1000, &error);
 		if (error) {
 			g_debug("%s: %s", path, error->message);
 			g_clear_error(&error);
@@ -639,7 +632,6 @@ fiv_thumbnail_lookup(GFile *target, FivThumbnailSize size)
 
 	g_free(thumbnails_dir);
 	g_free(sum);
-	g_free(uri);
 	return result;
 }
 

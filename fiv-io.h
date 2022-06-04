@@ -123,8 +123,8 @@ gboolean fiv_io_model_open(FivIoModel *self, GFile *directory, GError **error);
 GFile *fiv_io_model_get_location(FivIoModel *self);
 
 typedef struct {
-	gchar *uri;                         ///< GIO URI
-	gchar *collate_key;                 ///< Collate key for the filename
+	char *uri;                          ///< GIO URI
+	char *collate_key;                  ///< Collate key for the filename
 	gint64 mtime_msec;                  ///< Modification time in milliseconds
 } FivIoModelEntry;
 
