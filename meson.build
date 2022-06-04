@@ -39,11 +39,6 @@ dependencies = [
 	dependency('libwebpdemux'),
 	dependency('libwebpdecoder', required : false),
 	dependency('libwebpmux'),
-	# https://github.com/google/wuffs/issues/58
-	dependency('spng', version : '>=0.7.0',
-		default_options: 'default_library=static',
-		# fallback : ['spng', 'spng_dep'],
-	),
 
 	lcms2,
 	libjpegqs,

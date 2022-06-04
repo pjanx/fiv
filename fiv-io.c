@@ -582,6 +582,9 @@ load_wuffs_frame(struct load_wuffs_frame_context *ctx, GError **error)
 		return false;
 	}
 
+	// TODO(p): Maybe pre-clear with
+	// wuffs_base__frame_config__background_color(&fc).
+
 	// Wuffs' test/data/animated-red-blue.gif, e.g., needs this handling.
 	cairo_format_t decode_format = ctx->cairo_format;
 	if (wuffs_base__frame_config__index(&fc) > 0 &&
@@ -785,7 +788,7 @@ open_wuffs(wuffs_base__image_decoder *dec, wuffs_base__io_buffer src,
 	struct load_wuffs_frame_context ctx = {
 		.dec = dec, .src = &src, .target = ioctx->screen_profile};
 
-	// TODO(p): PNG text chunks (Wuffs #58).
+	// TODO(p): PNG text chunks, like we do with PNG thumbnails.
 	// TODO(p): See if something could and should be done about
 	// https://www.w3.org/TR/png-hdr-pq/
 	wuffs_base__image_decoder__set_report_metadata(
@@ -966,6 +969,166 @@ open_wuffs_using(wuffs_base__image_decoder *(*allocate)(),
 		open_wuffs(dec, wuffs_base__ptr_u8__reader((uint8_t *) data, len, TRUE),
 			ctx, error);
 	free(dec);
+	return surface;
+}
+
+// --- Wuffs for PNG thumbnails ------------------------------------------------
+
+static bool
+pull_metadata_kvp(wuffs_png__decoder *dec, wuffs_base__io_buffer *src,
+	GHashTable *texts, gchar **key, GError **error)
+{
+	wuffs_base__more_information minfo = {};
+	GBytes *bytes = NULL;
+	if (!(bytes = pull_metadata(
+			wuffs_png__decoder__upcast_as__wuffs_base__image_decoder(dec),
+			src, &minfo, error)))
+		return false;
+
+	switch (wuffs_base__more_information__metadata__fourcc(&minfo)) {
+	case WUFFS_BASE__FOURCC__KVPK:
+		g_assert(*key == NULL);
+		*key = g_strndup(
+			g_bytes_get_data(bytes, NULL), g_bytes_get_size(bytes));
+		break;
+	case WUFFS_BASE__FOURCC__KVPV:
+		g_assert(*key != NULL);
+		g_hash_table_insert(texts, *key, g_strndup(
+			g_bytes_get_data(bytes, NULL), g_bytes_get_size(bytes)));
+		*key = NULL;
+	}
+
+	g_bytes_unref(bytes);
+	return true;
+}
+
+// An uncomplicated variant of fiv_io_open(), might be up for refactoring.
+cairo_surface_t *
+fiv_io_open_png_thumbnail(const char *path, GError **error)
+{
+	wuffs_png__decoder dec = {};
+	wuffs_base__status status = wuffs_png__decoder__initialize(
+		&dec, sizeof dec, WUFFS_VERSION, WUFFS_INITIALIZE__ALREADY_ZEROED);
+	if (!wuffs_base__status__is_ok(&status)) {
+		set_error(error, wuffs_base__status__message(&status));
+		return NULL;
+	}
+
+	gchar *data = NULL;
+	gsize len = 0;
+	if (!g_file_get_contents(path, &data, &len, error))
+		return NULL;
+
+	wuffs_base__io_buffer src =
+		wuffs_base__ptr_u8__reader((uint8_t *) data, len, TRUE);
+	wuffs_png__decoder__set_report_metadata(
+		&dec, WUFFS_BASE__FOURCC__KVP, true);
+
+	wuffs_base__image_config cfg = {};
+	wuffs_base__slice_u8 workbuf = {};
+	cairo_surface_t *surface = NULL;
+	bool success = false;
+
+	GHashTable *texts =
+		g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
+	gchar *key = NULL;
+	while (true) {
+		status = wuffs_png__decoder__decode_image_config(&dec, &cfg, &src);
+		if (wuffs_base__status__is_ok(&status))
+			break;
+
+		if (status.repr != wuffs_base__note__metadata_reported) {
+			set_error(error, wuffs_base__status__message(&status));
+			goto fail;
+		}
+		if (!pull_metadata_kvp(&dec, &src, texts, &key, error))
+			goto fail;
+	}
+
+	g_assert(key == NULL);
+
+	uint32_t width = wuffs_base__pixel_config__width(&cfg.pixcfg);
+	uint32_t height = wuffs_base__pixel_config__height(&cfg.pixcfg);
+	if (width > INT16_MAX || height > INT16_MAX) {
+		set_error(error, "image dimensions overflow");
+		goto fail;
+	}
+
+	wuffs_base__pixel_config__set(&cfg.pixcfg,
+		WUFFS_BASE__PIXEL_FORMAT__BGRA_PREMUL,
+		WUFFS_BASE__PIXEL_SUBSAMPLING__NONE, width, height);
+
+	uint64_t workbuf_len_max_incl =
+		wuffs_png__decoder__workbuf_len(&dec).max_incl;
+	if (workbuf_len_max_incl) {
+		workbuf = wuffs_base__malloc_slice_u8(malloc, workbuf_len_max_incl);
+		if (!workbuf.ptr) {
+			set_error(error, "failed to allocate a work buffer");
+			goto fail;
+		}
+	}
+
+	surface = cairo_image_surface_create(
+		wuffs_base__image_config__first_frame_is_opaque(&cfg)
+			? CAIRO_FORMAT_RGB24
+			: CAIRO_FORMAT_ARGB32,
+		width, height);
+
+	cairo_status_t surface_status = cairo_surface_status(surface);
+	if (surface_status != CAIRO_STATUS_SUCCESS) {
+		set_error(error, cairo_status_to_string(surface_status));
+		goto fail;
+	}
+
+	wuffs_base__pixel_buffer pb = {};
+	status = wuffs_base__pixel_buffer__set_from_slice(&pb, &cfg.pixcfg,
+		wuffs_base__make_slice_u8(cairo_image_surface_get_data(surface),
+			cairo_image_surface_get_stride(surface) *
+				cairo_image_surface_get_height(surface)));
+	if (!wuffs_base__status__is_ok(&status)) {
+		set_error(error, wuffs_base__status__message(&status));
+		goto fail;
+	}
+
+	status = wuffs_png__decoder__decode_frame(&dec, &pb, &src,
+		WUFFS_BASE__PIXEL_BLEND__SRC, workbuf, NULL);
+	if (!wuffs_base__status__is_ok(&status)) {
+		set_error(error, wuffs_base__status__message(&status));
+		goto fail;
+	}
+
+	// The specification does not say where the required metadata should be,
+	// it could very well be broken up into two parts.
+	wuffs_base__frame_config fc = {};
+	while (true) {
+		// Not interested in APNG, might even throw an error in that case.
+		status = wuffs_png__decoder__decode_frame_config(&dec, &fc, &src);
+		if (status.repr == wuffs_base__note__end_of_data ||
+			wuffs_base__status__is_ok(&status))
+			break;
+
+		if (status.repr != wuffs_base__note__metadata_reported) {
+			set_error(error, wuffs_base__status__message(&status));
+			goto fail;
+		}
+		if (!pull_metadata_kvp(&dec, &src, texts, &key, error))
+			goto fail;
+	}
+
+	g_assert(key == NULL);
+
+	cairo_surface_mark_dirty(surface);
+	cairo_surface_set_user_data(surface, &fiv_io_key_text,
+		g_hash_table_ref(texts), (cairo_destroy_func_t) g_hash_table_unref);
+	success = true;
+
+fail:
+	if (!success)
+		g_clear_pointer(&surface, cairo_surface_destroy);
+
+	free(workbuf.ptr);
+	g_free(data);
+	g_hash_table_unref(texts);
 	return surface;
 }
 
@@ -2555,6 +2718,7 @@ cairo_user_data_key_t fiv_io_key_orientation;
 cairo_user_data_key_t fiv_io_key_icc;
 cairo_user_data_key_t fiv_io_key_xmp;
 cairo_user_data_key_t fiv_io_key_thum;
+cairo_user_data_key_t fiv_io_key_text;
 
 cairo_user_data_key_t fiv_io_key_frame_next;
 cairo_user_data_key_t fiv_io_key_frame_previous;

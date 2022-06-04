@@ -18,7 +18,6 @@
 #include "config.h"
 
 #include <glib/gstdio.h>
-#include <spng.h>
 #include <webp/demux.h>
 #include <webp/encode.h>
 #include <webp/mux.h>
@@ -446,138 +445,33 @@ read_wide_thumbnail(
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-static int  // tri-state
-check_spng_thumbnail_texts(struct spng_text *texts, uint32_t texts_len,
-	const gchar *target, time_t mtime)
-{
-	// May contain Thumb::Image::Width Thumb::Image::Height,
-	// but those aren't interesting currently (would be for fast previews).
-	bool need_uri = true, need_mtime = true;
-	for (uint32_t i = 0; i < texts_len; i++) {
-		struct spng_text *text = texts + i;
-		if (!strcmp(text->keyword, THUMB_URI)) {
-			need_uri = false;
-			if (strcmp(target, text->text))
-				return false;
-		}
-		if (!strcmp(text->keyword, THUMB_MTIME)) {
-			need_mtime = false;
-			if (atol(text->text) != mtime)
-				return false;
-		}
-	}
-	return need_uri || need_mtime ? -1 : true;
-}
-
-static int  // tri-state
-check_spng_thumbnail(spng_ctx *ctx, const gchar *target, time_t mtime, int *err)
-{
-	uint32_t texts_len = 0;
-	if ((*err = spng_get_text(ctx, NULL, &texts_len)))
-		return false;
-
-	int result = false;
-	struct spng_text *texts = g_malloc0_n(texts_len, sizeof *texts);
-	if (!(*err = spng_get_text(ctx, texts, &texts_len)))
-		result = check_spng_thumbnail_texts(texts, texts_len, target, mtime);
-	g_free(texts);
-	return result;
-}
-
 static cairo_surface_t *
-read_spng_thumbnail(
+read_png_thumbnail(
 	const gchar *path, const gchar *uri, time_t mtime, GError **error)
 {
-	FILE *fp;
-	cairo_surface_t *result = NULL;
-	if (!(fp = fopen(path, "rb"))) {
-		set_error(error, g_strerror(errno));
+	cairo_surface_t *surface = fiv_io_open_png_thumbnail(path, error);
+	if (!surface)
+		return NULL;
+
+	GHashTable *texts = cairo_surface_get_user_data(surface, &fiv_io_key_text);
+	if (!texts) {
+		set_error(error, "not a thumbnail");
+		cairo_surface_destroy(surface);
 		return NULL;
 	}
 
-	errno = 0;
-	spng_ctx *ctx = spng_ctx_new(0);
-	if (!ctx) {
-		set_error(error, g_strerror(errno));
-		goto fail_init;
-	}
-
-	int err;
-	size_t size = 0;
-	if ((err = spng_set_png_file(ctx, fp)) ||
-		(err = spng_set_image_limits(ctx, INT16_MAX, INT16_MAX)) ||
-		(err = spng_decoded_image_size(ctx, SPNG_FMT_RGBA8, &size))) {
-		set_error(error, spng_strerror(err));
-		goto fail;
-	}
-	if (check_spng_thumbnail(ctx, uri, mtime, &err) == false) {
-		set_error(error, err ? spng_strerror(err) : "mismatch");
-		goto fail;
-	}
-
-	struct spng_ihdr ihdr = {};
-	struct spng_trns trns = {};
-	spng_get_ihdr(ctx, &ihdr);
-	bool may_be_translucent = !spng_get_trns(ctx, &trns) ||
-		ihdr.color_type == SPNG_COLOR_TYPE_GRAYSCALE_ALPHA ||
-		ihdr.color_type == SPNG_COLOR_TYPE_TRUECOLOR_ALPHA;
-
-	cairo_surface_t *surface = cairo_image_surface_create(
-		may_be_translucent ? CAIRO_FORMAT_ARGB32 : CAIRO_FORMAT_RGB24,
-		ihdr.width, ihdr.height);
-
-	cairo_status_t surface_status = cairo_surface_status(surface);
-	if (surface_status != CAIRO_STATUS_SUCCESS) {
-		set_error(error, cairo_status_to_string(surface_status));
-		goto fail_data;
-	}
-
-	uint32_t *data = (uint32_t *) cairo_image_surface_get_data(surface);
-	g_assert((size_t) cairo_image_surface_get_stride(surface) *
-		cairo_image_surface_get_height(surface) == size);
-
-	cairo_surface_flush(surface);
-	if ((err = spng_decode_image(ctx, data, size, SPNG_FMT_RGBA8,
-		SPNG_DECODE_TRNS | SPNG_DECODE_GAMMA))) {
-		set_error(error, spng_strerror(err));
-		goto fail_data;
-	}
-
-	// The specification does not say where the required metadata should be,
-	// it could very well be broken up into two parts.
-	if (check_spng_thumbnail(ctx, uri, mtime, &err) != true) {
-		set_error(
-			error, err ? spng_strerror(err) : "mismatch or not a thumbnail");
-		goto fail_data;
-	}
-
-	// pixman can be mildly abused to do this operation, but it won't be faster.
-	if (may_be_translucent) {
-		for (size_t i = size / sizeof *data; i--; ) {
-			const uint8_t *unit = (const uint8_t *) &data[i];
-			uint32_t a = unit[3],
-				b = PREMULTIPLY8(a, unit[2]),
-				g = PREMULTIPLY8(a, unit[1]),
-				r = PREMULTIPLY8(a, unit[0]);
-			data[i] = a << 24 | r << 16 | g << 8 | b;
-		}
-	} else {
-		for (size_t i = size / sizeof *data; i--; ) {
-			uint32_t rgba = g_ntohl(data[i]);
-			data[i] = rgba << 24 | rgba >> 8;
-		}
-	}
-
-	cairo_surface_mark_dirty((result = surface));
-
-fail_data:
-	if (!result)
+	// May contain Thumb::Image::Width Thumb::Image::Height,
+	// but those aren't interesting currently (would be for fast previews).
+	const char *text_uri = g_hash_table_lookup(texts, THUMB_URI);
+	const char *text_mtime = g_hash_table_lookup(texts, THUMB_MTIME);
+	if (!text_uri || strcmp(text_uri, uri) ||
+		!text_mtime || atol(text_mtime) != mtime) {
+		set_error(error, "mismatch or not a thumbnail");
 		cairo_surface_destroy(surface);
-fail:
-	spng_ctx_free(ctx);
-fail_init:
-	fclose(fp);
-	return result;
+		return NULL;
+	}
+
+	return surface;
 }
 
 cairo_surface_t *
@@ -616,7 +510,7 @@ fiv_thumbnail_lookup(char *uri, gint64 mtime_msec, FivThumbnailSize size)
 
 		gchar *path =
 			g_strdup_printf("%s/%s/%s.png", thumbnails_dir, name, sum);
-		result = read_spng_thumbnail(path, uri, mtime_msec / 1000, &error);
+		result = read_png_thumbnail(path, uri, mtime_msec / 1000, &error);
 		if (error) {
 			g_debug("%s: %s", path, error->message);
 			g_clear_error(&error);

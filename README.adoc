@@ -38,7 +38,7 @@ Building and Running
 --------------------
 Build dependencies: Meson, pkg-config +
 Runtime dependencies: gtk+-3.0, glib>=2.64, pixman-1, shared-mime-info,
-libturbojpeg, libwebp, spng>=0.7.0 +
+libturbojpeg, libwebp +
 Optional dependencies: lcms2, LibRaw, librsvg-2.0, xcursor, libheif, libtiff,
 ExifTool, resvg (unstable API, needs to be requested explicitly)
 

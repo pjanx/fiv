@@ -53,6 +53,9 @@ extern cairo_user_data_key_t fiv_io_key_icc;
 extern cairo_user_data_key_t fiv_io_key_xmp;
 /// GBytes with a WebP's THUM chunk, used for our thumbnails.
 extern cairo_user_data_key_t fiv_io_key_thum;
+/// GHashTable with key-value pairs from PNG's tEXt, zTXt, iTXt chunks.
+/// Currently only read by fiv_io_open_png_thumbnail().
+extern cairo_user_data_key_t fiv_io_key_text;
 
 /// The next frame in a sequence, as a surface, in a chain, pre-composited.
 /// There is no wrap-around.
@@ -95,6 +98,7 @@ typedef struct {
 cairo_surface_t *fiv_io_open(const FivIoOpenContext *ctx, GError **error);
 cairo_surface_t *fiv_io_open_from_data(
 	const char *data, size_t len, const FivIoOpenContext *ctx, GError **error);
+cairo_surface_t *fiv_io_open_png_thumbnail(const char *path, GError **error);
 
 // --- Thumbnail passing utilities ---------------------------------------------
 
