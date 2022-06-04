@@ -425,8 +425,10 @@ read_wide_thumbnail(
 	bool sRGB = false;
 	GBytes *thum = cairo_surface_get_user_data(surface, &fiv_io_key_thum);
 	if (!thum) {
+		g_clear_error(error);
 		set_error(error, "not a thumbnail");
 	} else if (!check_wide_thumbnail_texts(thum, uri, mtime, &sRGB)) {
+		g_clear_error(error);
 		set_error(error, "mismatch");
 	} else {
 		// TODO(p): Add a function or a non-valueless define to check

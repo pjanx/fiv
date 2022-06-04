@@ -589,7 +589,6 @@ load_wuffs_frame(struct load_wuffs_frame_context *ctx, GError **error)
 			WUFFS_BASE__PIXEL_FORMAT__BGRA_NONPREMUL)
 		decode_format = CAIRO_FORMAT_ARGB32;
 
-	bool success = false;
 	unsigned char *targetbuf = NULL;
 	cairo_surface_t *surface =
 		cairo_image_surface_create(decode_format, ctx->width, ctx->height);
@@ -627,7 +626,10 @@ load_wuffs_frame(struct load_wuffs_frame_context *ctx, GError **error)
 		WUFFS_BASE__PIXEL_BLEND__SRC, ctx->workbuf, NULL);
 	if (!wuffs_base__status__is_ok(&status)) {
 		set_error(error, wuffs_base__status__message(&status));
-		goto fail;
+
+		// The PNG decoder, at minimum, will flush any pixel data, so use them.
+		if (status.repr != wuffs_base__suspension__short_read)
+			goto fail;
 	}
 
 	if (ctx->target) {
@@ -760,19 +762,17 @@ load_wuffs_frame(struct load_wuffs_frame_context *ctx, GError **error)
 	else
 		ctx->result = surface;
 
-	success = true;
 	ctx->result_tail = surface;
 	ctx->last_fc = fc;
+	g_free(targetbuf);
+	return wuffs_base__status__is_ok(&status);
 
 fail:
-	if (!success) {
-		cairo_surface_destroy(surface);
-		g_clear_pointer(&ctx->result, cairo_surface_destroy);
-		ctx->result_tail = NULL;
-	}
-
+	cairo_surface_destroy(surface);
+	g_clear_pointer(&ctx->result, cairo_surface_destroy);
+	ctx->result_tail = NULL;
 	g_free(targetbuf);
-	return success;
+	return false;
 }
 
 // https://github.com/google/wuffs/blob/main/example/gifplayer/gifplayer.c
@@ -2695,7 +2695,6 @@ fiv_io_open_from_data(
 
 #ifdef HAVE_GDKPIXBUF  // ------------------------------------------------------
 	// This is used as a last resort, the rest above is special-cased.
-	// Wuffs #71 and similar concerns make us default to it in all cases.
 	if (!surface) {
 		GError *err = NULL;
 		if ((surface = open_gdkpixbuf(data, len, ctx, &err))) {
