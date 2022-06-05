@@ -306,9 +306,9 @@ complete_path(GFile *location, GtkListStore *model)
 			g_file_info_get_is_hidden(info))
 			continue;
 
-		char *parse_name = g_file_get_parse_name(child);
+		gchar *parse_name = g_file_get_parse_name(child);
 		if (!g_str_has_suffix(parse_name, G_DIR_SEPARATOR_S)) {
-			char *save = parse_name;
+			gchar *save = parse_name;
 			parse_name = g_strdup_printf("%s%c", parse_name, G_DIR_SEPARATOR);
 			g_free(save);
 		}

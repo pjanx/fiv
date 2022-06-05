@@ -39,7 +39,7 @@ void fiv_io_profile_free(FivIoProfile self);
 
 extern const char *fiv_io_supported_media_types[];
 
-char **fiv_io_all_supported_media_types(void);
+gchar **fiv_io_all_supported_media_types(void);
 
 // Userdata are typically attached to all Cairo surfaces in an animation.
 
@@ -127,8 +127,8 @@ gboolean fiv_io_model_open(FivIoModel *self, GFile *directory, GError **error);
 GFile *fiv_io_model_get_location(FivIoModel *self);
 
 typedef struct {
-	char *uri;                          ///< GIO URI
-	char *collate_key;                  ///< Collate key for the filename
+	gchar *uri;                         ///< GIO URI
+	gchar *collate_key;                 ///< Collate key for the filename
 	gint64 mtime_msec;                  ///< Modification time in milliseconds
 } FivIoModelEntry;
 
@@ -145,7 +145,7 @@ unsigned char *fiv_io_encode_webp(
 /// Saves the page as a lossless WebP still picture or animation.
 /// If no exact frame is specified, this potentially creates an animation.
 gboolean fiv_io_save(cairo_surface_t *page, cairo_surface_t *frame,
-	FivIoProfile target, const gchar *path, GError **error);
+	FivIoProfile target, const char *path, GError **error);
 
 // --- Metadata ----------------------------------------------------------------
 
@@ -173,4 +173,4 @@ FivIoOrientation fiv_io_exif_orientation(const guint8 *exif, gsize len);
 
 /// Save metadata attached by this module in Exiv2 format.
 gboolean fiv_io_save_metadata(
-	cairo_surface_t *page, const gchar *path, GError **error);
+	cairo_surface_t *page, const char *path, GError **error);

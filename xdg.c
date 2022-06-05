@@ -21,7 +21,7 @@
 /// defining is-a relations, and is traversed recursively.
 static void
 add_applying_transitive_closure(
-	const gchar *element, GHashTable *relation, GHashTable *output)
+	const char *element, GHashTable *relation, GHashTable *output)
 {
 	// Stop condition.
 	if (!g_hash_table_add(output, g_strdup(element)))
@@ -61,7 +61,7 @@ get_xdg_data_dirs(void)
 	GPtrArray *output = g_ptr_array_new_with_free_func(g_free);
 	g_ptr_array_add(output, get_xdg_home_dir("XDG_DATA_HOME", ".local/share"));
 
-	const gchar *xdg_data_dirs;
+	const char *xdg_data_dirs;
 	if (!(xdg_data_dirs = getenv("XDG_DATA_DIRS")) || !*xdg_data_dirs)
 		xdg_data_dirs = "/usr/local/share/:/usr/share/";
 
@@ -82,7 +82,7 @@ get_xdg_data_dirs(void)
 // Derived from shared-mime-info-spec 0.21.
 
 static void
-read_mime_subclasses(const gchar *path, GHashTable *subclass_sets)
+read_mime_subclasses(const char *path, GHashTable *subclass_sets)
 {
 	gchar *data = NULL;
 	if (!g_file_get_contents(path, &data, NULL /* length */, NULL /* error */))
@@ -112,7 +112,7 @@ read_mime_subclasses(const gchar *path, GHashTable *subclass_sets)
 }
 
 static gboolean
-filter_mime_globs(const gchar *path, guint is_globs2, GHashTable *supported_set,
+filter_mime_globs(const char *path, guint is_globs2, GHashTable *supported_set,
 	GHashTable *output_set)
 {
 	gchar *data = NULL;
@@ -120,7 +120,7 @@ filter_mime_globs(const gchar *path, guint is_globs2, GHashTable *supported_set,
 		return FALSE;
 
 	gchar *datasave = NULL;
-	for (const gchar *line = strtok_r(data, "\r\n", &datasave); line;
+	for (const char *line = strtok_r(data, "\r\n", &datasave); line;
 			line = strtok_r(NULL, "\r\n", &datasave)) {
 		if (*line == '#')
 			continue;

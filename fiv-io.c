@@ -115,7 +115,7 @@ const char *fiv_io_supported_media_types[] = {
 	NULL
 };
 
-char **
+gchar **
 fiv_io_all_supported_media_types(void)
 {
 	GPtrArray *types = g_ptr_array_new();
@@ -957,7 +957,7 @@ fail:
 
 static cairo_surface_t *
 open_wuffs_using(wuffs_base__image_decoder *(*allocate)(),
-	const gchar *data, gsize len, const FivIoOpenContext *ctx, GError **error)
+	const char *data, gsize len, const FivIoOpenContext *ctx, GError **error)
 {
 	wuffs_base__image_decoder *dec = allocate();
 	if (!dec) {
@@ -1135,7 +1135,7 @@ fail:
 // --- JPEG --------------------------------------------------------------------
 
 static GBytes *
-parse_jpeg_metadata(cairo_surface_t *surface, const gchar *data, gsize len)
+parse_jpeg_metadata(cairo_surface_t *surface, const char *data, gsize len)
 {
 	// Because the JPEG file format is simple, just do it manually.
 	// See: https://www.w3.org/Graphics/JPEG/itu-t81.pdf
@@ -1228,7 +1228,7 @@ parse_jpeg_metadata(cairo_surface_t *surface, const gchar *data, gsize len)
 
 static void
 load_jpeg_finalize(cairo_surface_t *surface, bool cmyk,
-	FivIoProfile destination, const gchar *data, size_t len)
+	FivIoProfile destination, const char *data, size_t len)
 {
 	GBytes *icc_profile = parse_jpeg_metadata(surface, data, len);
 	FivIoProfile source = NULL;
@@ -1250,7 +1250,7 @@ load_jpeg_finalize(cairo_surface_t *surface, bool cmyk,
 
 static cairo_surface_t *
 open_libjpeg_turbo(
-	const gchar *data, gsize len, const FivIoOpenContext *ctx, GError **error)
+	const char *data, gsize len, const FivIoOpenContext *ctx, GError **error)
 {
 	// Note that there doesn't seem to be much of a point in using this
 	// simplified API anymore, because JPEG-QS needs the original libjpeg API.
@@ -1351,7 +1351,7 @@ libjpeg_error_exit(j_common_ptr cinfo)
 
 static cairo_surface_t *
 open_libjpeg_enhanced(
-	const gchar *data, gsize len, const FivIoOpenContext *ctx, GError **error)
+	const char *data, gsize len, const FivIoOpenContext *ctx, GError **error)
 {
 	cairo_surface_t *volatile surface = NULL;
 
@@ -1613,7 +1613,7 @@ fail:
 
 static cairo_surface_t *
 open_libwebp(
-	const gchar *data, gsize len, const FivIoOpenContext *ctx, GError **error)
+	const char *data, gsize len, const FivIoOpenContext *ctx, GError **error)
 {
 	// It is wholly zero-initialized by libwebp.
 	WebPDecoderConfig config = {};
@@ -1698,7 +1698,7 @@ fail:
 #ifdef HAVE_LIBRAW  // ---------------------------------------------------------
 
 static cairo_surface_t *
-open_libraw(const gchar *data, gsize len, GError **error)
+open_libraw(const char *data, gsize len, GError **error)
 {
 	// https://github.com/LibRaw/LibRaw/issues/418
 	libraw_data_t *iprc = libraw_init(
@@ -1884,7 +1884,7 @@ load_resvg_error(int err)
 
 static cairo_surface_t *
 open_resvg(
-	const gchar *data, gsize len, const FivIoOpenContext *ctx, GError **error)
+	const char *data, gsize len, const FivIoOpenContext *ctx, GError **error)
 {
 	GFile *file = g_file_new_for_uri(ctx->uri);
 	GFile *base_file = g_file_get_parent(file);
@@ -1974,7 +1974,7 @@ load_librsvg_render(FivIoRenderClosure *closure, double scale)
 
 static cairo_surface_t *
 open_librsvg(
-	const gchar *data, gsize len, const FivIoOpenContext *ctx, GError **error)
+	const char *data, gsize len, const FivIoOpenContext *ctx, GError **error)
 {
 	GFile *base_file = g_file_new_for_uri(ctx->uri);
 	GInputStream *is = g_memory_input_stream_new_from_data(data, len, NULL);
@@ -2108,7 +2108,7 @@ static const XcursorFile fiv_io_xcursor_adaptor = {
 };
 
 static cairo_surface_t *
-open_xcursor(const gchar *data, gsize len, GError **error)
+open_xcursor(const char *data, gsize len, GError **error)
 {
 	if (len > G_MAXLONG) {
 		set_error(error, "size overflow");
@@ -2318,7 +2318,7 @@ load_libheif_aux_images(const FivIoOpenContext *ioctx,
 
 static cairo_surface_t *
 open_libheif(
-	const gchar *data, gsize len, const FivIoOpenContext *ioctx, GError **error)
+	const char *data, gsize len, const FivIoOpenContext *ioctx, GError **error)
 {
 	// libheif will throw C++ exceptions on allocation failures.
 	// The library is generally awful through and through.
@@ -2547,7 +2547,7 @@ fail:
 
 static cairo_surface_t *
 open_libtiff(
-	const gchar *data, gsize len, const FivIoOpenContext *ctx, GError **error)
+	const char *data, gsize len, const FivIoOpenContext *ctx, GError **error)
 {
 	// Both kinds of handlers are called, redirect everything.
 	TIFFErrorHandler eh = TIFFSetErrorHandler(NULL);
@@ -2651,7 +2651,7 @@ load_gdkpixbuf_argb32_unpremultiplied(GdkPixbuf *pixbuf)
 
 static cairo_surface_t *
 open_gdkpixbuf(
-	const gchar *data, gsize len, const FivIoOpenContext *ctx, GError **error)
+	const char *data, gsize len, const FivIoOpenContext *ctx, GError **error)
 {
 	// gdk-pixbuf controls the playback itself, there is no reliable method of
 	// extracting individual frames (due to loops).
@@ -3002,7 +3002,7 @@ static guint model_signals[LAST_SIGNAL];
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 static gboolean
-model_supports(FivIoModel *self, const gchar *filename)
+model_supports(FivIoModel *self, const char *filename)
 {
 	gchar *utf8 = g_filename_to_utf8(filename, -1, NULL, NULL, NULL);
 	if (!utf8)
@@ -3410,7 +3410,7 @@ set_metadata(WebPMux *mux, const char *fourcc, GBytes *data)
 
 gboolean
 fiv_io_save(cairo_surface_t *page, cairo_surface_t *frame, FivIoProfile target,
-	const gchar *path, GError **error)
+	const char *path, GError **error)
 {
 	g_return_val_if_fail(page != NULL, FALSE);
 	g_return_val_if_fail(path != NULL, FALSE);
@@ -3574,7 +3574,7 @@ fiv_io_exif_orientation(const guint8 *tiff, gsize len)
 }
 
 gboolean
-fiv_io_save_metadata(cairo_surface_t *page, const gchar *path, GError **error)
+fiv_io_save_metadata(cairo_surface_t *page, const char *path, GError **error)
 {
 	g_return_val_if_fail(page != NULL, FALSE);
 

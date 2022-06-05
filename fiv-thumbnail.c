@@ -378,7 +378,7 @@ fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size,
 }
 
 static bool
-check_wide_thumbnail_texts(GBytes *thum, const gchar *target, time_t mtime,
+check_wide_thumbnail_texts(GBytes *thum, const char *target, time_t mtime,
 	bool *sRGB)
 {
 	gsize len = 0;
@@ -409,7 +409,7 @@ check_wide_thumbnail_texts(GBytes *thum, const gchar *target, time_t mtime,
 
 static cairo_surface_t *
 read_wide_thumbnail(
-	const gchar *path, const gchar *uri, time_t mtime, GError **error)
+	const char *path, const char *uri, time_t mtime, GError **error)
 {
 	gchar *thumbnail_uri = g_filename_to_uri(path, NULL, error);
 	if (!thumbnail_uri)
@@ -447,7 +447,7 @@ read_wide_thumbnail(
 
 static cairo_surface_t *
 read_png_thumbnail(
-	const gchar *path, const gchar *uri, time_t mtime, GError **error)
+	const char *path, const char *uri, time_t mtime, GError **error)
 {
 	cairo_surface_t *surface = fiv_io_open_png_thumbnail(path, error);
 	if (!surface)

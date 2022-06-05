@@ -90,7 +90,7 @@ struct _FivBrowser {
 static cairo_user_data_key_t fiv_browser_key_mtime_msec;
 
 struct entry {
-	char *uri;                          ///< GIO URI
+	gchar *uri;                         ///< GIO URI
 	gint64 mtime_msec;                  ///< Modification time in milliseconds
 	cairo_surface_t *thumbnail;         ///< Prescaled thumbnail
 	GIcon *icon;                        ///< If no thumbnail, use this icon
@@ -706,7 +706,7 @@ thumbnailers_start(FivBrowser *self)
 typedef struct _OpenContext {
 	GWeakRef widget;
 	GFile *file;
-	char *content_type;
+	gchar *content_type;
 	GAppInfo *app_info;
 } OpenContext;
 

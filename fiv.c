@@ -35,10 +35,10 @@
 
 // --- Utilities ---------------------------------------------------------------
 
-static void exit_fatal(const gchar *format, ...) G_GNUC_PRINTF(1, 2);
+static void exit_fatal(const char *format, ...) G_GNUC_PRINTF(1, 2);
 
 static void
-exit_fatal(const gchar *format, ...)
+exit_fatal(const char *format, ...)
 {
 	va_list ap;
 	va_start(ap, format);
@@ -618,7 +618,7 @@ update_files_index(void)
 }
 
 static void
-load_directory_without_reload(const gchar *uri)
+load_directory_without_reload(const char *uri)
 {
 	gchar *uri_duplicated = g_strdup(uri);
 	if (g.directory_back && !strcmp(uri, g.directory_back->data)) {
@@ -657,7 +657,7 @@ load_directory_without_reload(const gchar *uri)
 }
 
 static void
-load_directory_without_switching(const gchar *uri)
+load_directory_without_switching(const char *uri)
 {
 	if (uri) {
 		load_directory_without_reload(uri);
@@ -682,7 +682,7 @@ load_directory_without_switching(const gchar *uri)
 }
 
 static void
-load_directory(const gchar *uri)
+load_directory(const char *uri)
 {
 	load_directory_without_switching(uri);
 
@@ -761,7 +761,7 @@ on_notify_view_messages(FivView *view, G_GNUC_UNUSED gpointer user_data)
 }
 
 static void
-open(const gchar *uri)
+open(const char *uri)
 {
 	GFile *file = g_file_new_for_uri(uri);
 	if (fiv_view_set_uri(FIV_VIEW(g.view), uri))
@@ -1322,7 +1322,7 @@ on_button_press_browser_paned(
 }
 
 static GtkWidget *
-make_toolbar_button(const gchar *symbolic, const gchar *tooltip)
+make_toolbar_button(const char *symbolic, const char *tooltip)
 {
 	GtkWidget *button = gtk_button_new();
 	gtk_button_set_image(GTK_BUTTON(button),
@@ -1335,7 +1335,7 @@ make_toolbar_button(const gchar *symbolic, const gchar *tooltip)
 }
 
 static GtkWidget *
-make_toolbar_toggle(const gchar *symbolic, const gchar *tooltip)
+make_toolbar_toggle(const char *symbolic, const char *tooltip)
 {
 	GtkWidget *button = gtk_toggle_button_new();
 	gtk_button_set_image(GTK_BUTTON(button),

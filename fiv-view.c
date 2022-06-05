@@ -1161,7 +1161,7 @@ fiv_view_init(FivView *self)
 // --- Public interface --------------------------------------------------------
 
 static cairo_surface_t *
-open_without_swapping_in(FivView *self, const gchar *uri)
+open_without_swapping_in(FivView *self, const char *uri)
 {
 	FivIoOpenContext ctx = {
 		.uri = uri,
@@ -1190,7 +1190,7 @@ open_without_swapping_in(FivView *self, const gchar *uri)
 
 // TODO(p): Progressive picture loading, or at least async/cancellable.
 gboolean
-fiv_view_set_uri(FivView *self, const gchar *uri)
+fiv_view_set_uri(FivView *self, const char *uri)
 {
 	// This is extremely expensive, and only works sometimes.
 	g_clear_pointer(&self->enhance_swap, cairo_surface_destroy);

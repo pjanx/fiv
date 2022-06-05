@@ -22,10 +22,10 @@
 
 // --- Utilities ---------------------------------------------------------------
 
-static void exit_fatal(const gchar *format, ...) G_GNUC_PRINTF(1, 2);
+static void exit_fatal(const char *format, ...) G_GNUC_PRINTF(1, 2);
 
 static void
-exit_fatal(const gchar *format, ...)
+exit_fatal(const char *format, ...)
 {
 	va_list ap;
 	va_start(ap, format);
@@ -250,7 +250,7 @@ on_motion(G_GNUC_UNUSED GtkWidget *self, GdkEventMotion *event,
 }
 
 static gboolean
-open_jpeg(const gchar *data, gsize len, GError **error)
+open_jpeg(const char *data, gsize len, GError **error)
 {
 	tjhandle h = tjInitDecompress();
 	if (!h) {
