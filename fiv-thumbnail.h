@@ -45,9 +45,9 @@ typedef struct _FivThumbnailSizeInfo {
 	const char *thumbnail_spec_name;    ///< thumbnail-spec directory name
 } FivThumbnailSizeInfo;
 
-extern FivThumbnailSizeInfo fiv_thumbnail_sizes[FIV_THUMBNAIL_SIZE_COUNT];
-
 enum { FIV_THUMBNAIL_WIDE_COEFFICIENT = 2 };
+
+extern FivThumbnailSizeInfo fiv_thumbnail_sizes[FIV_THUMBNAIL_SIZE_COUNT];
 
 /// If non-NULL, indicates a thumbnail of insufficient quality.
 extern cairo_user_data_key_t fiv_thumbnail_key_lq;

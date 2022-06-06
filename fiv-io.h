@@ -102,8 +102,10 @@ cairo_surface_t *fiv_io_open_png_thumbnail(const char *path, GError **error);
 
 // --- Thumbnail passing utilities ---------------------------------------------
 
-void fiv_io_serialize_to_stdout(cairo_surface_t *surface);
-cairo_surface_t *fiv_io_deserialize(GBytes *bytes);
+enum { FIV_IO_SERIALIZE_LOW_QUALITY = 1 << 0 };
+
+void fiv_io_serialize_to_stdout(cairo_surface_t *surface, guint64 user_data);
+cairo_surface_t *fiv_io_deserialize(GBytes *bytes, guint64 *user_data);
 
 // --- Filesystem --------------------------------------------------------------
 

@@ -2891,11 +2891,12 @@ fiv_io_open_from_data(
 // --- Thumbnail passing utilities ---------------------------------------------
 
 typedef struct {
+	guint64 user_data;
 	int width, height, stride, format;
 } CairoHeader;
 
 void
-fiv_io_serialize_to_stdout(cairo_surface_t *surface)
+fiv_io_serialize_to_stdout(cairo_surface_t *surface, guint64 user_data)
 {
 	if (!surface || cairo_surface_get_type(surface) != CAIRO_SURFACE_TYPE_IMAGE)
 		return;
@@ -2907,6 +2908,7 @@ fiv_io_serialize_to_stdout(cairo_surface_t *surface)
 #endif
 
 	CairoHeader h = {
+		.user_data = user_data,
 		.width = cairo_image_surface_get_width(surface),
 		.height = cairo_image_surface_get_height(surface),
 		.stride = cairo_image_surface_get_stride(surface),
@@ -2921,7 +2923,7 @@ fiv_io_serialize_to_stdout(cairo_surface_t *surface)
 }
 
 cairo_surface_t *
-fiv_io_deserialize(GBytes *bytes)
+fiv_io_deserialize(GBytes *bytes, guint64 *user_data)
 {
 	CairoHeader h = {};
 	GByteArray *array = g_bytes_unref_to_array(bytes);
@@ -2949,6 +2951,7 @@ fiv_io_deserialize(GBytes *bytes)
 	static cairo_user_data_key_t key;
 	cairo_surface_set_user_data(
 		surface, &key, array, (cairo_destroy_func_t) g_byte_array_unref);
+	*user_data = h.user_data;
 	return surface;
 }
 
