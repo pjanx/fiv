@@ -1767,11 +1767,47 @@ static const char stylesheet[] = "@define-color fiv-tile @content_view_bg; \
 	} \
 	.fiv-information label { padding: 0 4px; }";
 
+static void
+output_thumbnail(const char *path_arg, gboolean extract, const char *size_arg)
+{
+	if (!path_arg)
+		exit_fatal("no path given");
+
+	FivThumbnailSize size = 0;
+	if (size_arg) {
+		for (; size < FIV_THUMBNAIL_SIZE_COUNT; size++) {
+			if (!strcmp(
+					fiv_thumbnail_sizes[size].thumbnail_spec_name, size_arg))
+				break;
+		}
+		if (size >= FIV_THUMBNAIL_SIZE_COUNT)
+			exit_fatal("unknown thumbnail size: %s", size_arg);
+	}
+
+	GError *error = NULL;
+	GFile *file = g_file_new_for_commandline_arg(path_arg);
+	cairo_surface_t *surface = NULL;
+	if (extract && (surface = fiv_thumbnail_extract(file, &error)))
+		fiv_io_serialize_to_stdout(surface, FIV_IO_SERIALIZE_LOW_QUALITY);
+	else if (size_arg &&
+		(g_clear_error(&error),
+			(surface = fiv_thumbnail_produce(file, size, &error))))
+		fiv_io_serialize_to_stdout(surface, 0);
+	else
+		g_assert(error != NULL);
+
+	g_object_unref(file);
+	if (error)
+		exit_fatal("%s", error->message);
+
+	cairo_surface_destroy(surface);
+}
+
 int
 main(int argc, char *argv[])
 {
 	gboolean show_version = FALSE, show_supported_media_types = FALSE,
-		invalidate_cache = FALSE, browse = FALSE;
+		invalidate_cache = FALSE, browse = FALSE, extract_thumbnail = FALSE;
 	gchar **path_args = NULL, *thumbnail_size = NULL;
 	const GOptionEntry options[] = {
 		{G_OPTION_REMAINING, 0, 0, G_OPTION_ARG_FILENAME_ARRAY, &path_args,
@@ -1782,9 +1818,12 @@ main(int argc, char *argv[])
 		{"browse", 0, G_OPTION_FLAG_IN_MAIN,
 			G_OPTION_ARG_NONE, &browse,
 			"Start in filesystem browsing mode", NULL},
+		{"extract-thumbnail", 0, G_OPTION_FLAG_IN_MAIN,
+			G_OPTION_ARG_NONE, &extract_thumbnail,
+			"Output any embedded thumbnail (superseding --thumbnail)", NULL},
 		{"thumbnail", 0, G_OPTION_FLAG_IN_MAIN,
 			G_OPTION_ARG_STRING, &thumbnail_size,
-			"Generate thumbnails for an image, up to the given size", "SIZE"},
+			"Generate thumbnails, up to SIZE, and output that size", "SIZE"},
 		{"invalidate-cache", 0, G_OPTION_FLAG_IN_MAIN,
 			G_OPTION_ARG_NONE, &invalidate_cache,
 			"Invalidate the wide thumbnail cache", NULL},
@@ -1820,27 +1859,8 @@ main(int argc, char *argv[])
 	// TODO(p): Complain to the user if there's more than one argument.
 	// Best show the help message, if we can figure that out.
 	const gchar *path_arg = path_args ? path_args[0] : NULL;
-	if (thumbnail_size) {
-		if (!path_arg)
-			exit_fatal("no path given");
-
-		FivThumbnailSize size = 0;
-		for (; size < FIV_THUMBNAIL_SIZE_COUNT; size++)
-			if (!strcmp(fiv_thumbnail_sizes[size].thumbnail_spec_name,
-					thumbnail_size))
-				break;
-		if (size >= FIV_THUMBNAIL_SIZE_COUNT)
-			exit_fatal("unknown thumbnail size: %s", thumbnail_size);
-
-		GFile *target = g_file_new_for_commandline_arg(path_arg);
-		cairo_surface_t *surface = NULL;
-		if (!fiv_thumbnail_produce(target, size, &surface, &error))
-			exit_fatal("%s", error->message);
-		g_object_unref(target);
-		if (surface) {
-			fiv_io_serialize_to_stdout(surface);
-			cairo_surface_destroy(surface);
-		}
+	if (extract_thumbnail || thumbnail_size) {
+		output_thumbnail(path_arg, extract_thumbnail, thumbnail_size);
 		return 0;
 	}
 

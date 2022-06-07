@@ -555,8 +555,9 @@ thumbnailer_reprocess_entry(FivBrowser *self, GBytes *output, Entry *entry)
 {
 	g_clear_object(&entry->icon);
 	g_clear_pointer(&entry->thumbnail, cairo_surface_destroy);
+	guint64 dummy;
 	if (!output || !(entry->thumbnail = rescale_thumbnail(
-			fiv_io_deserialize(output), self->item_height))) {
+			fiv_io_deserialize(output, &dummy), self->item_height))) {
 		entry_add_thumbnail(entry, self);
 		materialize_icon(self, entry);
 	} else {

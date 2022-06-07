@@ -30,6 +30,10 @@
 #include "fiv-thumbnail.h"
 #include "xdg.h"
 
+#ifdef HAVE_LIBRAW
+#include <libraw.h>
+#endif  // HAVE_LIBRAW
+
 #ifndef __linux__
 #define st_mtim st_mtimespec
 #endif  // ! __linux__
@@ -100,6 +104,91 @@ fiv_thumbnail_get_root(void)
 	gchar *thumbnails_dir = g_build_filename(cache_dir, "thumbnails", NULL);
 	g_free(cache_dir);
 	return thumbnails_dir;
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+static cairo_surface_t *
+render(GFile *target, GBytes *data, gboolean *color_managed, GError **error)
+{
+	FivIoOpenContext ctx = {
+		.uri = g_file_get_uri(target),
+		.screen_profile = fiv_io_profile_new_sRGB(),
+		.screen_dpi = 96,
+		.first_frame_only = TRUE,
+		// Only using this array as a redirect.
+		.warnings = g_ptr_array_new_with_free_func(g_free),
+	};
+
+	cairo_surface_t *surface = fiv_io_open_from_data(
+		g_bytes_get_data(data, NULL), g_bytes_get_size(data), &ctx, error);
+	g_free((gchar *) ctx.uri);
+	g_ptr_array_free(ctx.warnings, TRUE);
+	if ((*color_managed = !!ctx.screen_profile))
+		fiv_io_profile_free(ctx.screen_profile);
+	g_bytes_unref(data);
+	return surface;
+}
+
+cairo_surface_t *
+fiv_thumbnail_extract(GFile *target, GError **error)
+{
+	const char *path = g_file_peek_path(target);
+	if (!path) {
+		set_error(error, "thumbnails will only be extracted from local files");
+		return NULL;
+	}
+
+	GMappedFile *mf = g_mapped_file_new(path, FALSE, error);
+	if (!mf)
+		return NULL;
+
+	cairo_surface_t *surface = NULL;
+#ifndef HAVE_LIBRAW
+	// TODO(p): Implement our own thumbnail extractors.
+	set_error(error, "unsupported file");
+#else  // HAVE_LIBRAW
+	libraw_data_t *iprc = libraw_init(
+		LIBRAW_OPIONS_NO_MEMERR_CALLBACK | LIBRAW_OPIONS_NO_DATAERR_CALLBACK);
+	if (!iprc) {
+		set_error(error, "failed to obtain a LibRaw handle");
+		goto fail;
+	}
+
+	int err = 0;
+	if ((err = libraw_open_buffer(iprc, (void *) g_mapped_file_get_contents(mf),
+			 g_mapped_file_get_length(mf))) ||
+		(err = libraw_unpack_thumb(iprc))) {
+		set_error(error, libraw_strerror(err));
+		goto fail_libraw;
+	}
+
+	libraw_processed_image_t *image = libraw_dcraw_make_mem_thumb(iprc, &err);
+	if (!image) {
+		set_error(error, libraw_strerror(err));
+		goto fail_libraw;
+	}
+
+	gboolean dummy = FALSE;
+	switch (image->type) {
+	case LIBRAW_IMAGE_JPEG:
+		surface = render(
+			target, g_bytes_new(image->data, image->data_size), &dummy, error);
+		break;
+	case LIBRAW_IMAGE_BITMAP:
+		// TODO(p): Implement this one as well.
+	default:
+		set_error(error, "unsupported embedded thumbnail");
+	}
+
+	libraw_dcraw_clear_mem(image);
+fail_libraw:
+	libraw_close(iprc);
+#endif  // HAVE_LIBRAW
+
+fail:
+	g_mapped_file_unref(mf);
+	return surface;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -238,30 +327,7 @@ save_thumbnail(cairo_surface_t *thumbnail, const char *path, GString *thum)
 }
 
 static cairo_surface_t *
-render(GFile *target, GBytes *data, gboolean *color_managed, GError **error)
-{
-	FivIoOpenContext ctx = {
-		.uri = g_file_get_uri(target),
-		.screen_profile = fiv_io_profile_new_sRGB(),
-		.screen_dpi = 96,
-		.first_frame_only = TRUE,
-		// Only using this array as a redirect.
-		.warnings = g_ptr_array_new_with_free_func(g_free),
-	};
-
-	cairo_surface_t *surface = fiv_io_open_from_data(
-		g_bytes_get_data(data, NULL), g_bytes_get_size(data), &ctx, error);
-	g_free((gchar *) ctx.uri);
-	g_ptr_array_free(ctx.warnings, TRUE);
-	if ((*color_managed = !!ctx.screen_profile))
-		fiv_io_profile_free(ctx.screen_profile);
-	g_bytes_unref(data);
-	return surface;
-}
-
-static gboolean
-produce_fallback(GFile *target, FivThumbnailSize size,
-	cairo_surface_t **surface, GError **error)
+produce_fallback(GFile *target, FivThumbnailSize size, GError **error)
 {
 	goffset filesize = 0;
 	GFileInfo *info = g_file_query_info(target,
@@ -276,40 +342,39 @@ produce_fallback(GFile *target, FivThumbnailSize size,
 	// For example, we can employ magic checks.
 	if (filesize > 10 << 20) {
 		set_error(error, "oversize, not thumbnailing");
-		return FALSE;
+		return NULL;
 	}
 
 	GBytes *data = g_file_load_bytes(target, NULL, NULL, error);
 	if (!data)
-		return FALSE;
+		return NULL;
 
 	gboolean color_managed = FALSE;
-	cairo_surface_t *result = render(target, data, &color_managed, error);
-	if (!result)
-		return FALSE;
+	cairo_surface_t *surface = render(target, data, &color_managed, error);
+	if (!surface)
+		return NULL;
 
-	if (!*surface)
-		*surface = adjust_thumbnail(result, fiv_thumbnail_sizes[size].size);
-	cairo_surface_destroy(result);
-	return TRUE;
+	cairo_surface_t *result =
+		adjust_thumbnail(surface, fiv_thumbnail_sizes[size].size);
+	cairo_surface_destroy(surface);
+	return result;
 }
 
-gboolean
-fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size,
-	cairo_surface_t **max_size_surface, GError **error)
+cairo_surface_t *
+fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size, GError **error)
 {
 	g_return_val_if_fail(max_size >= FIV_THUMBNAIL_SIZE_MIN &&
 		max_size <= FIV_THUMBNAIL_SIZE_MAX, FALSE);
 
 	const gchar *path = g_file_peek_path(target);
 	if (!path || !g_file_is_native(target) /* Don't save sftp://. */)
-		return produce_fallback(target, max_size, max_size_surface, error);
+		return produce_fallback(target, max_size, error);
 
 	// Make the TOCTTOU issue favour unnecessary reloading.
 	GStatBuf st = {};
 	if (g_stat(path, &st)) {
 		set_error(error, g_strerror(errno));
-		return FALSE;
+		return NULL;
 	}
 
 	GError *e = NULL;
@@ -317,7 +382,7 @@ fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size,
 	if (!mf) {
 		g_debug("%s: %s", path, e->message);
 		g_error_free(e);
-		return produce_fallback(target, max_size, max_size_surface, error);
+		return produce_fallback(target, max_size, error);
 	}
 
 	gsize filesize = g_mapped_file_get_length(mf);
@@ -326,7 +391,7 @@ fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size,
 		render(target, g_mapped_file_get_bytes(mf), &color_managed, error);
 	g_mapped_file_unref(mf);
 	if (!surface)
-		return FALSE;
+		return NULL;
 
 	// Boilerplate copied from fiv_thumbnail_lookup().
 	gchar *uri = g_file_get_uri(target);
@@ -354,6 +419,7 @@ fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size,
 			thum, "%s%c%s%c", THUMB_COLORSPACE, 0, THUMB_COLORSPACE_SRGB, 0);
 	}
 
+	cairo_surface_t *max_size_surface = NULL;
 	for (int use = max_size; use >= FIV_THUMBNAIL_SIZE_MIN; use--) {
 		cairo_surface_t *scaled =
 			adjust_thumbnail(surface, fiv_thumbnail_sizes[use].size);
@@ -362,8 +428,8 @@ fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size,
 		save_thumbnail(scaled, path, thum);
 		g_free(path);
 
-		if (!*max_size_surface)
-			*max_size_surface = scaled;
+		if (!max_size_surface)
+			max_size_surface = scaled;
 		else
 			cairo_surface_destroy(scaled);
 	}
@@ -374,7 +440,7 @@ fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size,
 	g_free(sum);
 	g_free(uri);
 	cairo_surface_destroy(surface);
-	return TRUE;
+	return max_size_surface;
 }
 
 static bool
