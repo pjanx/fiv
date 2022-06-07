@@ -439,6 +439,9 @@ entry_add_thumbnail(gpointer data, gpointer user_data)
 		(intptr_t) cairo_surface_get_user_data(
 			cached, &fiv_browser_key_mtime_msec) == self->mtime_msec) {
 		self->thumbnail = cairo_surface_reference(cached);
+		// TODO(p): If this hit is low-quality, see if a high-quality thumbnail
+		// hasn't been produced without our knowledge (avoid launching a minion
+		// unnecessarily; we might also shift the concern there).
 	} else {
 		cairo_surface_t *found = fiv_thumbnail_lookup(
 			self->uri, self->mtime_msec, browser->item_size);
@@ -555,19 +558,31 @@ thumbnailer_reprocess_entry(FivBrowser *self, GBytes *output, Entry *entry)
 {
 	g_clear_object(&entry->icon);
 	g_clear_pointer(&entry->thumbnail, cairo_surface_destroy);
-	guint64 dummy;
-	if (!output || !(entry->thumbnail = rescale_thumbnail(
-			fiv_io_deserialize(output, &dummy), self->item_height))) {
-		entry_add_thumbnail(entry, self);
-		materialize_icon(self, entry);
-	} else {
-		// This choice of mtime favours unnecessary thumbnail reloading.
-		cairo_surface_set_user_data(entry->thumbnail,
-			&fiv_browser_key_mtime_msec, (void *) (intptr_t) entry->mtime_msec,
-			NULL);
-	}
 
 	gtk_widget_queue_resize(GTK_WIDGET(self));
+
+	guint64 flags = 0;
+	if (!output || !(entry->thumbnail = rescale_thumbnail(
+			fiv_io_deserialize(output, &flags), self->item_height))) {
+		entry_add_thumbnail(entry, self);
+		materialize_icon(self, entry);
+		return;
+	}
+	if ((flags & FIV_IO_SERIALIZE_LOW_QUALITY)) {
+		cairo_surface_set_user_data(entry->thumbnail, &fiv_thumbnail_key_lq,
+			(void *) (intptr_t) 1, NULL);
+
+		// TODO(p): Improve complexity; this will iterate the whole linked list.
+		self->thumbnailers_queue =
+			g_list_append(self->thumbnailers_queue, entry);
+	}
+
+	// This choice of mtime favours unnecessary thumbnail reloading.
+	cairo_surface_set_user_data(entry->thumbnail,
+		&fiv_browser_key_mtime_msec, (void *) (intptr_t) entry->mtime_msec,
+		NULL);
+	g_hash_table_insert(self->thumbnail_cache, g_strdup(entry->uri),
+		cairo_surface_reference(entry->thumbnail));
 }
 
 static void
@@ -629,11 +644,23 @@ thumbnailer_next(Thumbnailer *t)
 	self->thumbnailers_queue =
 		g_list_delete_link(self->thumbnailers_queue, self->thumbnailers_queue);
 
+	// Case analysis:
+	//  - We haven't found any thumbnail for the entry at all
+	//    (and it has a symbolic icon as a result):
+	//    we want to fill the void ASAP, so go for embedded thumbnails first.
+	//  - We've found one, but we're not quite happy with it:
+	//    always run the full process for a high-quality wide thumbnail.
+	//  - We can't end up here in any other cases.
+	const char *argv_faster[] = {PROJECT_NAME, "--extract-thumbnail",
+		"--thumbnail", fiv_thumbnail_sizes[self->item_size].thumbnail_spec_name,
+		"--", t->target->uri, NULL};
+	const char *argv_slower[] = {PROJECT_NAME,
+		"--thumbnail", fiv_thumbnail_sizes[self->item_size].thumbnail_spec_name,
+		"--", t->target->uri, NULL};
+
 	GError *error = NULL;
-	t->minion = g_subprocess_new(G_SUBPROCESS_FLAGS_STDOUT_PIPE, &error,
-		PROJECT_NAME, "--thumbnail",
-		fiv_thumbnail_sizes[self->item_size].thumbnail_spec_name, "--",
-		t->target->uri, NULL);
+	t->minion = g_subprocess_newv(t->target->icon ? argv_faster : argv_slower,
+		G_SUBPROCESS_FLAGS_STDOUT_PIPE, &error);
 	if (error) {
 		g_warning("%s", error->message);
 		g_error_free(error);
