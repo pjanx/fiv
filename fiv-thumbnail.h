@@ -56,7 +56,9 @@ extern cairo_user_data_key_t fiv_thumbnail_key_lq;
 gchar *fiv_thumbnail_get_root(void);
 
 /// Attempts to extract any low-quality thumbnail from fast targets.
-cairo_surface_t *fiv_thumbnail_extract(GFile *target, GError **error);
+/// If `max_size` is a valid value, the image will be downscaled as appropriate.
+cairo_surface_t *fiv_thumbnail_extract(
+	GFile *target, FivThumbnailSize max_size, GError **error);
 
 /// Generates wide thumbnails of up to the specified size, saves them in cache.
 /// Returns the surface used for the maximum size, or an error.

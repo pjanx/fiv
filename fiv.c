@@ -1773,9 +1773,9 @@ output_thumbnail(const char *path_arg, gboolean extract, const char *size_arg)
 	if (!path_arg)
 		exit_fatal("no path given");
 
-	FivThumbnailSize size = 0;
+	FivThumbnailSize size = FIV_THUMBNAIL_SIZE_COUNT;
 	if (size_arg) {
-		for (; size < FIV_THUMBNAIL_SIZE_COUNT; size++) {
+		for (size = 0; size < FIV_THUMBNAIL_SIZE_COUNT; size++) {
 			if (!strcmp(
 					fiv_thumbnail_sizes[size].thumbnail_spec_name, size_arg))
 				break;
@@ -1787,7 +1787,7 @@ output_thumbnail(const char *path_arg, gboolean extract, const char *size_arg)
 	GError *error = NULL;
 	GFile *file = g_file_new_for_commandline_arg(path_arg);
 	cairo_surface_t *surface = NULL;
-	if (extract && (surface = fiv_thumbnail_extract(file, &error)))
+	if (extract && (surface = fiv_thumbnail_extract(file, size, &error)))
 		fiv_io_serialize_to_stdout(surface, FIV_IO_SERIALIZE_LOW_QUALITY);
 	else if (size_arg &&
 		(g_clear_error(&error),
