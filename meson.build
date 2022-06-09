@@ -115,6 +115,19 @@ jpegcrop = executable('fiv-jpegcrop', 'fiv-jpegcrop.c',
 install_data('fiv-jpegcrop.desktop',
 	install_dir : get_option('datadir') / 'applications')
 
+if get_option('tools').enabled()
+	# libjq 1.6 lacks a pkg-config file, and there is no release in sight.
+	# libjq 1.6 is required.
+	tools_dependencies = [cc.find_library('libjq'), dependency('libpng')]
+	tools_c_args = cc.get_supported_arguments(
+		'-Wno-unused-function', '-Wno-unused-parameter')
+	foreach tool : ['pnginfo', 'jpeginfo', 'tiffinfo', 'webpinfo', 'bmffinfo']
+		executable(tool, 'tools/' + tool + '.c',
+			dependencies : tools_dependencies,
+			c_args: tools_c_args)
+	endforeach
+endif
+
 # XXX: With gdk-pixbuf, this even depends on currently installed modules.
 if meson.is_cross_build()
 	install_data('fiv.desktop',

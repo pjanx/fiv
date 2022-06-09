@@ -1,6 +1,6 @@
 #!/bin/sh -e
 # Remove thumbnails with URIs pointing to at this moment non-existing files.
-make pnginfo
+ninja pnginfo
 
 pnginfo=$(pwd)/pnginfo cache_home=${XDG_CACHE_HOME:-$HOME/.cache}
 for size in normal large x-large xx-large; do

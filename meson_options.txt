@@ -1,3 +1,6 @@
+option('tools', type : 'feature', value : 'disabled',
+	description : 'Build a few extra file inspection tools')
+
 option('lcms2', type : 'feature', value : 'auto',
 	description : 'Build with Little CMS colour management')
 option('libjpegqs', type : 'feature', value : 'auto',
