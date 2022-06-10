@@ -201,6 +201,28 @@ adjust_thumbnail(cairo_surface_t *thumbnail, double row_height)
 	return scaled;
 }
 
+static cairo_surface_t *
+orient_thumbnail(cairo_surface_t *surface, FivIoOrientation orientation)
+{
+	if (!surface || orientation <= FivIoOrientation0)
+		return surface;
+
+	double w = 0, h = 0;
+	cairo_matrix_t matrix =
+		fiv_io_orientation_apply(surface, orientation, &w, &h);
+	cairo_surface_t *oriented =
+		cairo_image_surface_create(CAIRO_FORMAT_RGB24, w, h);
+
+	cairo_t *cr = cairo_create(oriented);
+	cairo_set_source_surface(cr, surface, 0, 0);
+	cairo_pattern_set_matrix(cairo_get_source(cr), &matrix);
+	cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+	cairo_paint(cr);
+	cairo_destroy(cr);
+	cairo_surface_destroy(surface);
+	return oriented;
+}
+
 cairo_surface_t *
 fiv_thumbnail_extract(GFile *target, FivThumbnailSize max_size, GError **error)
 {
@@ -214,6 +236,29 @@ fiv_thumbnail_extract(GFile *target, FivThumbnailSize max_size, GError **error)
 	if (!mf)
 		return NULL;
 
+	// Bitmap thumbnails generally need rotating, e.g.:
+	//  - Hasselblad/H4D-50/2-9-2017_street_0012.fff
+	//  - OnePlus/One/IMG_20150729_201116.dng (and more DNGs in general)
+	// Though it's apparent LibRaw doesn't adjust the thumbnails to match
+	// the main image's "flip" field (it just happens to match up often), e.g.:
+	//  - Phase One/H 25/H25_Outdoor_.IIQ (correct Orientation in IFD0)
+	//  - Phase One/H 25/H25_IT8.7-2_Card.TIF (correctly missing in IFD0)
+	//
+	// JPEG thumbnails generally have the right rotation in their Exif, e.g.:
+	//  - Canon/EOS-1Ds Mark II/RAW_CANON_1DSM2.CR2
+	//  - Leica/C (Typ 112)/Leica_-_C_(Typ_112)-_3:2.RWL
+	//  - Nikon/1 S2/RAW_NIKON_1S2.NEF
+	//  - Panasonic/DMC-FZ18/RAW_PANASONIC_LUMIX_FZ18.RAW
+	//  - Panasonic/DMC-FZ70/P1000836.RW2
+	//  - Samsung/NX200/2013-05-08-194524__sam6589.srw
+	//  - Sony/DSC-HX95/DSC00018.ARW
+	//
+	// Some files are problematic and we won't bother with special-casing:
+	//  - Leaf/Aptus 22/L_003172.mos (JPEG)'s thumbnail wrongly contains
+	//    Exif Orientation 6, and sizes.flip also contains 6.
+	//  - Nokia/Lumia 1020/RAW_NOKIA_LUMIA_1020.DNG (bitmap) has wrong color.
+	//  - Ricoh/GXR/R0017428.DNG (JPEG) seems to be plainly invalid.
+	FivIoOrientation orientation = FivIoOrientationUnknown;
 	cairo_surface_t *surface = NULL;
 #ifndef HAVE_LIBRAW
 	// TODO(p): Implement our own thumbnail extractors.
@@ -245,9 +290,31 @@ fiv_thumbnail_extract(GFile *target, FivThumbnailSize max_size, GError **error)
 	case LIBRAW_IMAGE_JPEG:
 		surface = render(
 			target, g_bytes_new(image->data, image->data_size), &dummy, error);
+		orientation = (int) (intptr_t) cairo_surface_get_user_data(
+			surface, &fiv_io_key_orientation);
 		break;
 	case LIBRAW_IMAGE_BITMAP:
-		// TODO(p): Implement this one as well.
+		// Anything else is extremely rare.
+		if (image->colors != 3 || image->bits != 8) {
+			set_error(error, "unsupported bitmap thumbnail");
+			break;
+		}
+
+		surface = cairo_image_surface_create(
+			CAIRO_FORMAT_RGB24, image->width, image->height);
+		guint32 *out = (guint32 *) cairo_image_surface_get_data(surface);
+		const unsigned char *in = image->data;
+		for (guint64 i = 0; i < image->width * image->height; in += 3)
+			out[i++] = in[0] << 16 | in[1] << 8 | in[2];
+		cairo_surface_mark_dirty(surface);
+
+		// LibRaw actually turns an 8 to 5, so follow the documentation.
+		switch (iprc->sizes.flip) {
+		break; case 3: orientation = FivIoOrientation180;
+		break; case 5: orientation = FivIoOrientation270;
+		break; case 6: orientation = FivIoOrientation90;
+		}
+		break;
 	default:
 		set_error(error, "unsupported embedded thumbnail");
 	}
@@ -259,6 +326,10 @@ fail_libraw:
 
 fail:
 	g_mapped_file_unref(mf);
+
+	// This hardcodes Exif orientation before adjust_thumbnail() might do so,
+	// before the early return below.
+	surface = orient_thumbnail(surface, orientation);
 	if (!surface || max_size < FIV_THUMBNAIL_SIZE_MIN ||
 		max_size > FIV_THUMBNAIL_SIZE_MAX)
 		return surface;
