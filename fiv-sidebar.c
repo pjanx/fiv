@@ -17,6 +17,7 @@
 
 #include <gtk/gtk.h>
 
+#include "fiv-context-menu.h"
 #include "fiv-io.h"
 #include "fiv-sidebar.h"
 
@@ -99,7 +100,7 @@ on_rowlabel_query_tooltip(GtkWidget *widget,
 }
 
 static gboolean
-on_breadcrumb_release(
+on_breadcrumb_button_release(
 	G_GNUC_UNUSED GtkWidget *widget, GdkEventButton *event, gpointer user_data)
 {
 	// This also prevents unwanted primary button click handling in GtkListBox.
@@ -145,6 +146,30 @@ on_breadcrumb_drag_end(G_GNUC_UNUSED GtkWidget *widget,
 	GdkDragContext *context, gpointer user_data)
 {
 	gtk_places_sidebar_set_drop_targets_visible(user_data, FALSE, context);
+}
+
+static gboolean
+on_breadcrumb_button_press(GtkWidget *widget, GdkEventButton *event,
+	G_GNUC_UNUSED gpointer user_data)
+{
+	if (event->type != GDK_BUTTON_PRESS ||
+		event->button != GDK_BUTTON_SECONDARY)
+		return FALSE;
+
+	GFile *location =
+		g_object_get_qdata(G_OBJECT(widget), fiv_sidebar_location_quark());
+	gtk_menu_popup_at_pointer(fiv_context_menu_new(widget, location), NULL);
+	return TRUE;
+}
+
+static gboolean
+on_breadcrumb_popup_menu(GtkWidget *widget, G_GNUC_UNUSED gpointer user_data)
+{
+	GFile *location =
+		g_object_get_qdata(G_OBJECT(widget), fiv_sidebar_location_quark());
+	gtk_menu_popup_at_widget(fiv_context_menu_new(widget, location), widget,
+		GDK_GRAVITY_SOUTH_WEST, GDK_GRAVITY_NORTH_WEST, NULL);
+	return TRUE;
 }
 
 static GtkWidget *
@@ -198,8 +223,15 @@ create_row(FivSidebar *self, GFile *file, const char *icon_name)
 		g_object_ref(file), (GDestroyNotify) g_object_unref);
 	g_object_set_qdata_full(G_OBJECT(row), fiv_sidebar_self_quark(),
 		g_object_ref(self), (GDestroyNotify) g_object_unref);
+	g_signal_connect(row, "button-press-event",
+		G_CALLBACK(on_breadcrumb_button_press), NULL);
+	g_signal_connect(row, "popup-menu",
+		G_CALLBACK(on_breadcrumb_popup_menu), NULL);
+
+	// TODO(p): Why do we hook to the revealer, and not the row itself?
+	// Is it due to some kind of margin or padding?
 	g_signal_connect(revealer, "button-release-event",
-		G_CALLBACK(on_breadcrumb_release), row);
+		G_CALLBACK(on_breadcrumb_button_release), row);
 	g_signal_connect(revealer, "drag-data-get",
 		G_CALLBACK(on_breadcrumb_drag_data_get), row);
 	g_signal_connect(revealer, "drag-begin",
