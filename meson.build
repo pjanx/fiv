@@ -103,7 +103,7 @@ tiff_tables = custom_target('tiff-tables.h',
 	capture : true,
 )
 
-exe = executable('fiv', 'fiv.c', 'fiv-view.c', 'fiv-io.c',
+exe = executable('fiv', 'fiv.c', 'fiv-view.c', 'fiv-io.c', 'fiv-context-menu.c',
 	'fiv-browser.c', 'fiv-sidebar.c', 'fiv-thumbnail.c', 'xdg.c', resources,
 	install : true,
 	dependencies : [dependencies])
