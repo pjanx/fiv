@@ -581,7 +581,7 @@ fiv_view_scroll_event(GtkWidget *widget, GdkEventScroll *event)
 	case GDK_SCROLL_DOWN:
 		return set_scale(self, self->scale / SCALE_STEP);
 	default:
-		// For some reason, we can also get GDK_SCROLL_SMOOTH.
+		// For some reason, native GdkWindows may also get GDK_SCROLL_SMOOTH.
 		// Left/right are good to steal from GtkScrolledWindow for consistency.
 		return TRUE;
 	}

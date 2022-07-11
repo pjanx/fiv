@@ -15,10 +15,15 @@
 // CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 //
 
+#include "config.h"
+
 #include <math.h>
 #include <pixman.h>
 
-#include "config.h"
+#include <gtk/gtk.h>
+#ifdef GDK_WINDOWING_X11
+#include <gdk/gdkx.h>
+#endif  // GDK_WINDOWING_X11
 
 #include "fiv-browser.h"
 #include "fiv-context-menu.h"
@@ -941,6 +946,22 @@ fiv_browser_realize(GtkWidget *widget)
 			GDK_KEY_PRESS_MASK,
 	};
 
+	// On Wayland, touchpad scrolling doesn't emulate the scroll wheel,
+	// making GDK_SMOOTH_SCROLL_MASK necessary for our GtkScrolledWindow.
+	// On X11 and Windows, this merely makes touchpad scrolling smoother.
+	//
+	// Note that Apple Magic Mouse's touchpad also sends out smooth scrolling
+	// events, and is indistinguishable from a mouse wheel (GDK_SOURCE_MOUSE,
+	// sends LIBINPUT_EVENT_POINTER_SCROLL_WHEEL).  Yet, curiously,
+	// something in the stack on Wayland makes scrolling events discrete.
+#ifdef GDK_WINDOWING_X11
+	// XXX: On X11 (at least, not on Wayland or Windows), the first scroll wheel
+	// event only produces a smooth stop event.  Not our bug, yet annoying.
+	// We might make smooth scrolling support optional.
+	if (!GDK_IS_X11_WINDOW(gtk_widget_get_parent_window(widget)))
+#endif  // GDK_WINDOWING_X11
+		attributes.event_mask |= GDK_SMOOTH_SCROLL_MASK;
+
 	// We need this window to receive input events at all.
 	// TODO(p): See if input events bubble up to parents.
 	GdkWindow *window = gdk_window_new(gtk_widget_get_parent_window(widget),
@@ -1166,6 +1187,7 @@ fiv_browser_scroll_event(GtkWidget *widget, GdkEventScroll *event)
 		GDK_CONTROL_MASK)
 		return FALSE;
 
+	static double delta = 0;
 	switch (event->direction) {
 	case GDK_SCROLL_UP:
 		set_item_size(self, self->item_size + 1);
@@ -1173,8 +1195,20 @@ fiv_browser_scroll_event(GtkWidget *widget, GdkEventScroll *event)
 	case GDK_SCROLL_DOWN:
 		set_item_size(self, self->item_size - 1);
 		return TRUE;
+	case GDK_SCROLL_SMOOTH:
+		// On GDK/Wayland, the mouse wheel will typically create 1.5 deltas,
+		// after dividing a 15 degree click angle from libinput by 10.
+		// On X11, as libinput(4) indicates, the delta will always be 1.0.
+		if ((delta += event->delta_y) <= -1)
+			set_item_size(self, self->item_size + 1);
+		else if (delta >= +1)
+			set_item_size(self, self->item_size - 1);
+		else if (!event->is_stop)
+			return TRUE;
+
+		delta = 0;
+		return TRUE;
 	default:
-		// For some reason, we can also get GDK_SCROLL_SMOOTH.
 		// Left/right are good to steal from GtkScrolledWindow for consistency.
 		return TRUE;
 	}
