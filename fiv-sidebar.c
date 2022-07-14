@@ -480,13 +480,18 @@ fiv_sidebar_init(FivSidebar *self)
 	// TODO(p): Transplant functionality from the shitty GtkPlacesSidebar.
 	// We cannot reasonably place any new items within its own GtkListBox,
 	// so we need to replicate the style hierarchy to some extent.
-	self->places = GTK_PLACES_SIDEBAR(gtk_places_sidebar_new());
+	GtkWidget *places = gtk_places_sidebar_new();
+	self->places = GTK_PLACES_SIDEBAR(places);
 	gtk_places_sidebar_set_show_recent(self->places, FALSE);
 	gtk_places_sidebar_set_show_trash(self->places, FALSE);
 	gtk_places_sidebar_set_open_flags(self->places,
 		GTK_PLACES_OPEN_NORMAL | GTK_PLACES_OPEN_NEW_WINDOW);
 	g_signal_connect(self->places, "open-location",
 		G_CALLBACK(on_open_location), self);
+
+	gint minimum_width = -1;
+	gtk_widget_get_size_request(places, &minimum_width, NULL);
+	gtk_widget_set_size_request(places, minimum_width, -1);
 
 	gtk_places_sidebar_set_show_enter_location(self->places, TRUE);
 	g_signal_connect(self->places, "show-enter-location",
