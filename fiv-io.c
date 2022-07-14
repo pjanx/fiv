@@ -2970,7 +2970,7 @@ model_entry_finalize(FivIoModelEntry *entry)
 
 struct _FivIoModel {
 	GObject parent_instance;
-	gchar **supported_globs;
+	GPatternSpec **supported_patterns;
 
 	GFile *directory;                   ///< Currently loaded directory
 	GFileMonitor *monitor;              ///< "directory" monitoring
@@ -3011,19 +3011,21 @@ model_supports(FivIoModel *self, const char *filename)
 	if (!utf8)
 		return FALSE;
 
-	gchar *lowercased = g_utf8_strdown(utf8, -1);
+	gchar *lc = g_utf8_strdown(utf8, -1);
+	gsize lc_length = strlen(lc);
+	gchar *reversed = g_utf8_strreverse(lc, lc_length);
 	g_free(utf8);
 
-	// XXX: fnmatch() uses the /locale/ encoding, but who cares nowadays.
-	// TODO(p): Use GPatternSpec and g_file_info_get_display_name().
-	for (gchar **p = self->supported_globs; *p; p++)
-		if (!fnmatch(*p, lowercased, 0)) {
-			g_free(lowercased);
-			return TRUE;
-		}
+	// fnmatch() uses the /locale encoding/, and isn't present on Windows.
+	// TODO(p): Consider using g_file_info_get_display_name() for direct UTF-8.
+	gboolean result = FALSE;
+	for (GPatternSpec **p = self->supported_patterns; *p; p++)
+		if ((result = g_pattern_spec_match(*p, lc_length, lc, reversed)))
+			break;
 
-	g_free(lowercased);
-	return FALSE;
+	g_free(lc);
+	g_free(reversed);
+	return result;
 }
 
 static inline int
@@ -3135,6 +3137,10 @@ static void
 fiv_io_model_finalize(GObject *gobject)
 {
 	FivIoModel *self = FIV_IO_MODEL(gobject);
+	for (GPatternSpec **p = self->supported_patterns; *p; p++)
+		g_pattern_spec_free(*p);
+	g_free(self->supported_patterns);
+
 	g_clear_object(&self->directory);
 	g_clear_object(&self->monitor);
 	g_array_free(self->subdirs, TRUE);
@@ -3234,8 +3240,14 @@ fiv_io_model_init(FivIoModel *self)
 	self->filtering = TRUE;
 
 	char **types = fiv_io_all_supported_media_types();
-	self->supported_globs = extract_mime_globs((const char **) types);
+	char **globs = extract_mime_globs((const char **) types);
 	g_strfreev(types);
+
+	gsize n = g_strv_length(globs);
+	self->supported_patterns = g_malloc0_n(n, sizeof *self->supported_patterns);
+	while (n--)
+		self->supported_patterns[n] = g_pattern_spec_new(globs[n]);
+	g_strfreev(globs);
 
 	self->files = g_array_new(FALSE, TRUE, sizeof(FivIoModelEntry));
 	self->subdirs = g_array_new(FALSE, TRUE, sizeof(FivIoModelEntry));
