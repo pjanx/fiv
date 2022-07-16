@@ -198,12 +198,12 @@ relayout(FivBrowser *self, int width)
 	if (self->vadjustment) {
 		gtk_adjustment_set_lower(self->vadjustment, 0);
 		gtk_adjustment_set_upper(self->vadjustment, total_height);
-		gtk_adjustment_set_page_size(
-			self->vadjustment, gtk_widget_get_allocated_height(widget));
-		gtk_adjustment_set_page_increment(
-			self->vadjustment, gtk_widget_get_allocated_height(widget));
 		gtk_adjustment_set_step_increment(self->vadjustment,
 			self->item_height + self->item_spacing + 2 * self->item_border_y);
+		gtk_adjustment_set_page_increment(
+			self->vadjustment, gtk_widget_get_allocated_height(widget) * 0.9);
+		gtk_adjustment_set_page_size(
+			self->vadjustment, gtk_widget_get_allocated_height(widget));
 	}
 	return total_height;
 }
@@ -765,8 +765,7 @@ static void
 on_adjustment_value_changed(
 	G_GNUC_UNUSED GtkAdjustment *adjustment, gpointer user_data)
 {
-	FivBrowser *self = FIV_BROWSER(user_data);
-	gtk_widget_queue_draw(GTK_WIDGET(self));
+	gtk_widget_queue_draw(GTK_WIDGET(user_data));
 }
 
 static gboolean

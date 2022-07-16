@@ -50,6 +50,10 @@ fiv_view_command_get_type(void)
 
 struct _FivView {
 	GtkWidget parent_instance;
+	GtkAdjustment *hadjustment;         ///< GtkScrollable boilerplate
+	GtkAdjustment *vadjustment;         ///< GtkScrollable boilerplate
+	GtkScrollablePolicy hscroll_policy; ///< GtkScrollable boilerplate
+	GtkScrollablePolicy vscroll_policy; ///< GtkScrollable boilerplate
 
 	gchar *messages;                    ///< Image load information
 	gchar *uri;                         ///< Path to the current image (if any)
@@ -73,7 +77,8 @@ struct _FivView {
 	gulong frame_update_connection;     ///< GdkFrameClock::update
 };
 
-G_DEFINE_TYPE(FivView, fiv_view, GTK_TYPE_WIDGET)
+G_DEFINE_TYPE_EXTENDED(FivView, fiv_view, GTK_TYPE_WIDGET, 0,
+	G_IMPLEMENT_INTERFACE(GTK_TYPE_SCROLLABLE, NULL))
 
 typedef struct _Dimensions {
 	double width, height;
@@ -128,7 +133,13 @@ enum {
 	PROP_CAN_ANIMATE,
 	PROP_HAS_PREVIOUS_PAGE,
 	PROP_HAS_NEXT_PAGE,
-	N_PROPERTIES
+	N_PROPERTIES,
+
+	// These are overriden, we do not register them.
+	PROP_HADJUSTMENT,
+	PROP_VADJUSTMENT,
+	PROP_HSCROLL_POLICY,
+	PROP_VSCROLL_POLICY,
 };
 
 static GParamSpec *view_properties[N_PROPERTIES];
@@ -142,6 +153,75 @@ enum {
 static guint view_signals[LAST_SIGNAL];
 
 static void
+on_adjustment_value_changed(
+	G_GNUC_UNUSED GtkAdjustment *adjustment, gpointer user_data)
+{
+	gtk_widget_queue_draw(GTK_WIDGET(user_data));
+}
+
+static Dimensions
+get_surface_dimensions(FivView *self)
+{
+	if (!self->image)
+		return (Dimensions) {};
+
+	Dimensions dimensions = {};
+	fiv_io_orientation_dimensions(
+		self->page, self->orientation, &dimensions.width, &dimensions.height);
+	return dimensions;
+}
+
+static void
+get_display_dimensions(FivView *self, int *width, int *height)
+{
+	Dimensions surface_dimensions = get_surface_dimensions(self);
+	*width = ceil(surface_dimensions.width * self->scale);
+	*height = ceil(surface_dimensions.height * self->scale);
+}
+
+static void
+update_adjustments(FivView *self)
+{
+	int w = 0, h = 0;
+	get_display_dimensions(self, &w, &h);
+
+	GtkAllocation alloc;
+	gtk_widget_get_allocation(GTK_WIDGET(self), &alloc);
+
+	if (self->hadjustment) {
+		gtk_adjustment_configure(self->hadjustment,
+			gtk_adjustment_get_value(self->hadjustment), 0, w,
+			alloc.width * 0.1, alloc.width * 0.9, alloc.width);
+	}
+	if (self->vadjustment) {
+		gtk_adjustment_configure(self->vadjustment,
+			gtk_adjustment_get_value(self->vadjustment), 0, h,
+			alloc.height * 0.1, alloc.height * 0.9, alloc.height);
+	}
+}
+
+static gboolean
+replace_adjustment(
+	FivView *self, GtkAdjustment **adjustment, GtkAdjustment *replacement)
+{
+	if (*adjustment == replacement)
+		return FALSE;
+
+	if (*adjustment) {
+		g_signal_handlers_disconnect_by_func(
+			*adjustment, on_adjustment_value_changed, self);
+		g_clear_object(adjustment);
+	}
+	if (replacement) {
+		*adjustment = g_object_ref(replacement);
+		g_signal_connect(*adjustment, "value-changed",
+			G_CALLBACK(on_adjustment_value_changed), self);
+		update_adjustments(self);
+	}
+	return TRUE;
+}
+
+static void
 fiv_view_finalize(GObject *gobject)
 {
 	FivView *self = FIV_VIEW(gobject);
@@ -151,6 +231,9 @@ fiv_view_finalize(GObject *gobject)
 	g_clear_pointer(&self->page_scaled, cairo_surface_destroy);
 	g_free(self->uri);
 	g_free(self->messages);
+
+	replace_adjustment(self, &self->hadjustment, NULL);
+	replace_adjustment(self, &self->vadjustment, NULL);
 
 	G_OBJECT_CLASS(fiv_view_parent_class)->finalize(gobject);
 }
@@ -199,6 +282,19 @@ fiv_view_get_property(
 		g_value_set_boolean(value, self->page &&
 			cairo_surface_get_user_data(self->page, &fiv_io_key_page_next));
 		break;
+
+	case PROP_HADJUSTMENT:
+		g_value_set_object(value, self->hadjustment);
+		break;
+	case PROP_VADJUSTMENT:
+		g_value_set_object(value, self->vadjustment);
+		break;
+	case PROP_HSCROLL_POLICY:
+		g_value_set_enum(value, self->hscroll_policy);
+		break;
+	case PROP_VSCROLL_POLICY:
+		g_value_set_enum(value, self->vscroll_policy);
+		break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
 	}
@@ -230,29 +326,34 @@ fiv_view_set_property(
 		if (self->enhance != g_value_get_boolean(value))
 			fiv_view_command(self, FIV_VIEW_COMMAND_TOGGLE_ENHANCE);
 		break;
+
+	case PROP_HADJUSTMENT:
+		if (replace_adjustment(
+				self, &self->hadjustment, g_value_get_object(value)))
+			g_object_notify_by_pspec(object, pspec);
+		break;
+	case PROP_VADJUSTMENT:
+		if (replace_adjustment(
+				self, &self->vadjustment, g_value_get_object(value)))
+			g_object_notify_by_pspec(object, pspec);
+		break;
+	case PROP_HSCROLL_POLICY:
+		if ((gint) self->hscroll_policy != g_value_get_enum(value)) {
+			self->hscroll_policy = g_value_get_enum(value);
+			gtk_widget_queue_resize(GTK_WIDGET(self));
+			g_object_notify_by_pspec(object, pspec);
+		}
+		break;
+	case PROP_VSCROLL_POLICY:
+		if ((gint) self->vscroll_policy != g_value_get_enum(value)) {
+			self->vscroll_policy = g_value_get_enum(value);
+			gtk_widget_queue_resize(GTK_WIDGET(self));
+			g_object_notify_by_pspec(object, pspec);
+		}
+		break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
 	}
-}
-
-static Dimensions
-get_surface_dimensions(FivView *self)
-{
-	if (!self->image)
-		return (Dimensions) {};
-
-	Dimensions dimensions = {};
-	fiv_io_orientation_dimensions(
-		self->page, self->orientation, &dimensions.width, &dimensions.height);
-	return dimensions;
-}
-
-static void
-get_display_dimensions(FivView *self, int *width, int *height)
-{
-	Dimensions surface_dimensions = get_surface_dimensions(self);
-	*width = ceil(surface_dimensions.width * self->scale);
-	*height = ceil(surface_dimensions.height * self->scale);
 }
 
 static void
@@ -308,7 +409,7 @@ fiv_view_size_allocate(GtkWidget *widget, GtkAllocation *allocation)
 
 	FivView *self = FIV_VIEW(widget);
 	if (!self->image || !self->scale_to_fit)
-		return;
+		goto out;
 
 	Dimensions surface_dimensions = get_surface_dimensions(self);
 	double scale = 1;
@@ -322,6 +423,9 @@ fiv_view_size_allocate(GtkWidget *widget, GtkAllocation *allocation)
 		g_object_notify_by_pspec(G_OBJECT(widget), view_properties[PROP_SCALE]);
 		prescale_page(self);
 	}
+
+out:
+	update_adjustments(self);
 }
 
 // https://www.freedesktop.org/wiki/OpenIcc/ICC_Profiles_in_X_Specification_0.4
@@ -438,6 +542,10 @@ fiv_view_draw(GtkWidget *widget, cairo_t *cr)
 
 	double x = 0;
 	double y = 0;
+	if (self->hadjustment)
+		x = -gtk_adjustment_get_value(self->hadjustment);
+	if (self->vadjustment)
+		y = -gtk_adjustment_get_value(self->vadjustment);
 	if (w < allocation.width)
 		x = round((allocation.width - w) / 2.);
 	if (h < allocation.height)
@@ -554,8 +662,7 @@ static void
 set_scale_to_fit_width(FivView *self)
 {
 	double w = get_surface_dimensions(self).width;
-	int allocated = gtk_widget_get_allocated_width(
-		gtk_widget_get_parent(GTK_WIDGET(self)));
+	int allocated = gtk_widget_get_allocated_width(GTK_WIDGET(self));
 	if (ceil(w * self->scale) > allocated)
 		set_scale(self, allocated / w);
 }
@@ -564,8 +671,7 @@ static void
 set_scale_to_fit_height(FivView *self)
 {
 	double h = get_surface_dimensions(self).height;
-	int allocated = gtk_widget_get_allocated_height(
-		gtk_widget_get_parent(GTK_WIDGET(self)));
+	int allocated = gtk_widget_get_allocated_height(GTK_WIDGET(self));
 	if (ceil(h * self->scale) > allocated)
 		set_scale(self, allocated / h);
 }
@@ -1094,6 +1200,15 @@ fiv_view_class_init(FivViewClass *klass)
 		FALSE, G_PARAM_READABLE);
 	g_object_class_install_properties(
 		object_class, N_PROPERTIES, view_properties);
+
+	g_object_class_override_property(
+		object_class, PROP_HADJUSTMENT, "hadjustment");
+	g_object_class_override_property(
+		object_class, PROP_VADJUSTMENT, "vadjustment");
+	g_object_class_override_property(
+		object_class, PROP_HSCROLL_POLICY, "hscroll-policy");
+	g_object_class_override_property(
+		object_class, PROP_VSCROLL_POLICY, "vscroll-policy");
 
 	view_signals[COMMAND] =
 		g_signal_new_class_handler("command", G_TYPE_FROM_CLASS(klass),
