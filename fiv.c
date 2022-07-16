@@ -1324,8 +1324,8 @@ on_button_press_browser_paned(
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 static void
-on_view_scroller_drag_begin(
-	GtkGestureDrag *self, gdouble start_x, gdouble start_y, gpointer user_data)
+on_view_scroller_drag_begin(GtkGestureDrag *self, G_GNUC_UNUSED gdouble start_x,
+	G_GNUC_UNUSED gdouble start_y, gpointer user_data)
 {
 	GtkGesture *gesture = GTK_GESTURE(self);
 	GdkEventSequence *sequence = gtk_gesture_get_last_updated_sequence(gesture);
@@ -1347,34 +1347,24 @@ on_view_scroller_drag_begin(
 	gdk_window_set_cursor(window, cursor);
 	g_object_unref(cursor);
 
-	double *last = user_data;
-	last[0] = start_x;
-	last[1] = start_y;
+	double *init = user_data;
+	GtkScrolledWindow *sw = GTK_SCROLLED_WINDOW(
+		gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(self)));
+	init[0] = gtk_adjustment_get_value(gtk_scrolled_window_get_hadjustment(sw));
+	init[1] = gtk_adjustment_get_value(gtk_scrolled_window_get_vadjustment(sw));
 }
 
 static void
 on_view_scroller_drag(GtkGestureDrag *self, gdouble offset_x, gdouble offset_y,
 	gpointer user_data)
 {
-	double start_x = 0, start_y = 0;
-	gtk_gesture_drag_get_start_point(self, &start_x, &start_y);
-
-	double *last = user_data,
-		diff_x = (start_x + offset_x) - last[0],
-		diff_y = (start_y + offset_y) - last[1];
-
-	last[0] = start_x + offset_x;
-	last[1] = start_y + offset_y;
-
+	const double *init = user_data;
 	GtkScrolledWindow *sw = GTK_SCROLLED_WINDOW(
 		gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(self)));
-	GtkAdjustment *h = gtk_scrolled_window_get_hadjustment(sw);
-	GtkAdjustment *v = gtk_scrolled_window_get_vadjustment(sw);
-
-	if (diff_x)
-		gtk_adjustment_set_value(h, gtk_adjustment_get_value(h) - diff_x);
-	if (diff_y)
-		gtk_adjustment_set_value(v, gtk_adjustment_get_value(v) - diff_y);
+	gtk_adjustment_set_value(
+		gtk_scrolled_window_get_hadjustment(sw), init[0] - offset_x);
+	gtk_adjustment_set_value(
+		gtk_scrolled_window_get_vadjustment(sw), init[1] - offset_y);
 }
 
 static void
@@ -1968,13 +1958,13 @@ main(int argc, char *argv[])
 	// Though note that the GdkWindow doesn't register for touch events now.
 	gtk_gesture_single_set_exclusive(GTK_GESTURE_SINGLE(drag), TRUE);
 
-	double last_drag_point[2] = {};
+	double init_drag_values[2] = {};
 	g_signal_connect(drag, "drag-begin",
-		G_CALLBACK(on_view_scroller_drag_begin), last_drag_point);
+		G_CALLBACK(on_view_scroller_drag_begin), init_drag_values);
 	g_signal_connect(drag, "drag-update",
-		G_CALLBACK(on_view_scroller_drag), last_drag_point);
+		G_CALLBACK(on_view_scroller_drag), init_drag_values);
 	g_signal_connect(drag, "drag-end",
-		G_CALLBACK(on_view_scroller_drag_end), last_drag_point);
+		G_CALLBACK(on_view_scroller_drag_end), init_drag_values);
 
 	// We need to hide it together with the separator.
 	g.view_toolbar = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
