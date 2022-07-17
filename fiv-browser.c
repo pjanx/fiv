@@ -193,7 +193,14 @@ relayout(FivBrowser *self, int width)
 	g_array_free(items, TRUE);
 	int total_height = y + padding.bottom;
 	if (self->hadjustment) {
-		// TODO(p): Set it to the width. Ideally, bump it to the minimum width.
+		gint minimum_width = 0;
+		gtk_widget_get_preferred_width(widget, &minimum_width, NULL);
+
+		gtk_adjustment_set_lower(self->hadjustment, 0);
+		gtk_adjustment_set_upper(self->hadjustment, MAX(width, minimum_width));
+		gtk_adjustment_set_step_increment(self->hadjustment, width * 0.1);
+		gtk_adjustment_set_page_increment(self->hadjustment, width * 0.9);
+		gtk_adjustment_set_page_size(self->hadjustment, width);
 	}
 	if (self->vadjustment) {
 		gtk_adjustment_set_lower(self->vadjustment, 0);
