@@ -360,6 +360,12 @@ on_about_draw(GtkWidget *widget, cairo_t *cr, gpointer user_data)
 	GtkStyleContext *style = gtk_widget_get_style_context(widget);
 	gtk_render_background(style, cr, 0, 0, allocation.width, allocation.height);
 
+	// The transformation matrix turns out/is applied wrongly on Quartz.
+	gboolean broken_backend = cairo_surface_get_type(cairo_get_target(cr)) ==
+		CAIRO_SURFACE_TYPE_QUARTZ;
+	if (broken_backend)
+		cairo_push_group(cr);
+
 	cairo_translate(cr, (allocation.width - ABOUT_SIZE * ABOUT_SCALE) / 2,
 		ABOUT_SIZE * ABOUT_SCALE / 4);
 	cairo_scale(cr, ABOUT_SCALE, ABOUT_SCALE);
@@ -385,6 +391,11 @@ on_about_draw(GtkWidget *widget, cairo_t *cr, gpointer user_data)
 
 	cairo_restore(cr);
 	draw_ligature(cr);
+
+	if (broken_backend) {
+		cairo_pop_group_to_source(cr);
+		cairo_paint(cr);
+	}
 	return TRUE;
 }
 
