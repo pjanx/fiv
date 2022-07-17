@@ -506,8 +506,8 @@ fiv_view_realize(GtkWidget *widget)
 	//
 	// It completely breaks the Quartz backend, so limit it to X11.
 #ifdef GDK_WINDOWING_X11
-	// FIXME: This causes some flicker while scrolling, because it disables
-	// double buffering, see: https://gitlab.gnome.org/GNOME/gtk/-/issues/2560
+	// Note that this disables double buffering, and sometimes causes artefacts,
+	// see: https://gitlab.gnome.org/GNOME/gtk/-/issues/2560
 	//
 	// If GTK+'s OpenGL integration fails to deliver, we need to use the window
 	// directly, sidestepping the toolkit entirely.
@@ -647,6 +647,12 @@ set_scale_to_fit(FivView *self, bool scale_to_fit)
 static gboolean
 set_scale(FivView *self, double scale, const GdkEvent *event)
 {
+	// FIXME: Zooming to exactly 1:1 breaks rendering with some images
+	// when using a native X11 Window. This is a silly workaround.
+	GdkWindow *window = gtk_widget_get_window(GTK_WIDGET(self));
+	if (window && gdk_window_has_native(window) && scale == 1)
+		scale = 1.000000000000001;
+
 	if (self->scale == scale)
 		goto out;
 
