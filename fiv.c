@@ -146,10 +146,11 @@ static struct key_group help_keys_viewer[] = {
 		{}
 	}},
 	{"Configuration", (struct key[]) {
+		{"k", "Toggle keeping zoom and position"},
+		{"x", "Toggle scale to fit if larger"},
 #ifdef HAVE_LCMS2
 		{"c", "Toggle color management"},
 #endif
-		{"x", "Toggle scale to fit if larger"},
 		{"i", "Toggle smooth scaling"},
 		{"t", "Toggle transparency highlighting"},
 #ifdef HAVE_JPEG_QS

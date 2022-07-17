@@ -1361,6 +1361,7 @@ fiv_view_class_init(FivViewClass *klass)
 	bind(bs, GDK_KEY_minus,        0, FIV_VIEW_COMMAND_ZOOM_OUT);
 	bind(bs, GDK_KEY_w,            0, FIV_VIEW_COMMAND_FIT_WIDTH);
 	bind(bs, GDK_KEY_h,            0, FIV_VIEW_COMMAND_FIT_HEIGHT);
+	bind(bs, GDK_KEY_k,            0, FIV_VIEW_COMMAND_TOGGLE_FIXATE);
 	bind(bs, GDK_KEY_x,            0, FIV_VIEW_COMMAND_TOGGLE_SCALE_TO_FIT);
 	bind(bs, GDK_KEY_c,            0, FIV_VIEW_COMMAND_TOGGLE_CMS);
 	bind(bs, GDK_KEY_i,            0, FIV_VIEW_COMMAND_TOGGLE_FILTER);
