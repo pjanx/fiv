@@ -543,9 +543,9 @@ fiv_view_draw(GtkWidget *widget, cairo_t *cr)
 	double x = 0;
 	double y = 0;
 	if (self->hadjustment)
-		x = -gtk_adjustment_get_value(self->hadjustment);
+		x = -floor(gtk_adjustment_get_value(self->hadjustment));
 	if (self->vadjustment)
-		y = -gtk_adjustment_get_value(self->vadjustment);
+		y = -floor(gtk_adjustment_get_value(self->vadjustment));
 	if (w < allocation.width)
 		x = round((allocation.width - w) / 2.);
 	if (h < allocation.height)
@@ -645,15 +645,52 @@ set_scale_to_fit(FivView *self, bool scale_to_fit)
 }
 
 static gboolean
-set_scale(FivView *self, double scale)
+set_scale(FivView *self, double scale, const GdkEvent *event)
 {
-	if (self->scale != scale) {
-		self->scale = scale;
-		g_object_notify_by_pspec(G_OBJECT(self), view_properties[PROP_SCALE]);
-		prescale_page(self);
+	if (self->scale == scale)
+		goto out;
 
-		gtk_widget_queue_resize(GTK_WIDGET(self));
+	GtkAllocation allocation;
+	gtk_widget_get_allocation(GTK_WIDGET(self), &allocation);
+
+	double focus_x = 0, focus_y = 0, surface_x = 0, surface_y = 0;
+	if (!event || !gdk_event_get_coords(event, &focus_x, &focus_y)) {
+		focus_x = 0.5 * allocation.width;
+		focus_y = 0.5 * allocation.height;
 	}
+	if (self->hadjustment && self->vadjustment) {
+		int w, h;
+		get_display_dimensions(self, &w, &h);
+
+		surface_x = (focus_x + (w < allocation.width
+			? -round((allocation.width - w) / 2.)
+			: +floor(gtk_adjustment_get_value(self->hadjustment))))
+				/ self->scale;
+		surface_y = (focus_y + (h < allocation.height
+			? -round((allocation.height - h) / 2.)
+			: +floor(gtk_adjustment_get_value(self->vadjustment))))
+				/ self->scale;
+	}
+
+	self->scale = scale;
+	g_object_notify_by_pspec(G_OBJECT(self), view_properties[PROP_SCALE]);
+	prescale_page(self);
+
+	if (self->hadjustment && self->vadjustment) {
+		update_adjustments(self);
+
+		Dimensions surface_dimensions = get_surface_dimensions(self);
+		if (surface_dimensions.width * self->scale > allocation.width)
+			gtk_adjustment_set_value(
+				self->hadjustment, surface_x * self->scale - focus_x);
+		if (surface_dimensions.height * self->scale > allocation.height)
+			gtk_adjustment_set_value(
+				self->vadjustment, surface_y * self->scale - focus_y);
+	}
+
+	gtk_widget_queue_resize(GTK_WIDGET(self));
+
+out:
 	return set_scale_to_fit(self, false);
 }
 
@@ -663,7 +700,7 @@ set_scale_to_fit_width(FivView *self)
 	double w = get_surface_dimensions(self).width;
 	int allocated = gtk_widget_get_allocated_width(GTK_WIDGET(self));
 	if (ceil(w * self->scale) > allocated)
-		set_scale(self, allocated / w);
+		set_scale(self, allocated / w, NULL);
 }
 
 static void
@@ -672,7 +709,7 @@ set_scale_to_fit_height(FivView *self)
 	double h = get_surface_dimensions(self).height;
 	int allocated = gtk_widget_get_allocated_height(GTK_WIDGET(self));
 	if (ceil(h * self->scale) > allocated)
-		set_scale(self, allocated / h);
+		set_scale(self, allocated / h, NULL);
 }
 
 static gboolean
@@ -686,9 +723,9 @@ fiv_view_scroll_event(GtkWidget *widget, GdkEventScroll *event)
 
 	switch (event->direction) {
 	case GDK_SCROLL_UP:
-		return set_scale(self, self->scale * SCALE_STEP);
+		return set_scale(self, self->scale * SCALE_STEP, (GdkEvent *) event);
 	case GDK_SCROLL_DOWN:
-		return set_scale(self, self->scale / SCALE_STEP);
+		return set_scale(self, self->scale / SCALE_STEP, (GdkEvent *) event);
 	default:
 		// For some reason, native GdkWindows may also get GDK_SCROLL_SMOOTH.
 		// Left/right are good to steal from GtkScrolledWindow for consistency.
@@ -1196,7 +1233,7 @@ fiv_view_key_press_event(GtkWidget *widget, GdkEventKey *event)
 	if (self->image &&
 		!(event->state & gtk_accelerator_get_default_mod_mask()) &&
 		event->keyval >= GDK_KEY_1 && event->keyval <= GDK_KEY_9)
-		return set_scale(self, event->keyval - GDK_KEY_0);
+		return set_scale(self, event->keyval - GDK_KEY_0, NULL);
 
 	return GTK_WIDGET_CLASS(fiv_view_parent_class)
 		->key_press_event(widget, event);
@@ -1538,11 +1575,11 @@ fiv_view_command(FivView *self, FivViewCommand command)
 		info(self);
 
 	break; case FIV_VIEW_COMMAND_ZOOM_IN:
-		set_scale(self, self->scale * SCALE_STEP);
+		set_scale(self, self->scale * SCALE_STEP, NULL);
 	break; case FIV_VIEW_COMMAND_ZOOM_OUT:
-		set_scale(self, self->scale / SCALE_STEP);
+		set_scale(self, self->scale / SCALE_STEP, NULL);
 	break; case FIV_VIEW_COMMAND_ZOOM_1:
-		set_scale(self, 1.0);
+		set_scale(self, 1.0, NULL);
 	break; case FIV_VIEW_COMMAND_FIT_WIDTH:
 		set_scale_to_fit_width(self);
 	break; case FIV_VIEW_COMMAND_FIT_HEIGHT:
