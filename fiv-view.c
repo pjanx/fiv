@@ -67,6 +67,7 @@ struct _FivView {
 	bool checkerboard : 1;              ///< Show checkerboard background
 	bool enhance : 1;                   ///< Try to enhance picture data
 	bool scale_to_fit : 1;              ///< Image no larger than the allocation
+	bool fixate : 1;                    ///< Keep zoom and position
 	double scale;                       ///< Scaling factor
 	double drag_start[2];               ///< Adjustment values for drag origin
 
@@ -125,6 +126,7 @@ enum {
 	PROP_MESSAGES = 1,
 	PROP_SCALE,
 	PROP_SCALE_TO_FIT,
+	PROP_FIXATE,
 	PROP_ENABLE_CMS,
 	PROP_FILTER,
 	PROP_CHECKERBOARD,
@@ -254,6 +256,9 @@ fiv_view_get_property(
 	case PROP_SCALE_TO_FIT:
 		g_value_set_boolean(value, self->scale_to_fit);
 		break;
+	case PROP_FIXATE:
+		g_value_set_boolean(value, self->fixate);
+		break;
 	case PROP_ENABLE_CMS:
 		g_value_set_boolean(value, self->enable_cms);
 		break;
@@ -310,6 +315,10 @@ fiv_view_set_property(
 	case PROP_SCALE_TO_FIT:
 		if (self->scale_to_fit != g_value_get_boolean(value))
 			fiv_view_command(self, FIV_VIEW_COMMAND_TOGGLE_SCALE_TO_FIT);
+		break;
+	case PROP_FIXATE:
+		if (self->fixate != g_value_get_boolean(value))
+			fiv_view_command(self, FIV_VIEW_COMMAND_TOGGLE_FIXATE);
 		break;
 	case PROP_ENABLE_CMS:
 		if (self->enable_cms != g_value_get_boolean(value))
@@ -636,7 +645,12 @@ static gboolean
 set_scale_to_fit(FivView *self, bool scale_to_fit)
 {
 	if (self->scale_to_fit != scale_to_fit) {
-		self->scale_to_fit = scale_to_fit;
+		if ((self->scale_to_fit = scale_to_fit)) {
+			self->fixate = false;
+			g_object_notify_by_pspec(
+				G_OBJECT(self), view_properties[PROP_FIXATE]);
+		}
+
 		g_object_notify_by_pspec(
 			G_OBJECT(self), view_properties[PROP_SCALE_TO_FIT]);
 		gtk_widget_queue_resize(GTK_WIDGET(self));
@@ -1270,6 +1284,9 @@ fiv_view_class_init(FivViewClass *klass)
 	view_properties[PROP_SCALE_TO_FIT] = g_param_spec_boolean(
 		"scale-to-fit", "Scale to fit", "Scale images down to fit the window",
 		TRUE, G_PARAM_READWRITE);
+	view_properties[PROP_FIXATE] = g_param_spec_boolean(
+		"fixate", "Fixate", "Keep zoom and position",
+		FALSE, G_PARAM_READWRITE);
 	view_properties[PROP_ENABLE_CMS] = g_param_spec_boolean(
 		"enable-cms", "Enable CMS", "Enable color management",
 		TRUE, G_PARAM_READWRITE);
@@ -1443,7 +1460,10 @@ fiv_view_set_uri(FivView *self, const char *uri)
 	self->frame = self->page = NULL;
 	self->image = surface;
 	switch_page(self, self->image);
-	set_scale_to_fit(self, true);
+
+	// Otherwise, adjustment values and zoom are retained implicitly.
+	if (!self->fixate)
+		set_scale_to_fit(self, true);
 
 	g_free(self->uri);
 	self->uri = g_strdup(uri);
@@ -1592,5 +1612,10 @@ fiv_view_command(FivView *self, FivViewCommand command)
 		set_scale_to_fit_height(self);
 	break; case FIV_VIEW_COMMAND_TOGGLE_SCALE_TO_FIT:
 		set_scale_to_fit(self, !self->scale_to_fit);
+	break; case FIV_VIEW_COMMAND_TOGGLE_FIXATE:
+		if ((self->fixate = !self->fixate))
+			set_scale_to_fit(self, false);
+		g_object_notify_by_pspec(
+			G_OBJECT(self), view_properties[PROP_FIXATE]);
 	}
 }

@@ -60,7 +60,8 @@ typedef enum _FivViewCommand {
 	XX(FIV_VIEW_COMMAND_ZOOM_1,              "zoom-1")                         \
 	XX(FIV_VIEW_COMMAND_FIT_WIDTH,           "fit-width")                      \
 	XX(FIV_VIEW_COMMAND_FIT_HEIGHT,          "fit-height")                     \
-	XX(FIV_VIEW_COMMAND_TOGGLE_SCALE_TO_FIT, "toggle-scale-to-fit")
+	XX(FIV_VIEW_COMMAND_TOGGLE_SCALE_TO_FIT, "toggle-scale-to-fit")            \
+	XX(FIV_VIEW_COMMAND_TOGGLE_FIXATE,       "toggle-fixate")
 #define XX(constant, name) constant,
 	FIV_VIEW_COMMANDS(XX)
 #undef XX

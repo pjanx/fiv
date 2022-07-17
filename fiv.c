@@ -497,13 +497,13 @@ show_about_dialog(GtkWidget *parent)
 	XX(PLAY_PAUSE,    B("media-playback-start-symbolic", "Pause")) \
 	XX(SEEK_FORWARD,  B("media-seek-forward-symbolic", "Next frame")) \
 	XX(S3,            gtk_separator_new(GTK_ORIENTATION_HORIZONTAL)) \
+	XX(FIXATE,        T("pin2-symbolic", "Keep zoom and position")) \
 	XX(MINUS,         B("zoom-out-symbolic", "Zoom out")) \
 	XX(SCALE,         gtk_label_new("")) \
 	XX(PLUS,          B("zoom-in-symbolic", "Zoom in")) \
 	XX(ONE,           B("zoom-original-symbolic", "Original size")) \
 	XX(FIT,           T("zoom-fit-best-symbolic", "Scale to fit")) \
 	XX(S4,            gtk_separator_new(GTK_ORIENTATION_HORIZONTAL)) \
-	/* XX(PIN,        B("view-pin-symbolic", "Keep view configuration")) */ \
 	/* Or perhaps "blur-symbolic", also in the extended set. */ \
 	XX(COLOR,         T("preferences-color-symbolic", "Color management")) \
 	XX(SMOOTH,        T("blend-tool-symbolic", "Smooth scaling")) \
@@ -1523,6 +1523,7 @@ make_view_toolbar(void)
 	toolbar_command(TOOLBAR_PLUS,          FIV_VIEW_COMMAND_ZOOM_IN);
 	toolbar_command(TOOLBAR_ONE,           FIV_VIEW_COMMAND_ZOOM_1);
 	toolbar_toggler(TOOLBAR_FIT,           "scale-to-fit");
+	toolbar_toggler(TOOLBAR_FIXATE,        "fixate");
 	toolbar_toggler(TOOLBAR_COLOR,         "enable-cms");
 	toolbar_toggler(TOOLBAR_SMOOTH,        "filter");
 	toolbar_toggler(TOOLBAR_CHECKERBOARD,  "checkerboard");
@@ -1541,6 +1542,8 @@ make_view_toolbar(void)
 		G_CALLBACK(on_notify_view_playing), NULL);
 	g_signal_connect(g.view, "notify::scale-to-fit",
 		G_CALLBACK(on_notify_view_boolean), g.toolbar[TOOLBAR_FIT]);
+	g_signal_connect(g.view, "notify::fixate",
+		G_CALLBACK(on_notify_view_boolean), g.toolbar[TOOLBAR_FIXATE]);
 	g_signal_connect(g.view, "notify::enable-cms",
 		G_CALLBACK(on_notify_view_boolean), g.toolbar[TOOLBAR_COLOR]);
 	g_signal_connect(g.view, "notify::filter",
@@ -1553,6 +1556,7 @@ make_view_toolbar(void)
 	g_object_notify(G_OBJECT(g.view), "scale");
 	g_object_notify(G_OBJECT(g.view), "playing");
 	g_object_notify(G_OBJECT(g.view), "scale-to-fit");
+	g_object_notify(G_OBJECT(g.view), "fixate");
 	g_object_notify(G_OBJECT(g.view), "enable-cms");
 	g_object_notify(G_OBJECT(g.view), "filter");
 	g_object_notify(G_OBJECT(g.view), "checkerboard");

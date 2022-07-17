@@ -14,6 +14,8 @@ Features
  - Employs high-performance file format libraries: Wuffs and libjpeg-turbo.
  - Makes use of 30-bit X.org visuals, whenever it's possible and appropriate.
  - Has a notion of pages, and tries to load all included content within files.
+ - Can keep the zoom and position when browsing, to help with comparing
+   zoomed-in images.
 
 Explicit non-goals
 ------------------
