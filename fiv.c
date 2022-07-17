@@ -1323,61 +1323,6 @@ on_button_press_browser_paned(
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-static void
-on_view_scroller_drag_begin(GtkGestureDrag *self, G_GNUC_UNUSED gdouble start_x,
-	G_GNUC_UNUSED gdouble start_y, gpointer user_data)
-{
-	GtkGesture *gesture = GTK_GESTURE(self);
-	GdkEventSequence *sequence = gtk_gesture_get_last_updated_sequence(gesture);
-	GdkModifierType state = 0;
-	gdk_event_get_state(gtk_gesture_get_last_event(gesture, sequence), &state);
-	if (state & gtk_accelerator_get_default_mod_mask()) {
-		gtk_gesture_set_state(gesture, GTK_EVENT_SEQUENCE_DENIED);
-		return;
-	}
-
-	// Since we set this up as a pointer-only gesture, there is only the NULL
-	// sequence, so gtk_gesture_set_sequence_state() is completely unneeded.
-	gtk_gesture_set_state(gesture, GTK_EVENT_SEQUENCE_CLAIMED);
-
-	GdkWindow *window = gtk_widget_get_window(
-		gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(self)));
-	GdkCursor *cursor =
-		gdk_cursor_new_from_name(gdk_window_get_display(window), "grabbing");
-	gdk_window_set_cursor(window, cursor);
-	g_object_unref(cursor);
-
-	double *init = user_data;
-	GtkScrolledWindow *sw = GTK_SCROLLED_WINDOW(
-		gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(self)));
-	init[0] = gtk_adjustment_get_value(gtk_scrolled_window_get_hadjustment(sw));
-	init[1] = gtk_adjustment_get_value(gtk_scrolled_window_get_vadjustment(sw));
-}
-
-static void
-on_view_scroller_drag(GtkGestureDrag *self, gdouble offset_x, gdouble offset_y,
-	gpointer user_data)
-{
-	const double *init = user_data;
-	GtkScrolledWindow *sw = GTK_SCROLLED_WINDOW(
-		gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(self)));
-	gtk_adjustment_set_value(
-		gtk_scrolled_window_get_hadjustment(sw), init[0] - offset_x);
-	gtk_adjustment_set_value(
-		gtk_scrolled_window_get_vadjustment(sw), init[1] - offset_y);
-}
-
-static void
-on_view_scroller_drag_end(GtkGestureDrag *self, G_GNUC_UNUSED gdouble start_x,
-	G_GNUC_UNUSED gdouble start_y, G_GNUC_UNUSED gpointer user_data)
-{
-	GdkWindow *window = gtk_widget_get_window(
-		gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(self)));
-	gdk_window_set_cursor(window, NULL);
-}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-
 static GtkWidget *
 make_toolbar_button(const char *symbolic, const char *tooltip)
 {
@@ -1947,24 +1892,6 @@ main(int argc, char *argv[])
 	g_signal_connect(g.view, "drag-data-received",
 		G_CALLBACK(on_view_drag_data_received), NULL);
 	gtk_container_add(GTK_CONTAINER(view_scroller), g.view);
-
-	GtkGesture *drag = gtk_gesture_drag_new(view_scroller);
-	gtk_event_controller_set_propagation_phase(
-		GTK_EVENT_CONTROLLER(drag), GTK_PHASE_CAPTURE);
-
-	// GtkScrolledWindow's internal GtkGestureDrag is set to only look for
-	// touch events (and its "event_controllers" are perfectly private,
-	// so we can't change this), hopefully this is mutually exclusive with that.
-	// Though note that the GdkWindow doesn't register for touch events now.
-	gtk_gesture_single_set_exclusive(GTK_GESTURE_SINGLE(drag), TRUE);
-
-	double init_drag_values[2] = {};
-	g_signal_connect(drag, "drag-begin",
-		G_CALLBACK(on_view_scroller_drag_begin), init_drag_values);
-	g_signal_connect(drag, "drag-update",
-		G_CALLBACK(on_view_scroller_drag), init_drag_values);
-	g_signal_connect(drag, "drag-end",
-		G_CALLBACK(on_view_scroller_drag_end), init_drag_values);
 
 	// We need to hide it together with the separator.
 	g.view_toolbar = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);

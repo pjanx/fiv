@@ -68,6 +68,7 @@ struct _FivView {
 	bool enhance : 1;                   ///< Try to enhance picture data
 	bool scale_to_fit : 1;              ///< Image no larger than the allocation
 	double scale;                       ///< Scaling factor
+	double drag_start[2];               ///< Adjustment values for drag origin
 
 	cairo_surface_t *enhance_swap;      ///< Quick swap in/out
 	FivIoProfile screen_cms_profile;    ///< Target colour profile for widget
@@ -489,8 +490,7 @@ fiv_view_realize(GtkWidget *widget)
 		// than what we get automatically.
 		.visual = gtk_widget_get_visual(widget),
 
-		// Pointer motion/release enables attaching GtkGestureDrag to
-		// the parent GtkScrolledWindow, having it work with the mouse.
+		// Pointer motion/release enables GtkGestureDrag.
 		.event_mask = gtk_widget_get_events(widget) | GDK_KEY_PRESS_MASK |
 			GDK_SCROLL_MASK | GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK |
 			GDK_POINTER_MOTION_MASK,
@@ -621,13 +621,12 @@ fiv_view_draw(GtkWidget *widget, cairo_t *cr)
 static gboolean
 fiv_view_button_press_event(GtkWidget *widget, GdkEventButton *event)
 {
+	// XXX: Return value?
 	GTK_WIDGET_CLASS(fiv_view_parent_class)->button_press_event(widget, event);
 
 	if (event->button == GDK_BUTTON_PRIMARY &&
 		gtk_widget_get_focus_on_click(widget))
 		gtk_widget_grab_focus(widget);
-
-	// TODO(p): Use for left button scroll drag, which may rather be a gesture.
 	return FALSE;
 }
 
@@ -825,6 +824,63 @@ fiv_view_unmap(GtkWidget *widget)
 {
 	stop_animating(FIV_VIEW(widget));
 	GTK_WIDGET_CLASS(fiv_view_parent_class)->unmap(widget);
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+static void
+on_drag_begin(GtkGestureDrag *drag, G_GNUC_UNUSED gdouble start_x,
+	G_GNUC_UNUSED gdouble start_y, gpointer user_data)
+{
+	GtkGesture *gesture = GTK_GESTURE(drag);
+	GdkEventSequence *sequence = gtk_gesture_get_last_updated_sequence(gesture);
+	GdkModifierType state = 0;
+	gdk_event_get_state(gtk_gesture_get_last_event(gesture, sequence), &state);
+	if (state & gtk_accelerator_get_default_mod_mask()) {
+		gtk_gesture_set_state(gesture, GTK_EVENT_SEQUENCE_DENIED);
+		return;
+	}
+
+	// Since we set this up as a pointer-only gesture, there is only the NULL
+	// sequence, so gtk_gesture_set_sequence_state() is completely unneeded.
+	gtk_gesture_set_state(gesture, GTK_EVENT_SEQUENCE_CLAIMED);
+
+	GdkWindow *window = gtk_widget_get_window(
+		gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(drag)));
+	GdkCursor *cursor =
+		gdk_cursor_new_from_name(gdk_window_get_display(window), "grabbing");
+	gdk_window_set_cursor(window, cursor);
+	g_object_unref(cursor);
+
+	FivView *self = FIV_VIEW(user_data);
+	self->drag_start[0] = self->hadjustment ?
+		gtk_adjustment_get_value(self->hadjustment) : 0;
+	self->drag_start[1] = self->vadjustment ?
+		gtk_adjustment_get_value(self->vadjustment) : 0;
+}
+
+static void
+on_drag_update(G_GNUC_UNUSED GtkGestureDrag *drag, gdouble offset_x,
+	gdouble offset_y, gpointer user_data)
+{
+	FivView *self = FIV_VIEW(user_data);
+	if (self->hadjustment) {
+		gtk_adjustment_set_value(
+			self->hadjustment, self->drag_start[0] - offset_x);
+	}
+	if (self->vadjustment) {
+		gtk_adjustment_set_value(
+			self->vadjustment, self->drag_start[1] - offset_y);
+	}
+}
+
+static void
+on_drag_end(GtkGestureDrag *drag, G_GNUC_UNUSED gdouble start_x,
+	G_GNUC_UNUSED gdouble start_y, G_GNUC_UNUSED gpointer user_data)
+{
+	GdkWindow *window = gtk_widget_get_window(
+		gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(drag)));
+	gdk_window_set_cursor(window, NULL);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -1275,6 +1331,25 @@ fiv_view_init(FivView *self)
 	self->filter = true;
 	self->checkerboard = false;
 	self->scale = 1.0;
+
+	GtkGesture *drag = gtk_gesture_drag_new(GTK_WIDGET(self));
+	g_object_set_data_full(
+		G_OBJECT(self), "fiv-view-drag-gesture", drag, g_object_unref);
+	gtk_event_controller_set_propagation_phase(
+		GTK_EVENT_CONTROLLER(drag), GTK_PHASE_BUBBLE);
+
+	// GtkScrolledWindow's internal GtkGestureDrag is set to only look for
+	// touch events (and its "event_controllers" are perfectly private,
+	// so we can't change this), hopefully this is mutually exclusive with that.
+	// Though note that the GdkWindow doesn't register for touch events now.
+	gtk_gesture_single_set_exclusive(GTK_GESTURE_SINGLE(drag), TRUE);
+
+	g_signal_connect(drag, "drag-begin",
+		G_CALLBACK(on_drag_begin), self);
+	g_signal_connect(drag, "drag-update",
+		G_CALLBACK(on_drag_update), self);
+	g_signal_connect(drag, "drag-end",
+		G_CALLBACK(on_drag_end), self);
 }
 
 // --- Public interface --------------------------------------------------------
