@@ -651,7 +651,7 @@ set_scale(FivView *self, double scale, const GdkEvent *event)
 	// when using a native X11 Window. This is a silly workaround.
 	GdkWindow *window = gtk_widget_get_window(GTK_WIDGET(self));
 	if (window && gdk_window_has_native(window) && scale == 1)
-		scale = 1.000000000000001;
+		scale = 0.999999999999999;
 
 	if (self->scale == scale)
 		goto out;
