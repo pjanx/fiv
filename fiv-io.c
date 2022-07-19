@@ -3244,7 +3244,8 @@ fiv_io_model_init(FivIoModel *self)
 	g_strfreev(types);
 
 	gsize n = g_strv_length(globs);
-	self->supported_patterns = g_malloc0_n(n, sizeof *self->supported_patterns);
+	self->supported_patterns =
+		g_malloc0_n(n + 1, sizeof *self->supported_patterns);
 	while (n--)
 		self->supported_patterns[n] = g_pattern_spec_new(globs[n]);
 	g_strfreev(globs);
