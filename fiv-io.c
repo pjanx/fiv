@@ -2959,8 +2959,6 @@ fiv_io_deserialize(GBytes *bytes, guint64 *user_data)
 
 #include "xdg.h"
 
-#include <fnmatch.h>
-
 static void
 model_entry_finalize(FivIoModelEntry *entry)
 {
