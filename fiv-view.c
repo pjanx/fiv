@@ -630,13 +630,14 @@ fiv_view_draw(GtkWidget *widget, cairo_t *cr)
 static gboolean
 fiv_view_button_press_event(GtkWidget *widget, GdkEventButton *event)
 {
-	// XXX: Return value?
-	GTK_WIDGET_CLASS(fiv_view_parent_class)->button_press_event(widget, event);
+	if (GTK_WIDGET_CLASS(fiv_view_parent_class)
+			->button_press_event(widget, event))
+		return GDK_EVENT_STOP;
 
 	if (event->button == GDK_BUTTON_PRIMARY &&
 		gtk_widget_get_focus_on_click(widget))
 		gtk_widget_grab_focus(widget);
-	return FALSE;
+	return GDK_EVENT_PROPAGATE;
 }
 
 #define SCALE_STEP 1.25
@@ -737,9 +738,9 @@ fiv_view_scroll_event(GtkWidget *widget, GdkEventScroll *event)
 {
 	FivView *self = FIV_VIEW(widget);
 	if (!self->image)
-		return FALSE;
+		return GDK_EVENT_PROPAGATE;
 	if (event->state & gtk_accelerator_get_default_mod_mask())
-		return FALSE;
+		return GDK_EVENT_PROPAGATE;
 
 	switch (event->direction) {
 	case GDK_SCROLL_UP:
@@ -749,7 +750,7 @@ fiv_view_scroll_event(GtkWidget *widget, GdkEventScroll *event)
 	default:
 		// For some reason, native GdkWindows may also get GDK_SCROLL_SMOOTH.
 		// Left/right are good to steal from GtkScrolledWindow for consistency.
-		return TRUE;
+		return GDK_EVENT_STOP;
 	}
 }
 

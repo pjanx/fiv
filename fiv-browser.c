@@ -1070,10 +1070,10 @@ fiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 	// Make pressing multiple mouse buttons at once cancel a click.
 	if (self->tracked_button) {
 		abort_button_tracking(self);
-		return TRUE;
+		return GDK_EVENT_STOP;
 	}
 	if (event->type != GDK_BUTTON_PRESS)
-		return FALSE;
+		return GDK_EVENT_PROPAGATE;
 
 	guint state = event->state & gtk_accelerator_get_default_mod_mask();
 	if (event->button == GDK_BUTTON_PRIMARY && state == 0 &&
@@ -1085,13 +1085,13 @@ fiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 		if (event->button == GDK_BUTTON_SECONDARY)
 			show_context_menu(widget, fiv_io_model_get_location(self->model));
 		else if (event->button != GDK_BUTTON_PRIMARY)
-			return FALSE;
+			return GDK_EVENT_PROPAGATE;
 
 		if (self->selected) {
 			self->selected = NULL;
 			gtk_widget_queue_draw(widget);
 		}
-		return TRUE;
+		return GDK_EVENT_STOP;
 	}
 
 	// In accordance with Nautilus, Thunar, and the mildly confusing
@@ -1108,7 +1108,7 @@ fiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 		GFile *file = g_file_new_for_uri(entry->uri);
 		show_context_menu(widget, file);
 		g_object_unref(file);
-		return TRUE;
+		return GDK_EVENT_STOP;
 	}
 
 	// gtk_drag_source_set() would span the whole widget area, we'd have to
@@ -1119,9 +1119,9 @@ fiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 		self->tracked_button = event->button;
 		self->drag_begin_x = event->x;
 		self->drag_begin_y = event->y;
-		return TRUE;
+		return GDK_EVENT_STOP;
 	}
-	return FALSE;
+	return GDK_EVENT_PROPAGATE;
 }
 
 static gboolean
@@ -1132,13 +1132,13 @@ fiv_browser_button_release_event(GtkWidget *widget, GdkEventButton *event)
 		->button_release_event(widget, event))
 		return GDK_EVENT_STOP;
 	if (event->button != self->tracked_button)
-		return FALSE;
+		return GDK_EVENT_PROPAGATE;
 
 	// Middle clicks should only work on the starting entry.
 	const Entry *entry = entry_at(self, self->drag_begin_x, self->drag_begin_y);
 	abort_button_tracking(self);
 	if (!entry || entry != entry_at(self, event->x, event->y))
-		return FALSE;
+		return GDK_EVENT_PROPAGATE;
 
 	guint state = event->state & gtk_accelerator_get_default_mod_mask();
 	if ((event->button == GDK_BUTTON_PRIMARY && state == 0))
@@ -1146,7 +1146,7 @@ fiv_browser_button_release_event(GtkWidget *widget, GdkEventButton *event)
 	if ((event->button == GDK_BUTTON_PRIMARY && state == GDK_CONTROL_MASK) ||
 		(event->button == GDK_BUTTON_MIDDLE && state == 0))
 		return open_entry(widget, entry, TRUE);
-	return FALSE;
+	return GDK_EVENT_PROPAGATE;
 }
 
 static gboolean
@@ -1172,7 +1172,7 @@ fiv_browser_motion_notify_event(GtkWidget *widget, GdkEventMotion *event)
 		const Entry *entry = entry_at(self, event->x, event->y);
 		GdkWindow *window = gtk_widget_get_window(widget);
 		gdk_window_set_cursor(window, entry ? self->pointer : NULL);
-		return FALSE;
+		return GDK_EVENT_PROPAGATE;
 	}
 
 	// The "correct" behaviour is to set the selection on a left mouse button
@@ -1180,7 +1180,7 @@ fiv_browser_motion_notify_event(GtkWidget *widget, GdkEventMotion *event)
 	const Entry *entry = entry_at(self, self->drag_begin_x, self->drag_begin_y);
 	abort_button_tracking(self);
 	if (!entry)
-		return TRUE;
+		return GDK_EVENT_STOP;
 
 	self->selected = entry;
 	gtk_widget_queue_draw(widget);
@@ -1192,7 +1192,7 @@ fiv_browser_motion_notify_event(GtkWidget *widget, GdkEventMotion *event)
 	gtk_drag_begin_with_coordinates(widget, target_list, actions,
 		self->tracked_button, (GdkEvent *) event, event->x, event->y);
 	gtk_target_list_unref(target_list);
-	return TRUE;
+	return GDK_EVENT_STOP;
 }
 
 static gboolean
@@ -1202,16 +1202,16 @@ fiv_browser_scroll_event(GtkWidget *widget, GdkEventScroll *event)
 	abort_button_tracking(self);
 	if ((event->state & gtk_accelerator_get_default_mod_mask()) !=
 		GDK_CONTROL_MASK)
-		return FALSE;
+		return GDK_EVENT_PROPAGATE;
 
 	static double delta = 0;
 	switch (event->direction) {
 	case GDK_SCROLL_UP:
 		set_item_size(self, self->item_size + 1);
-		return TRUE;
+		return GDK_EVENT_STOP;
 	case GDK_SCROLL_DOWN:
 		set_item_size(self, self->item_size - 1);
-		return TRUE;
+		return GDK_EVENT_STOP;
 	case GDK_SCROLL_SMOOTH:
 		// On GDK/Wayland, the mouse wheel will typically create 1.5 deltas,
 		// after dividing a 15 degree click angle from libinput by 10.
@@ -1221,13 +1221,13 @@ fiv_browser_scroll_event(GtkWidget *widget, GdkEventScroll *event)
 		else if (delta >= +1)
 			set_item_size(self, self->item_size - 1);
 		else if (!event->is_stop)
-			return TRUE;
+			return GDK_EVENT_STOP;
 
 		delta = 0;
-		return TRUE;
+		return GDK_EVENT_STOP;
 	default:
 		// Left/right are good to steal from GtkScrolledWindow for consistency.
-		return TRUE;
+		return GDK_EVENT_STOP;
 	}
 }
 
@@ -1399,25 +1399,25 @@ fiv_browser_key_press_event(GtkWidget *widget, GdkEventKey *event)
 		case GDK_KEY_Return:
 			if (self->selected)
 				return open_entry(widget, self->selected, FALSE);
-			return TRUE;
+			return GDK_EVENT_STOP;
 		case GDK_KEY_Left:
 			move_selection(self, GTK_DIR_LEFT);
-			return TRUE;
+			return GDK_EVENT_STOP;
 		case GDK_KEY_Right:
 			move_selection(self, GTK_DIR_RIGHT);
-			return TRUE;
+			return GDK_EVENT_STOP;
 		case GDK_KEY_Up:
 			move_selection(self, GTK_DIR_UP);
-			return TRUE;
+			return GDK_EVENT_STOP;
 		case GDK_KEY_Down:
 			move_selection(self, GTK_DIR_DOWN);
-			return TRUE;
+			return GDK_EVENT_STOP;
 		case GDK_KEY_Home:
 			move_selection_home(self);
-			return TRUE;
+			return GDK_EVENT_STOP;
 		case GDK_KEY_End:
 			move_selection_end(self);
-			return TRUE;
+			return GDK_EVENT_STOP;
 		}
 		break;
 	case GDK_CONTROL_MASK:
@@ -1425,10 +1425,10 @@ fiv_browser_key_press_event(GtkWidget *widget, GdkEventKey *event)
 		switch (event->keyval) {
 		case GDK_KEY_plus:
 			set_item_size(self, self->item_size + 1);
-			return TRUE;
+			return GDK_EVENT_STOP;
 		case GDK_KEY_minus:
 			set_item_size(self, self->item_size - 1);
-			return TRUE;
+			return GDK_EVENT_STOP;
 		}
 	}
 
