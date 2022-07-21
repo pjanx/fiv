@@ -1063,8 +1063,9 @@ static gboolean
 fiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 {
 	FivBrowser *self = FIV_BROWSER(widget);
-	GTK_WIDGET_CLASS(fiv_browser_parent_class)
-		->button_press_event(widget, event);
+	if (GTK_WIDGET_CLASS(fiv_browser_parent_class)
+		->button_press_event(widget, event))
+		return GDK_EVENT_STOP;
 
 	// Make pressing multiple mouse buttons at once cancel a click.
 	if (self->tracked_button) {
@@ -1127,8 +1128,9 @@ static gboolean
 fiv_browser_button_release_event(GtkWidget *widget, GdkEventButton *event)
 {
 	FivBrowser *self = FIV_BROWSER(widget);
-	GTK_WIDGET_CLASS(fiv_browser_parent_class)
-		->button_release_event(widget, event);
+	if (GTK_WIDGET_CLASS(fiv_browser_parent_class)
+		->button_release_event(widget, event))
+		return GDK_EVENT_STOP;
 	if (event->button != self->tracked_button)
 		return FALSE;
 
@@ -1151,13 +1153,22 @@ static gboolean
 fiv_browser_motion_notify_event(GtkWidget *widget, GdkEventMotion *event)
 {
 	FivBrowser *self = FIV_BROWSER(widget);
-	GTK_WIDGET_CLASS(fiv_browser_parent_class)
-		->motion_notify_event(widget, event);
+	if (GTK_WIDGET_CLASS(fiv_browser_parent_class)
+		->motion_notify_event(widget, event))
+		return GDK_EVENT_STOP;
 
+	// Touch screen dragging is how you scroll the parent GtkScrolledWindow,
+	// don't steal that gesture.
+	//
+	// While we could allow dragging items that have been selected,
+	// it's currently impossible to select on touch screens without opening,
+	// and this behaviour/distinction seems unintuitive/surprising.
 	guint state = event->state & gtk_accelerator_get_default_mod_mask();
 	if (state != 0 || self->tracked_button != GDK_BUTTON_PRIMARY ||
 		!gtk_drag_check_threshold(widget, self->drag_begin_x,
-			self->drag_begin_y, event->x, event->y)) {
+			self->drag_begin_y, event->x, event->y) ||
+		gdk_device_get_source(gdk_event_get_source_device(
+			(GdkEvent *) event)) == GDK_SOURCE_TOUCHSCREEN) {
 		const Entry *entry = entry_at(self, event->x, event->y);
 		GdkWindow *window = gtk_widget_get_window(widget);
 		gdk_window_set_cursor(window, entry ? self->pointer : NULL);
@@ -1494,6 +1505,8 @@ on_long_press(GtkGestureLongPress *lp, gdouble x, gdouble y, gpointer user_data)
 		return;
 #endif  // GDK_WINDOWING_X11
 
+	// It might also be possible to have long-press just select items,
+	// and show some kind of toolbar with available actions.
 	GFile *file = g_file_new_for_uri(entry->uri);
 	gtk_menu_popup_at_rect(fiv_context_menu_new(widget, file), window,
 		&(GdkRectangle) {.x = x, .y = y}, GDK_GRAVITY_NORTH_WEST,
