@@ -873,9 +873,11 @@ spawn_uri(const char *uri)
 {
 	char *argv[] = {PROJECT_NAME, (char *) uri, NULL};
 	GError *error = NULL;
-	g_spawn_async(
-		NULL, argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, &error);
-	g_clear_error(&error);
+	if (!g_spawn_async(
+		NULL, argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, &error)) {
+		g_warning("%s", error->message);
+		g_error_free(error);
+	}
 }
 
 static void
