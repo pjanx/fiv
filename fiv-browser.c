@@ -156,7 +156,7 @@ relayout(FivBrowser *self, int width)
 
 	GtkBorder padding = {};
 	gtk_style_context_get_padding(style, GTK_STATE_FLAG_NORMAL, &padding);
-	int available_width = width - padding.left - padding.right;
+	int available_width = width - padding.left - padding.right, max_width = 0;
 
 	g_array_set_size(self->layouted_rows, 0);
 	// Whatever self->drag_begin_* used to point at might no longer be there,
@@ -183,7 +183,10 @@ relayout(FivBrowser *self, int width)
 
 		g_array_append_val(items,
 			((Item) {.entry = entry, .x_offset = x + self->item_border_x}));
+
 		x += width;
+		if (max_width < width)
+			max_width = width;
 	}
 	if (items->len) {
 		append_row(self, &y,
@@ -193,11 +196,9 @@ relayout(FivBrowser *self, int width)
 	g_array_free(items, TRUE);
 	int total_height = y + padding.bottom;
 	if (self->hadjustment) {
-		gint minimum_width = 0;
-		gtk_widget_get_preferred_width(widget, &minimum_width, NULL);
-
 		gtk_adjustment_set_lower(self->hadjustment, 0);
-		gtk_adjustment_set_upper(self->hadjustment, MAX(width, minimum_width));
+		gtk_adjustment_set_upper(self->hadjustment,
+			width + MAX(0, max_width - available_width));
 		gtk_adjustment_set_step_increment(self->hadjustment, width * 0.1);
 		gtk_adjustment_set_page_increment(self->hadjustment, width * 0.9);
 		gtk_adjustment_set_page_size(self->hadjustment, width);
@@ -916,9 +917,12 @@ fiv_browser_get_preferred_width(GtkWidget *widget, gint *minimum, gint *natural)
 
 	GtkBorder padding = {};
 	gtk_style_context_get_padding(style, GTK_STATE_FLAG_NORMAL, &padding);
-	*minimum = *natural =
-		FIV_THUMBNAIL_WIDE_COEFFICIENT * self->item_height + padding.left +
-		2 * self->item_border_x + padding.right;
+
+	// This should ideally reflect thumbnails, but we're in a GtkScrolledWindow,
+	// making this rather inconsequential.
+	int fluff = padding.left + 2 * self->item_border_x + padding.right;
+	*minimum = fluff + self->item_height /* Icons are rectangular. */;
+	*natural = fluff + FIV_THUMBNAIL_WIDE_COEFFICIENT * self->item_height;
 }
 
 static void
@@ -989,14 +993,16 @@ fiv_browser_size_allocate(GtkWidget *widget, GtkAllocation *allocation)
 	GTK_WIDGET_CLASS(fiv_browser_parent_class)
 		->size_allocate(widget, allocation);
 
-	int height = relayout(FIV_BROWSER(widget), allocation->width);
+	relayout(FIV_BROWSER(widget), allocation->width);
 
 	// Avoid fresh blank space.
+	if (self->hadjustment) {
+		gtk_adjustment_set_value(
+			self->hadjustment, gtk_adjustment_get_value(self->hadjustment));
+	}
 	if (self->vadjustment) {
-		double y1 = gtk_adjustment_get_value(self->vadjustment);
-		double ph = gtk_adjustment_get_page_size(self->vadjustment);
-		if (y1 + ph > height)
-			gtk_adjustment_set_value(self->vadjustment, height - ph);
+		gtk_adjustment_set_value(
+			self->vadjustment, gtk_adjustment_get_value(self->vadjustment));
 	}
 }
 
