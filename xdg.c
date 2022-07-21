@@ -45,7 +45,7 @@ char *
 get_xdg_home_dir(const char *var, const char *default_)
 {
 	const char *env = getenv(var);
-	if (env && *env == '/')
+	if (env && g_path_is_absolute(env))
 		return g_strdup(env);
 
 	// The specification doesn't handle a missing HOME variable explicitly.
@@ -65,9 +65,9 @@ get_xdg_data_dirs(void)
 	if (!(xdg_data_dirs = getenv("XDG_DATA_DIRS")) || !*xdg_data_dirs)
 		xdg_data_dirs = "/usr/local/share/:/usr/share/";
 
-	gchar **candidates = g_strsplit(xdg_data_dirs, ":", 0);
+	gchar **candidates = g_strsplit(xdg_data_dirs, G_SEARCHPATH_SEPARATOR_S, 0);
 	for (gchar **p = candidates; *p; p++) {
-		if (**p == '/')
+		if (g_path_is_absolute(*p))
 			g_ptr_array_add(output, *p);
 		else
 			g_free(*p);
