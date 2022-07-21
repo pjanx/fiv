@@ -1394,10 +1394,10 @@ fiv_view_init(FivView *self)
 	self->scale = 1.0;
 
 	GtkGesture *drag = gtk_gesture_drag_new(GTK_WIDGET(self));
-	g_object_set_data_full(
-		G_OBJECT(self), "fiv-view-drag-gesture", drag, g_object_unref);
 	gtk_event_controller_set_propagation_phase(
 		GTK_EVENT_CONTROLLER(drag), GTK_PHASE_BUBBLE);
+	g_object_set_data_full(
+		G_OBJECT(self), "fiv-view-drag-gesture", drag, g_object_unref);
 
 	// GtkScrolledWindow's internal GtkGestureDrag is set to only look for
 	// touch events (and its "event_controllers" are perfectly private,

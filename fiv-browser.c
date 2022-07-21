@@ -1474,6 +1474,37 @@ fiv_browser_popup_menu(GtkWidget *widget)
 }
 
 static void
+on_long_press(GtkGestureLongPress *lp, gdouble x, gdouble y, gpointer user_data)
+{
+	FivBrowser *self = FIV_BROWSER(user_data);
+	const Entry *entry = entry_at(self, x, y);
+	abort_button_tracking(self);
+	if (!entry)
+		return;
+
+	GtkGesture *gesture = GTK_GESTURE(lp);
+	GdkEventSequence *sequence = gtk_gesture_get_last_updated_sequence(gesture);
+	const GdkEvent *event = gtk_gesture_get_last_event(gesture, sequence);
+
+	GtkWidget *widget = GTK_WIDGET(self);
+	GdkWindow *window = gtk_widget_get_window(widget);
+#ifdef GDK_WINDOWING_X11
+	// FIXME: Once the finger is lifted, this menu is immediately closed.
+	if (GDK_IS_X11_WINDOW(window))
+		return;
+#endif  // GDK_WINDOWING_X11
+
+	GFile *file = g_file_new_for_uri(entry->uri);
+	gtk_menu_popup_at_rect(fiv_context_menu_new(widget, file), window,
+		&(GdkRectangle) {.x = x, .y = y}, GDK_GRAVITY_NORTH_WEST,
+		GDK_GRAVITY_NORTH_WEST, event);
+	g_object_unref(file);
+
+	self->selected = entry;
+	gtk_widget_queue_draw(widget);
+}
+
+static void
 fiv_browser_style_updated(GtkWidget *widget)
 {
 	GTK_WIDGET_CLASS(fiv_browser_parent_class)->style_updated(widget);
@@ -1621,6 +1652,15 @@ fiv_browser_init(FivBrowser *self)
 
 	g_signal_connect_swapped(gtk_settings_get_default(),
 		"notify::gtk-icon-theme-name", G_CALLBACK(reload_thumbnails), self);
+
+	GtkGesture *lp = gtk_gesture_long_press_new(GTK_WIDGET(self));
+	gtk_gesture_single_set_touch_only(GTK_GESTURE_SINGLE(lp), TRUE);
+	gtk_event_controller_set_propagation_phase(
+		GTK_EVENT_CONTROLLER(lp), GTK_PHASE_BUBBLE);
+	g_object_set_data_full(
+		G_OBJECT(self), "fiv-browser-long-press-gesture", lp, g_object_unref);
+
+	g_signal_connect(lp, "pressed", G_CALLBACK(on_long_press), self);
 }
 
 // --- Public interface --------------------------------------------------------
