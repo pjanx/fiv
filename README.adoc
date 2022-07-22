@@ -1,7 +1,8 @@
 fiv
 ===
 
-'fiv' is a slightly unconventional, general-purpose image browser and viewer.
+'fiv' is a slightly unconventional, general-purpose image browser and viewer
+for Linux (that said, macOS and Windows ports are possible).
 
 image::docs/fiv.webp["Screenshot of both the browser and the viewer"]
 
@@ -23,7 +24,6 @@ Explicit non-goals
    nothing beyond the most basic of adjustments is desired.
  - Following the latest GNOME HIG to the letter--header bars are deliberately
    avoided, for their general user hostility.
- - Portability to non-UNIXy systems, although patches are welcome.
  - Memory efficiency is secondary to both performance and development effort.
 
 Aspirations
