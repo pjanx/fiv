@@ -25,6 +25,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#ifdef G_OS_WIN32
+#include <io.h>
+#include <fcntl.h>
+#endif  // G_OS_WIN32
+
 #include "config.h"
 
 #include "fiv-browser.h"
@@ -1806,6 +1811,10 @@ output_thumbnail(const char *path_arg, gboolean extract, const char *size_arg)
 		if (size >= FIV_THUMBNAIL_SIZE_COUNT)
 			exit_fatal("unknown thumbnail size: %s", size_arg);
 	}
+
+#ifdef G_OS_WIN32
+	_setmode(fileno(stdout), _O_BINARY);
+#endif  // G_OS_WIN32
 
 	GError *error = NULL;
 	GFile *file = g_file_new_for_commandline_arg(path_arg);
