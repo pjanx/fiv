@@ -773,7 +773,7 @@ on_notify_view_messages(FivView *view, G_GNUC_UNUSED gpointer user_data)
 }
 
 static void
-open(const char *uri)
+open_image(const char *uri)
 {
 	GFile *file = g_file_new_for_uri(uri);
 	if (fiv_view_set_uri(FIV_VIEW(g.view), uri))
@@ -839,7 +839,7 @@ on_open(void)
 		gchar *uri;
 	case GTK_RESPONSE_ACCEPT:
 		uri = gtk_file_chooser_get_uri(GTK_FILE_CHOOSER(dialog));
-		open(uri);
+		open_image(uri);
 		g_free(uri);
 		break;
 	case GTK_RESPONSE_NONE:
@@ -855,7 +855,7 @@ on_previous(void)
 {
 	if (g.files_index >= 0) {
 		int previous = (g.files->len + g.files_index - 1) % g.files->len;
-		open(g_ptr_array_index(g.files, previous));
+		open_image(g_ptr_array_index(g.files, previous));
 	}
 }
 
@@ -864,7 +864,7 @@ on_next(void)
 {
 	if (g.files_index >= 0) {
 		int next = (g.files_index + 1) % g.files->len;
-		open(g_ptr_array_index(g.files, next));
+		open_image(g_ptr_array_index(g.files, next));
 	}
 }
 
@@ -888,7 +888,7 @@ on_item_activated(G_GNUC_UNUSED FivBrowser *browser, GFile *location,
 	if (flags == GTK_PLACES_OPEN_NEW_WINDOW)
 		spawn_uri(uri);
 	else
-		open(uri);
+		open_image(uri);
 	g_free(uri);
 }
 
@@ -935,7 +935,7 @@ open_any_file(GFile *file, gboolean force_browser)
 
 		fiv_browser_select(FIV_BROWSER(g.browser), uri);
 	} else {
-		open(uri);
+		open_image(uri);
 	}
 	g_free(uri);
 }
