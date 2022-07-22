@@ -1299,6 +1299,7 @@ on_button_press_view(G_GNUC_UNUSED GtkWidget *widget, GdkEventButton *event)
 	if ((event->state & gtk_accelerator_get_default_mod_mask()))
 		return FALSE;
 	switch (event->button) {
+	case 4:  // back (GdkWin32, GdkQuartz)
 	case 8:  // back
 		switch_to_browser();
 		return TRUE;
@@ -1320,10 +1321,12 @@ on_button_press_browser_paned(
 	if ((event->state & gtk_accelerator_get_default_mod_mask()))
 		return FALSE;
 	switch (event->button) {
+	case 4:  // back (GdkWin32, GdkQuartz)
 	case 8:  // back
 		if (g.directory_back)
 			load_directory(g.directory_back->data);
 		return TRUE;
+	case 5:  // forward (GdkWin32, GdkQuartz)
 	case 9:  // forward
 		if (g.directory_forward)
 			load_directory(g.directory_forward->data);
