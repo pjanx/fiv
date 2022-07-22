@@ -31,6 +31,7 @@ struct _FivSidebar {
 
 G_DEFINE_TYPE(FivSidebar, fiv_sidebar, GTK_TYPE_SCROLLED_WINDOW)
 
+G_DEFINE_QUARK(fiv-sidebar-drag-gesture-quark, fiv_sidebar_drag_gesture)
 G_DEFINE_QUARK(fiv-sidebar-location-quark, fiv_sidebar_location)
 G_DEFINE_QUARK(fiv-sidebar-self-quark, fiv_sidebar_self)
 
@@ -121,6 +122,48 @@ on_breadcrumb_button_release(
 }
 
 static void
+on_breadcrumb_gesture_drag_begin(GtkGestureDrag *drag,
+	G_GNUC_UNUSED gdouble start_x, G_GNUC_UNUSED gdouble start_y,
+	G_GNUC_UNUSED gpointer user_data)
+{
+	// Touch screen dragging is how you scroll the parent GtkScrolledWindow,
+	// don't steal that gesture. Moreover, touch screen dragging fails
+	// in the middle, without ever invoking drag-end.
+	GtkGesture *gesture = GTK_GESTURE(drag);
+	if (gdk_device_get_source(
+			gdk_event_get_source_device(gtk_gesture_get_last_event(
+				gesture, gtk_gesture_get_last_updated_sequence(gesture)))) ==
+		GDK_SOURCE_TOUCHSCREEN)
+		gtk_gesture_set_state(gesture, GTK_EVENT_SEQUENCE_DENIED);
+}
+
+static void
+on_breadcrumb_gesture_drag_update(GtkGestureDrag *drag,
+	gdouble offset_x, gdouble offset_y, gpointer user_data)
+{
+	GtkWidget *widget = GTK_WIDGET(user_data);
+	gdouble start_x = 0, start_y = 0;
+	if (!gtk_gesture_drag_get_start_point(drag, &start_x, &start_y) ||
+		!gtk_drag_check_threshold(widget, start_x, start_y,
+			start_x + offset_x, start_y + offset_y))
+		return;
+
+	GtkGesture *gesture = GTK_GESTURE(drag);
+	gtk_gesture_set_state(gesture, GTK_EVENT_SEQUENCE_CLAIMED);
+
+	GdkEvent *event = gdk_event_copy(gtk_gesture_get_last_event(
+		gesture, gtk_gesture_get_last_updated_sequence(gesture)));
+	GtkTargetList *target_list = gtk_target_list_new(NULL, 0);
+	gtk_target_list_add_uri_targets(target_list, 0);
+
+	gtk_drag_begin_with_coordinates(
+		widget, target_list, GDK_ACTION_LINK, 1, event, start_x, start_y);
+
+	gtk_target_list_unref(target_list);
+	gdk_event_free(event);
+}
+
+static void
 on_breadcrumb_drag_data_get(G_GNUC_UNUSED GtkWidget *widget,
 	G_GNUC_UNUSED GdkDragContext *context, GtkSelectionData *selection_data,
 	G_GNUC_UNUSED guint info, G_GNUC_UNUSED guint time_, gpointer user_data)
@@ -138,6 +181,7 @@ static void
 on_breadcrumb_drag_begin(G_GNUC_UNUSED GtkWidget *widget,
 	GdkDragContext *context, gpointer user_data)
 {
+	gtk_drag_set_icon_name(context, "inode-directory-symbolic", 0, 0);
 	gtk_places_sidebar_set_drop_targets_visible(user_data, TRUE, context);
 }
 
@@ -214,9 +258,17 @@ create_row(FivSidebar *self, GFile *file, const char *icon_name)
 		GTK_REVEALER(revealer), GTK_REVEALER_TRANSITION_TYPE_NONE);
 	gtk_container_add(GTK_CONTAINER(revealer), rowbox);
 
-	gtk_drag_source_set(revealer, GDK_BUTTON1_MASK, NULL, 0, GDK_ACTION_LINK);
-	gtk_drag_source_add_uri_targets(revealer);
-	gtk_drag_source_set_icon_name(revealer, "inode-directory-symbolic");
+	GtkGesture *drag = gtk_gesture_drag_new(revealer);
+	gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(drag), GDK_BUTTON_PRIMARY);
+	gtk_event_controller_set_propagation_phase(
+		GTK_EVENT_CONTROLLER(drag), GTK_PHASE_BUBBLE);
+	g_object_set_qdata_full(G_OBJECT(revealer),
+		fiv_sidebar_drag_gesture_quark(),
+		drag, (GDestroyNotify) g_object_unref);
+	g_signal_connect(drag, "drag-begin",
+		G_CALLBACK(on_breadcrumb_gesture_drag_begin), revealer);
+	g_signal_connect(drag, "drag-update",
+		G_CALLBACK(on_breadcrumb_gesture_drag_update), revealer);
 
 	GtkWidget *row = gtk_list_box_row_new();
 	g_object_set_qdata_full(G_OBJECT(row), fiv_sidebar_location_quark(),
@@ -228,8 +280,7 @@ create_row(FivSidebar *self, GFile *file, const char *icon_name)
 	g_signal_connect(row, "popup-menu",
 		G_CALLBACK(on_breadcrumb_popup_menu), NULL);
 
-	// TODO(p): Why do we hook to the revealer, and not the row itself?
-	// Is it due to some kind of margin or padding?
+	// Drag signals need to be hooked to a widget with its own GdkWindow.
 	g_signal_connect(revealer, "button-release-event",
 		G_CALLBACK(on_breadcrumb_button_release), row);
 	g_signal_connect(revealer, "drag-data-get",
