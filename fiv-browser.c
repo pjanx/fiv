@@ -24,12 +24,14 @@
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
 #endif  // GDK_WINDOWING_X11
+#ifdef GDK_WINDOWING_QUARTZ
+#include <gdk/gdkquartz.h>
+#endif  // GDK_WINDOWING_QUARTZ
 
 #include "fiv-browser.h"
 #include "fiv-context-menu.h"
 #include "fiv-io.h"
 #include "fiv-thumbnail.h"
-#include "fiv-view.h"
 
 // --- Widget ------------------------------------------------------------------
 //                     _________________________________
@@ -85,7 +87,10 @@ struct _FivBrowser {
 	GList *thumbnailers_queue;          ///< Queued up Entry pointers
 
 	GdkCursor *pointer;                 ///< Cached pointer cursor
-	cairo_surface_t *glow;              ///< CAIRO_FORMAT_A8 mask
+	cairo_pattern_t *glow;              ///< CAIRO_FORMAT_A8 mask for corners
+	cairo_pattern_t *glow_padded;       ///< CAIRO_FORMAT_A8 mask
+	int glow_w;                         ///< Glow corner width
+	int glow_h;                         ///< Glow corner height
 	int item_border_x;                  ///< L/R .item margin + border
 	int item_border_y;                  ///< T/B .item margin + border
 };
@@ -219,37 +224,30 @@ relayout(FivBrowser *self, int width)
 static void
 draw_outer_border(FivBrowser *self, cairo_t *cr, int width, int height)
 {
-	int offset_x = cairo_image_surface_get_width(self->glow);
-	int offset_y = cairo_image_surface_get_height(self->glow);
-	cairo_pattern_t *mask = cairo_pattern_create_for_surface(self->glow);
 	cairo_matrix_t matrix;
 
-	cairo_pattern_set_extend(mask, CAIRO_EXTEND_PAD);
 	cairo_save(cr);
-	cairo_translate(cr, -offset_x, -offset_y);
-	cairo_rectangle(cr, 0, 0, offset_x + width, offset_y + height);
+	cairo_translate(cr, -self->glow_w, -self->glow_h);
+	cairo_rectangle(cr, 0, 0, self->glow_w + width, self->glow_h + height);
 	cairo_clip(cr);
-	cairo_mask(cr, mask);
+	cairo_mask(cr, self->glow_padded);
 	cairo_restore(cr);
 	cairo_save(cr);
-	cairo_translate(cr, width + offset_x, height + offset_y);
-	cairo_rectangle(cr, 0, 0, -offset_x - width, -offset_y - height);
+	cairo_translate(cr, width + self->glow_w, height + self->glow_h);
+	cairo_rectangle(cr, 0, 0, -self->glow_w - width, -self->glow_h - height);
 	cairo_clip(cr);
 	cairo_scale(cr, -1, -1);
-	cairo_mask(cr, mask);
+	cairo_mask(cr, self->glow_padded);
 	cairo_restore(cr);
 
-	cairo_pattern_set_extend(mask, CAIRO_EXTEND_NONE);
 	cairo_matrix_init_scale(&matrix, -1, 1);
-	cairo_matrix_translate(&matrix, -width - offset_x, offset_y);
-	cairo_pattern_set_matrix(mask, &matrix);
-	cairo_mask(cr, mask);
+	cairo_matrix_translate(&matrix, -width - self->glow_w, self->glow_h);
+	cairo_pattern_set_matrix(self->glow, &matrix);
+	cairo_mask(cr, self->glow);
 	cairo_matrix_init_scale(&matrix, 1, -1);
-	cairo_matrix_translate(&matrix, offset_x, -height - offset_y);
-	cairo_pattern_set_matrix(mask, &matrix);
-	cairo_mask(cr, mask);
-
-	cairo_pattern_destroy(mask);
+	cairo_matrix_translate(&matrix, self->glow_w, -height - self->glow_h);
+	cairo_pattern_set_matrix(self->glow, &matrix);
+	cairo_mask(cr, self->glow);
 }
 
 static GdkRectangle
@@ -811,7 +809,8 @@ fiv_browser_finalize(GObject *gobject)
 
 	g_hash_table_destroy(self->thumbnail_cache);
 
-	cairo_surface_destroy(self->glow);
+	cairo_pattern_destroy(self->glow_padded);
+	cairo_pattern_destroy(self->glow);
 	g_clear_object(&self->pointer);
 
 	replace_adjustment(self, &self->hadjustment, NULL);
@@ -1544,14 +1543,14 @@ fiv_browser_style_updated(GtkWidget *widget)
 	gtk_style_context_get_border(style, GTK_STATE_FLAG_NORMAL, &border);
 	gtk_style_context_restore(style);
 
-	const int glow_w = (margin.left + margin.right) / 2;
-	const int glow_h = (margin.top + margin.bottom) / 2;
+	self->glow_w = (margin.left + margin.right) / 2;
+	self->glow_h = (margin.top + margin.bottom) / 2;
 
 	// Don't set different opposing sides, it will misrender, your problem.
 	// When the style of the class changes, this virtual method isn't invoked,
 	// so the update check is mildly pointless.
-	int item_border_x = glow_w + (border.left + border.right) / 2;
-	int item_border_y = glow_h + (border.top + border.bottom) / 2;
+	int item_border_x = self->glow_w + (border.left + border.right) / 2;
+	int item_border_y = self->glow_h + (border.top + border.bottom) / 2;
 	if (item_border_x != self->item_border_x ||
 		item_border_y != self->item_border_y) {
 		self->item_border_x = item_border_x;
@@ -1559,22 +1558,21 @@ fiv_browser_style_updated(GtkWidget *widget)
 		gtk_widget_queue_resize(widget);
 	}
 
+	if (self->glow_padded)
+		cairo_pattern_destroy(self->glow_padded);
 	if (self->glow)
-		cairo_surface_destroy(self->glow);
-	if (glow_w <= 0 || glow_h <= 0) {
-		self->glow = cairo_image_surface_create(CAIRO_FORMAT_A1, 0, 0);
-		return;
-	}
+		cairo_pattern_destroy(self->glow);
 
-	self->glow = cairo_image_surface_create(CAIRO_FORMAT_A8, glow_w, glow_h);
-	unsigned char *data = cairo_image_surface_get_data(self->glow);
-	int stride = cairo_image_surface_get_stride(self->glow);
+	cairo_surface_t *corner = cairo_image_surface_create(
+		CAIRO_FORMAT_A8, MAX(0, self->glow_w), MAX(0, self->glow_h));
+	unsigned char *data = cairo_image_surface_get_data(corner);
+	int stride = cairo_image_surface_get_stride(corner);
 
 	// Smooth out the curve, so that the edge of the glow isn't too jarring.
 	const double fade_factor = 1.5;
 
-	const int x_max = glow_w - 1;
-	const int y_max = glow_h - 1;
+	const int x_max = self->glow_w - 1;
+	const int y_max = self->glow_h - 1;
 	const double x_scale = 1. / MAX(1, x_max);
 	const double y_scale = 1. / MAX(1, y_max);
 	for (int y = 0; y <= y_max; y++)
@@ -1584,7 +1582,32 @@ fiv_browser_style_updated(GtkWidget *widget)
 			double v = MIN(sqrt(xn * xn + yn * yn), 1);
 			data[y * stride + x] = round(pow(1 - v, fade_factor) * 255);
 		}
-	cairo_surface_mark_dirty(self->glow);
+
+	cairo_surface_mark_dirty(corner);
+	self->glow = cairo_pattern_create_for_surface(corner);
+	self->glow_padded = cairo_pattern_create_for_surface(corner);
+	cairo_pattern_set_extend(self->glow_padded, CAIRO_EXTEND_PAD);
+
+#ifdef GDK_WINDOWING_QUARTZ
+	// Cairo's Quartz backend doesn't support CAIRO_EXTEND_PAD, work around it.
+	if (GDK_IS_QUARTZ_DISPLAY(gtk_widget_get_display(widget))) {
+		int max_size = fiv_thumbnail_sizes[FIV_THUMBNAIL_SIZE_MAX].size;
+		cairo_surface_t *padded = cairo_image_surface_create(CAIRO_FORMAT_A8,
+			cairo_image_surface_get_width(corner) +
+				max_size * FIV_THUMBNAIL_WIDE_COEFFICIENT,
+			cairo_image_surface_get_height(corner) + max_size);
+		cairo_t *cr = cairo_create(padded);
+		cairo_set_source(cr, self->glow_padded);
+		cairo_paint(cr);
+		cairo_destroy(cr);
+
+		cairo_pattern_destroy(self->glow_padded);
+		self->glow_padded = cairo_pattern_create_for_surface(padded);
+		cairo_surface_destroy(padded);
+	}
+#endif  // GDK_WINDOWING_QUARTZ
+
+	cairo_surface_destroy(corner);
 }
 
 static void
@@ -1667,7 +1690,8 @@ fiv_browser_init(FivBrowser *self)
 		self->thumbnailers[i].self = self;
 
 	set_item_size(self, FIV_THUMBNAIL_SIZE_NORMAL);
-	self->glow = cairo_image_surface_create(CAIRO_FORMAT_A1, 0, 0);
+	self->glow_padded = cairo_pattern_create_rgba(0, 0, 0, 0);
+	self->glow = cairo_pattern_create_rgba(0, 0, 0, 0);
 
 	g_signal_connect_swapped(gtk_settings_get_default(),
 		"notify::gtk-icon-theme-name", G_CALLBACK(reload_thumbnails), self);
