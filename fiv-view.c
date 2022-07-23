@@ -30,6 +30,11 @@
 #ifdef GDK_WINDOWING_QUARTZ
 #include <gdk/gdkquartz.h>
 #endif  // GDK_WINDOWING_QUARTZ
+#ifdef GDK_WINDOWING_WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <gdk/gdkwin32.h>
+#endif  // GDK_WINDOWING_WIN32
 
 GType
 fiv_view_command_get_type(void)
@@ -447,6 +452,28 @@ static void
 reload_screen_cms_profile(FivView *self, GdkWindow *window)
 {
 	g_clear_pointer(&self->screen_cms_profile, fiv_io_profile_free);
+
+#ifdef GDK_WINDOWING_WIN32
+	if (GDK_IS_WIN32_WINDOW(window)) {
+		HWND hwnd = GDK_WINDOW_HWND(window);
+		HDC hdc = GetDC(hwnd);
+		if (hdc) {
+			DWORD len = 0;
+			(void) GetICMProfile(hdc, &len, NULL);
+			gchar *path = g_new(gchar, len);
+			if (GetICMProfile(hdc, &len, path)) {
+				gchar *data = NULL;
+				gsize length = 0;
+				if (g_file_get_contents(path, &data, &length, NULL))
+					self->screen_cms_profile = fiv_io_profile_new(data, length);
+				g_free(data);
+			}
+			g_free(path);
+			ReleaseDC(hwnd, hdc);
+		}
+		goto out;
+	}
+#endif  // GDK_WINDOWING_WIN32
 
 	GdkDisplay *display = gdk_window_get_display(window);
 	GdkMonitor *monitor = gdk_display_get_monitor_at_window(display, window);
