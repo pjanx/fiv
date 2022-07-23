@@ -45,12 +45,15 @@ open_context_launch(GtkWidget *widget, OpenContext *self)
 	gdk_app_launch_context_set_screen(context, gtk_widget_get_screen(widget));
 	gdk_app_launch_context_set_timestamp(context, gtk_get_current_event_time());
 
-	// TODO(p): Display errors.
 	GList *files = g_list_append(NULL, self->file);
+	GError *error = NULL;
 	if (g_app_info_launch(
-			self->app_info, files, G_APP_LAUNCH_CONTEXT(context), NULL)) {
-		g_app_info_set_as_last_used_for_type(
+			self->app_info, files, G_APP_LAUNCH_CONTEXT(context), &error)) {
+		(void) g_app_info_set_as_last_used_for_type(
 			self->app_info, self->content_type, NULL);
+	} else {
+		g_warning("%s", error->message);
+		g_error_free(error);
 	}
 	g_list_free(files);
 	g_object_unref(context);
