@@ -18,6 +18,9 @@
 #include <glib.h>
 #include <glib/gstdio.h>
 #include <gtk/gtk.h>
+#ifdef GDK_WINDOWING_QUARTZ
+#include <gdk/gdkquartz.h>
+#endif  // GDK_WINDOWING_QUARTZ
 
 #include <errno.h>
 #include <math.h>
@@ -2008,6 +2011,13 @@ main(int argc, char *argv[])
 	// Ask for at least 800x600, to cover ridiculously heterogenous setups.
 	unit = MAX(200, unit);
 	gtk_window_set_default_size(GTK_WINDOW(g.window), 4 * unit, 3 * unit);
+
+#ifdef GDK_WINDOWING_QUARTZ
+	// Otherwise the window simply opens at (0, 0),
+	// while other macOS applications are more likely to start centered.
+	if (GDK_IS_QUARTZ_DISPLAY(display))
+		gtk_window_set_position(GTK_WINDOW(g.window), GTK_WIN_POS_CENTER);
+#endif  // GDK_WINDOWING_QUARTZ
 
 	// XXX: The widget wants to read the display's profile. The realize is ugly.
 	gtk_widget_realize(g.view);
