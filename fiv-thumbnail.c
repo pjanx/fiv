@@ -34,10 +34,6 @@
 #include <libraw.h>
 #endif  // HAVE_LIBRAW
 
-#ifndef __linux__
-#define st_mtim st_mtimespec
-#endif  // ! __linux__
-
 // TODO(p): Consider merging back with fiv-io.
 #define FIV_THUMBNAIL_ERROR fiv_thumbnail_error_quark()
 
@@ -480,7 +476,7 @@ fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size, GError **error)
 	g_string_append_printf(
 		thum, "%s%c%s%c", THUMB_URI, 0, uri, 0);
 	g_string_append_printf(
-		thum, "%s%c%ld%c", THUMB_MTIME, 0, (long) st.st_mtim.tv_sec, 0);
+		thum, "%s%c%ld%c", THUMB_MTIME, 0, (long) st.st_mtime, 0);
 	g_string_append_printf(
 		thum, "%s%c%ld%c", THUMB_SIZE, 0, (long) filesize, 0);
 
