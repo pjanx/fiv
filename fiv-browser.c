@@ -1220,6 +1220,7 @@ fiv_browser_scroll_event(GtkWidget *widget, GdkEventScroll *event)
 	case GDK_SCROLL_SMOOTH:
 		// On GDK/Wayland, the mouse wheel will typically create 1.5 deltas,
 		// after dividing a 15 degree click angle from libinput by 10.
+		// (Noticed on Arch + Sway, cannot reproduce on Ubuntu 22.04.)
 		// On X11, as libinput(4) indicates, the delta will always be 1.0.
 		if ((delta += event->delta_y) <= -1)
 			set_item_size(self, self->item_size + 1);
