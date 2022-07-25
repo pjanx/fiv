@@ -1,0 +1,4 @@
+#!/bin/sh -e
+sed -i "s|^MimeType=.*|MimeType=$(
+	"${DESTDIR:+$DESTDIR/}"'@EXE@' --list-supported-media-types | tr '\n' ';'
+)|" "${DESTDIR:+$DESTDIR/}"'@DESKTOP@'

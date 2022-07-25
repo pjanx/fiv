@@ -105,7 +105,7 @@ tiff_tables = custom_target('tiff-tables.h',
 	capture : true,
 )
 
-desktops = ['fiv-browse.desktop']
+desktops = ['fiv.desktop', 'fiv-browse.desktop']
 exe = executable('fiv', 'fiv.c', 'fiv-view.c', 'fiv-io.c', 'fiv-context-menu.c',
 	'fiv-browser.c', 'fiv-sidebar.c', 'fiv-thumbnail.c', 'xdg.c', resources,
 	install : true,
@@ -145,31 +145,30 @@ install_data(gsettings_schemas,
 # For the purposes of development: make the program find its GSettings schemas.
 gnome.compile_schemas(depend_files : files(gsettings_schemas))
 
-# TODO(p): With gdk-pixbuf, this even depends on currently installed modules,
-# and the package manager needs to be told to keep fiv's desktop file in sync.
-# add_install_script() with skip_if_destdir might be a mild improvement.
-# In any case, we need to install a script for updating this desktop file.
-if meson.is_cross_build()
-	desktops += 'fiv.desktop'
-else
-	# XXX: The exe path may not contain spaces--quoting is a bitch in Meson.
-	custom_target(
-		input : 'fiv.desktop',
-		output : application_ns + 'fiv.desktop',
-		command : ['sh', '-c', '''awk '/^MimeType=/ { $0 = "MimeType=";
-			while (((exe " --list-supported-media-types") | getline type) > 0)
-				$0 = $0 type ";" } 1' "exe=$1" "$2"''', 'sh', exe, '@INPUT@'],
-		capture : true,
-		install : true,
-		install_dir : get_option('datadir') / 'applications',
-	)
-endif
 if host_machine.system() != 'windows'
 	foreach desktop : desktops
 		install_data(desktop,
 			rename : application_ns + desktop,
 			install_dir : get_option('datadir') / 'applications')
 	endforeach
+
+	# With gdk-pixbuf, fiv.desktop depends on currently installed modules;
+	# the package manager needs to be told to run this script as necessary.
+	dynamic_desktops = gdkpixbuf.found()
+
+	updater = configure_file(
+		input : 'fiv-update-desktop-files.in',
+		output : 'fiv-update-desktop-files',
+		configuration : {
+			'EXE' : get_option('prefix') / get_option('bindir') / exe.name(),
+			'DESKTOP' : get_option('prefix') / get_option('datadir') \
+				/ 'applications' / application_ns + 'fiv.desktop',
+		},
+		install : dynamic_desktops,
+		install_dir : get_option('bindir'))
+	if not meson.is_cross_build()
+		meson.add_install_script(updater, skip_if_destdir : dynamic_desktops)
+	endif
 endif
 
 install_data('fiv.svg',
