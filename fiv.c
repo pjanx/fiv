@@ -1099,6 +1099,16 @@ show_help_shortcuts(void)
 	gtk_widget_show(window);
 }
 
+static void
+toggle_sunlight(void)
+{
+	GtkSettings *settings = gtk_settings_get_default();
+	const char *property = "gtk-application-prefer-dark-theme";
+	gboolean set = FALSE;
+	g_object_get(settings, property, &set, NULL);
+	g_object_set(settings, property, !set, NULL);
+}
+
 // Cursor keys, e.g., simply cannot be bound through accelerators
 // (and GtkWidget::keynav-failed would arguably be an awful solution).
 //
@@ -1116,13 +1126,8 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 {
 	switch (event->state & gtk_accelerator_get_default_mod_mask()) {
 	case GDK_MOD1_MASK | GDK_SHIFT_MASK:
-		if (event->keyval == GDK_KEY_D) {
-			GtkSettings *settings = gtk_settings_get_default();
-			const char *property = "gtk-application-prefer-dark-theme";
-			gboolean set = FALSE;
-			g_object_get(settings, property, &set, NULL);
-			g_object_set(settings, property, !set, NULL);
-		}
+		if (event->keyval == GDK_KEY_D)
+			toggle_sunlight();
 		break;
 	case GDK_CONTROL_MASK:
 	case GDK_CONTROL_MASK | GDK_SHIFT_MASK:
@@ -1906,6 +1911,10 @@ main(int argc, char *argv[])
 	gtk_window_set_default_icon_name(PROJECT_NAME);
 	gtk_icon_theme_add_resource_path(
 		gtk_icon_theme_get_default(), "/org/gnome/design/IconLibrary/");
+
+	GSettings *settings = g_settings_new(PROJECT_NS PROJECT_NAME);
+	if (g_settings_get_boolean(settings, "dark-theme"))
+		toggle_sunlight();
 
 	GtkCssProvider *provider = gtk_css_provider_new();
 	gtk_css_provider_load_from_data(

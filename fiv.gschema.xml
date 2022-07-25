@@ -10,5 +10,9 @@
 				double buffering.
 			</description>
 		</key>
+		<key name='dark-theme' type='b'>
+			<default>false</default>
+			<summary>Use a dark theme variant</summary>
+		</key>
 	</schema>
 </schemalist>
