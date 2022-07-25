@@ -602,11 +602,20 @@ set_window_title(const char *uri)
 }
 
 static void
-switch_to_browser(void)
+switch_to_browser_noselect(void)
 {
 	set_window_title(g.directory);
 	gtk_stack_set_visible_child(GTK_STACK(g.stack), g.browser_paned);
 	gtk_widget_grab_focus(g.browser);
+}
+
+static void
+switch_to_browser(void)
+{
+	// XXX: This distinction is weird, it might make sense to make
+	// an end-user option for the behaviour.
+	switch_to_browser_noselect();
+	fiv_browser_select(FIV_BROWSER(g.browser), g.uri);
 }
 
 static void
@@ -710,7 +719,7 @@ load_directory(const char *uri)
 	// kept at -1, and browsing doesn't work. How to behave here?
 	// Should we add it to the pointer array as an exception?
 	if (uri) {
-		switch_to_browser();
+		switch_to_browser_noselect();
 
 		// TODO(p): Rather place it in history.
 		g_clear_pointer(&g.uri, g_free);
@@ -1161,7 +1170,7 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 		switch (event->keyval) {
 		case GDK_KEY_Left:
 			if (gtk_stack_get_visible_child(GTK_STACK(g.stack)) == g.view_box)
-				switch_to_browser();
+				switch_to_browser_noselect();
 			else if (g.directory_back)
 				load_directory(g.directory_back->data);
 			return TRUE;
@@ -1252,7 +1261,6 @@ on_key_press_view(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 		case GDK_KEY_Escape:
 		case GDK_KEY_Return:
 			switch_to_browser();
-			fiv_browser_select(FIV_BROWSER(g.browser), g.uri);
 			return TRUE;
 		}
 	}
@@ -1315,7 +1323,7 @@ on_button_press_view(G_GNUC_UNUSED GtkWidget *widget, GdkEventButton *event)
 	switch (event->button) {
 	case 4:  // back (GdkWin32, GdkQuartz)
 	case 8:  // back
-		switch_to_browser();
+		switch_to_browser_noselect();
 		return TRUE;
 	case GDK_BUTTON_PRIMARY:
 		if (event->type == GDK_2BUTTON_PRESS) {
