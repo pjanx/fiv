@@ -1231,6 +1231,7 @@ on_key_press_view(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 	switch (event->state & gtk_accelerator_get_default_mod_mask()) {
 	case 0:
 		switch (event->keyval) {
+		// XXX: The same shortcut focuses GtkPaned's handle.
 		case GDK_KEY_F8:
 			gtk_widget_set_visible(g.view_toolbar,
 				!gtk_widget_is_visible(g.view_toolbar));
@@ -1985,7 +1986,6 @@ main(int argc, char *argv[])
 		GTK_STACK(g.stack), GTK_STACK_TRANSITION_TYPE_NONE);
 	gtk_container_add(GTK_CONTAINER(g.stack), g.view_box);
 	gtk_container_add(GTK_CONTAINER(g.stack), g.browser_paned);
-	gtk_widget_show_all(g.stack);
 
 	g.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	g_signal_connect(g.window, "destroy",
@@ -2005,6 +2005,12 @@ main(int argc, char *argv[])
 		toggle_sunlight();
 	g_object_set(g.browser, "thumbnail-size",
 		g_settings_get_enum(settings, "thumbnail-size"), NULL);
+
+	gtk_widget_show_all(menu_box);
+	gtk_widget_set_visible(g.browser_sidebar,
+		g_settings_get_boolean(settings, "show-browser-sidebar"));
+	gtk_widget_set_visible(g.view_toolbar,
+		g_settings_get_boolean(settings, "show-view-toolbar"));
 
 	// Try to get half of the screen vertically, in 4:3 aspect ratio.
 	//
@@ -2045,7 +2051,7 @@ main(int argc, char *argv[])
 		g_object_unref(file);
 	}
 
-	gtk_widget_show_all(g.window);
+	gtk_widget_show(g.window);
 	gtk_main();
 	return 0;
 }

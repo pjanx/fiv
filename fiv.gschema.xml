@@ -21,6 +21,14 @@
 			<default>false</default>
 			<summary>Use a dark theme variant on start-up</summary>
 		</key>
+		<key name='show-browser-sidebar' type='b'>
+			<default>true</default>
+			<summary>Show the browser's sidebar</summary>
+		</key>
+		<key name='show-view-toolbar' type='b'>
+			<default>true</default>
+			<summary>Show a toolbar in the image view</summary>
+		</key>
 		<key name='thumbnail-size' enum='name.janouch.fiv.thumbnail-size'>
 			<default>'Normal'</default>
 			<summary>Thumbnail size to assume on start-up</summary>
