@@ -1912,10 +1912,6 @@ main(int argc, char *argv[])
 	gtk_icon_theme_add_resource_path(
 		gtk_icon_theme_get_default(), "/org/gnome/design/IconLibrary/");
 
-	GSettings *settings = g_settings_new(PROJECT_NS PROJECT_NAME);
-	if (g_settings_get_boolean(settings, "dark-theme"))
-		toggle_sunlight();
-
 	GtkCssProvider *provider = gtk_css_provider_new();
 	gtk_css_provider_load_from_data(
 		provider, stylesheet, sizeof stylesheet - 1, NULL);
@@ -2003,6 +1999,12 @@ main(int argc, char *argv[])
 	gtk_container_add(GTK_CONTAINER(menu_box), make_menu_bar());
 	gtk_container_add(GTK_CONTAINER(menu_box), g.stack);
 	gtk_container_add(GTK_CONTAINER(g.window), menu_box);
+
+	GSettings *settings = g_settings_new(PROJECT_NS PROJECT_NAME);
+	if (g_settings_get_boolean(settings, "dark-theme"))
+		toggle_sunlight();
+	g_object_set(g.browser, "thumbnail-size",
+		g_settings_get_enum(settings, "thumbnail-size"), NULL);
 
 	// Try to get half of the screen vertically, in 4:3 aspect ratio.
 	//

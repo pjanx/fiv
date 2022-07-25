@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <schemalist>
+	<enum id="name.janouch.fiv.thumbnail-size">
+		<value nick='Small'  value='0'/>
+		<value nick='Normal' value='1'/>
+		<value nick='Large'  value='2'/>
+		<value nick='Huge'   value='3'/>
+	</enum>
+
 	<schema path="/name/janouch/fiv/" id="name.janouch.fiv">
 		<key name='native-view-window' type='b'>
 			<default>true</default>
@@ -12,7 +19,11 @@
 		</key>
 		<key name='dark-theme' type='b'>
 			<default>false</default>
-			<summary>Use a dark theme variant</summary>
+			<summary>Use a dark theme variant on start-up</summary>
+		</key>
+		<key name='thumbnail-size' enum='name.janouch.fiv.thumbnail-size'>
+			<default>'Normal'</default>
+			<summary>Thumbnail size to assume on start-up</summary>
 		</key>
 	</schema>
 </schemalist>
