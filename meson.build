@@ -70,10 +70,12 @@ endif
 
 # XXX: https://github.com/mesonbuild/meson/issues/825
 docdir = get_option('datadir') / 'doc' / meson.project_name()
+application_ns = 'name.janouch.'
 
 conf = configuration_data()
 conf.set_quoted('PROJECT_NAME', meson.project_name())
 conf.set_quoted('PROJECT_VERSION', meson.project_version())
+conf.set_quoted('PROJECT_NS', application_ns)
 conf.set_quoted('PROJECT_DOCDIR', get_option('prefix') / docdir)
 conf.set('HAVE_JPEG_QS', libjpegqs.found())
 conf.set('HAVE_LCMS2', lcms2.found())
@@ -103,6 +105,7 @@ tiff_tables = custom_target('tiff-tables.h',
 	capture : true,
 )
 
+desktops = ['fiv-browse.desktop']
 exe = executable('fiv', 'fiv.c', 'fiv-view.c', 'fiv-io.c', 'fiv-context-menu.c',
 	'fiv-browser.c', 'fiv-sidebar.c', 'fiv-thumbnail.c', 'xdg.c', resources,
 	install : true,
@@ -113,14 +116,13 @@ if gdkpixbuf.found()
 		dependencies : [dependencies, gdkpixbuf])
 endif
 
+desktops += 'fiv-jpegcrop.desktop'
 jpegcrop = executable('fiv-jpegcrop', 'fiv-jpegcrop.c',
 	install : true,
 	dependencies : [
 		dependency('gtk+-3.0'),
 		dependency('libturbojpeg'),
 	])
-install_data('fiv-jpegcrop.desktop',
-	install_dir : get_option('datadir') / 'applications')
 
 if get_option('tools').enabled()
 	# libjq 1.6 lacks a pkg-config file, and there is no release in sight.
@@ -135,15 +137,25 @@ if get_option('tools').enabled()
 	endforeach
 endif
 
-# XXX: With gdk-pixbuf, this even depends on currently installed modules.
+gsettings_schemas = ['fiv.gschema.xml']
+install_data(gsettings_schemas,
+	rename : [application_ns + gsettings_schemas[0]],
+	install_dir : get_option('datadir') / 'glib-2.0' / 'schemas')
+
+# For the purposes of development: make the program find its GSettings schemas.
+gnome.compile_schemas(depend_files : files(gsettings_schemas))
+
+# TODO(p): With gdk-pixbuf, this even depends on currently installed modules,
+# and the package manager needs to be told to keep fiv's desktop file in sync.
+# add_install_script() with skip_if_destdir might be a mild improvement.
+# In any case, we need to install a script for updating this desktop file.
 if meson.is_cross_build()
-	install_data('fiv.desktop',
-		install_dir : get_option('datadir') / 'applications')
+	desktops += 'fiv.desktop'
 else
 	# XXX: The exe path may not contain spaces--quoting is a bitch in Meson.
-	desktop = custom_target('desktop',
-		output : 'fiv.desktop',
+	custom_target(
 		input : 'fiv.desktop',
+		output : application_ns + 'fiv.desktop',
 		command : ['sh', '-c', '''awk '/^MimeType=/ { $0 = "MimeType=";
 			while (((exe " --list-supported-media-types") | getline type) > 0)
 				$0 = $0 type ";" } 1' "exe=$1" "$2"''', 'sh', exe, '@INPUT@'],
@@ -152,9 +164,14 @@ else
 		install_dir : get_option('datadir') / 'applications',
 	)
 endif
+if host_machine.system() != 'windows'
+	foreach desktop : desktops
+		install_data(desktop,
+			rename : application_ns + desktop,
+			install_dir : get_option('datadir') / 'applications')
+	endforeach
+endif
 
-install_data('fiv-browse.desktop',
-	install_dir : get_option('datadir') / 'applications')
 install_data('fiv.svg',
 	install_dir : get_option('datadir') / 'icons/hicolor/scalable/apps')
 install_subdir('docs', install_dir : docdir, strip_directory : true)

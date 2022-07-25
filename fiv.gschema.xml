@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<schemalist>
+	<schema path="/name/janouch/fiv/" id="name.janouch.fiv">
+		<key name='native-view-window' type='b'>
+			<default>true</default>
+			<summary>Use a native window for the view</summary>
+			<description>
+				On X11, using native GdkWindows enables use of 30-bit Visuals
+				(that is, 10 bits per channel), at the cost of disabling
+				double buffering.
+			</description>
+		</key>
+	</schema>
+</schemalist>

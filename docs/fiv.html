@@ -94,6 +94,15 @@ rm -rf ~/.cache/thumbnails/wide-*
 
 <h2>Configuration</h2>
 
+<p>The few configuration options <i>fiv</i> has can be adjusted using
+<i>dconf-editor</i> or <i>gsettings</i>.
+
+<pre>
+gsettings list-recursively name.janouch.fiv
+</pre>
+
+<h3>Theming</h3>
+
 <p>The standard means to adjust the looks of the program is through GTK+ 3 CSS.
 As an example, to tightly pack browser items, put the following in your
 <i>~/.config/gtk-3.0/gtk.css</i>:

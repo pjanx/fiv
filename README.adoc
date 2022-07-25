@@ -50,9 +50,9 @@ ExifTool, resvg (unstable API, needs to be requested explicitly)
  $ meson compile
 
 Considering the vast amount of dynamically-linked dependencies, do not attempt
-direct installations.  To test the program, help it find its custom thumbnailer:
+direct installations via `ninja install`.  To test the program:
 
- $ PATH=$(pwd):$PATH ./fiv
+ $ meson devenv fiv
 
 The lossless JPEG cropper is intended to be invoked from a context menu.
 

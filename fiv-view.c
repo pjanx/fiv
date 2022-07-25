@@ -547,7 +547,9 @@ fiv_view_realize(GtkWidget *widget)
 	//
 	// If GTK+'s OpenGL integration fails to deliver, we need to use the window
 	// directly, sidestepping the toolkit entirely.
-	if (GDK_IS_X11_WINDOW(window))
+	GSettings *settings = g_settings_new(PROJECT_NS PROJECT_NAME);
+	if (GDK_IS_X11_WINDOW(window) &&
+		g_settings_get_boolean(settings, "native-view-window"))
 		gdk_window_ensure_native(window);
 #endif  // GDK_WINDOWING_X11
 
