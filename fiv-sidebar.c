@@ -17,6 +17,7 @@
 
 #include <gtk/gtk.h>
 
+#include "fiv-collection.h"
 #include "fiv-context-menu.h"
 #include "fiv-io.h"
 #include "fiv-sidebar.h"
@@ -296,15 +297,48 @@ create_row(FivSidebar *self, GFile *file, const char *icon_name)
 }
 
 static void
+on_update_task(GTask *task, G_GNUC_UNUSED gpointer source_object,
+	G_GNUC_UNUSED gpointer task_data, G_GNUC_UNUSED GCancellable *cancellable)
+{
+	g_task_return_boolean(task, TRUE);
+}
+
+static void
+on_update_task_done(GObject *source_object, G_GNUC_UNUSED GAsyncResult *res,
+	G_GNUC_UNUSED gpointer user_data)
+{
+	FivSidebar *self = FIV_SIDEBAR(source_object);
+	gtk_places_sidebar_set_location(
+		self->places, fiv_io_model_get_location(self->model));
+}
+
+static void
 update_location(FivSidebar *self)
 {
 	GFile *location = fiv_io_model_get_location(self->model);
-	if (!location)
-		return;
+
+	GFile *collection = g_file_new_for_uri(FIV_COLLECTION_SCHEME ":/");
+	gtk_places_sidebar_remove_shortcut(self->places, collection);
+	if (location && g_file_has_uri_scheme(location, FIV_COLLECTION_SCHEME)) {
+		// add_shortcut() asynchronously requests GFileInfo, and only fills in
+		// the new row's "uri" data field once that's finished, resulting in
+		// the immediate set_location() call below failing to find it.
+		gtk_places_sidebar_add_shortcut(self->places, collection);
+
+		// Queue up a callback using the same mechanism that GFile uses.
+		GTask *task = g_task_new(self, NULL, on_update_task_done, NULL);
+		g_task_set_name(task, __func__);
+		g_task_set_priority(task, G_PRIORITY_LOW);
+		g_task_run_in_thread(task, on_update_task);
+		g_object_unref(task);
+	}
+	g_object_unref(collection);
 
 	gtk_places_sidebar_set_location(self->places, location);
 	gtk_container_foreach(GTK_CONTAINER(self->listbox),
 		(GtkCallback) gtk_widget_destroy, NULL);
+	if (!location)
+		return;
 
 	GFile *iter = g_object_ref(location);
 	GtkWidget *row = NULL;

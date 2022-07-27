@@ -615,7 +615,7 @@ read_png_thumbnail(
 }
 
 cairo_surface_t *
-fiv_thumbnail_lookup(char *uri, gint64 mtime_msec, FivThumbnailSize size)
+fiv_thumbnail_lookup(const char *uri, gint64 mtime_msec, FivThumbnailSize size)
 {
 	g_return_val_if_fail(size >= FIV_THUMBNAIL_SIZE_MIN &&
 		size <= FIV_THUMBNAIL_SIZE_MAX, NULL);

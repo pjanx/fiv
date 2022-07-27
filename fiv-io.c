@@ -2964,6 +2964,7 @@ static void
 model_entry_finalize(FivIoModelEntry *entry)
 {
 	g_free(entry->uri);
+	g_free(entry->target_uri);
 	g_free(entry->collate_key);
 }
 
@@ -3083,9 +3084,12 @@ model_reload(FivIoModel *self, GError **error)
 	g_array_set_size(self->files, 0);
 
 	GFileEnumerator *enumerator = g_file_enumerate_children(self->directory,
-		G_FILE_ATTRIBUTE_STANDARD_NAME "," G_FILE_ATTRIBUTE_STANDARD_TYPE ","
+		G_FILE_ATTRIBUTE_STANDARD_TYPE ","
+		G_FILE_ATTRIBUTE_STANDARD_NAME ","
+		G_FILE_ATTRIBUTE_STANDARD_TARGET_URI ","
 		G_FILE_ATTRIBUTE_STANDARD_IS_HIDDEN ","
-		G_FILE_ATTRIBUTE_TIME_MODIFIED "," G_FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
+		G_FILE_ATTRIBUTE_TIME_MODIFIED ","
+		G_FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
 		G_FILE_QUERY_INFO_NONE, NULL, error);
 	if (!enumerator) {
 		// Note that this has had a side-effect of clearing all entries.
@@ -3096,12 +3100,23 @@ model_reload(FivIoModel *self, GError **error)
 
 	GFileInfo *info = NULL;
 	GFile *child = NULL;
-	while (g_file_enumerator_iterate(enumerator, &info, &child, NULL, NULL) &&
-		info) {
+	GError *e = NULL;
+	while (TRUE) {
+		if (!g_file_enumerator_iterate(enumerator, &info, &child, NULL, &e) &&
+			e) {
+			g_warning("%s", e->message);
+			g_clear_error(&e);
+			continue;
+		}
+
+		if (!info)
+			break;
 		if (self->filtering && g_file_info_get_is_hidden(info))
 			continue;
 
-		FivIoModelEntry entry = {.uri = g_file_get_uri(child)};
+		FivIoModelEntry entry = {.uri = g_file_get_uri(child),
+			.target_uri = g_strdup(g_file_info_get_attribute_string(
+				info, G_FILE_ATTRIBUTE_STANDARD_TARGET_URI))};
 		GDateTime *mtime = g_file_info_get_modification_date_time(info);
 		if (mtime) {
 			entry.mtime_msec = g_date_time_to_unix(mtime) * 1000 +

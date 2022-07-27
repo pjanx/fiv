@@ -107,9 +107,10 @@ tiff_tables = custom_target('tiff-tables.h',
 
 desktops = ['fiv.desktop', 'fiv-browse.desktop']
 exe = executable('fiv', 'fiv.c', 'fiv-view.c', 'fiv-io.c', 'fiv-context-menu.c',
-	'fiv-browser.c', 'fiv-sidebar.c', 'fiv-thumbnail.c', 'xdg.c', resources,
+	'fiv-browser.c', 'fiv-sidebar.c', 'fiv-thumbnail.c', 'fiv-collection.c',
+	'xdg.c', resources,
 	install : true,
-	dependencies : [dependencies])
+	dependencies : dependencies)
 if gdkpixbuf.found()
 	executable('io-benchmark', 'fiv-io-benchmark.c', 'fiv-io.c', 'xdg.c',
 		build_by_default : false,

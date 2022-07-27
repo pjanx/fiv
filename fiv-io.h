@@ -130,6 +130,7 @@ GFile *fiv_io_model_get_location(FivIoModel *self);
 
 typedef struct {
 	gchar *uri;                         ///< GIO URI
+	gchar *target_uri;                  ///< GIO URI for any target
 	gchar *collate_key;                 ///< Collate key for the filename
 	gint64 mtime_msec;                  ///< Modification time in milliseconds
 } FivIoModelEntry;

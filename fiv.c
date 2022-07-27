@@ -36,6 +36,7 @@
 #include "config.h"
 
 #include "fiv-browser.h"
+#include "fiv-collection.h"
 #include "fiv-io.h"
 #include "fiv-sidebar.h"
 #include "fiv-thumbnail.h"
@@ -57,6 +58,17 @@ exit_fatal(const char *format, ...)
 
 	va_end(ap);
 	exit(EXIT_FAILURE);
+}
+
+static gchar **
+slist_to_strv(GSList *slist)
+{
+	gchar **strv = g_malloc0_n(g_slist_length(slist) + 1, sizeof *strv),
+		**p = strv;
+	for (GSList *link = slist; link; link = link->next)
+		*p++ = link->data;
+	g_slist_free(slist);
+	return strv;
 }
 
 // --- Keyboard shortcuts ------------------------------------------------------
@@ -707,7 +719,7 @@ load_directory_without_switching(const char *uri)
 	GError *error = NULL;
 	GFile *file = g_file_new_for_uri(g.directory);
 	if (fiv_io_model_open(g.model, file, &error)) {
-		// Handled by the signal callback.
+		// This is handled by our ::files-changed callback.
 	} else if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED)) {
 		g_error_free(error);
 	} else {
@@ -829,6 +841,7 @@ create_open_dialog(void)
 		"_Cancel", GTK_RESPONSE_CANCEL,
 		"_Open", GTK_RESPONSE_ACCEPT, NULL);
 	gtk_file_chooser_set_local_only(GTK_FILE_CHOOSER(dialog), FALSE);
+	gtk_file_chooser_set_select_multiple(GTK_FILE_CHOOSER(dialog), TRUE);
 
 	GtkFileFilter *filter = gtk_file_filter_new();
 	for (const char **p = fiv_io_supported_media_types; *p; p++)
@@ -858,13 +871,20 @@ on_open(void)
 	(void) gtk_file_chooser_set_current_folder_uri(
 		GTK_FILE_CHOOSER(dialog), g.directory);
 
-	// The default is local-only, single item.
 	switch (gtk_dialog_run(GTK_DIALOG(dialog))) {
-		gchar *uri;
+		GSList *uri_list;
 	case GTK_RESPONSE_ACCEPT:
-		uri = gtk_file_chooser_get_uri(GTK_FILE_CHOOSER(dialog));
-		open_image(uri);
-		g_free(uri);
+		if (!(uri_list = gtk_file_chooser_get_uris(GTK_FILE_CHOOSER(dialog))))
+			break;
+
+		gchar **uris = slist_to_strv(uri_list);
+		if (g_strv_length(uris) == 1) {
+			open_image(uris[0]);
+		} else {
+			fiv_collection_reload(uris);
+			load_directory(FIV_COLLECTION_SCHEME ":/");
+		}
+		g_strfreev(uris);
 		break;
 	case GTK_RESPONSE_NONE:
 		dialog = NULL;
@@ -892,16 +912,61 @@ on_next(void)
 	}
 }
 
+static gchar **
+build_spawn_argv(const char *uri)
+{
+	// Because we only pass URIs, there is no need to prepend "--" here.
+	GPtrArray *a = g_ptr_array_new();
+	g_ptr_array_add(a, g_strdup(PROJECT_NAME));
+
+	// Process-local VFS URIs need to be resolved to globally accessible URIs.
+	// It doesn't seem possible to reliably tell if a GFile is process-local,
+	// but our collection VFS is the only one to realistically cause problems.
+	if (!fiv_collection_uri_matches(uri)) {
+		g_ptr_array_add(a, g_strdup(uri));
+		goto out;
+	}
+
+	GFile *file = g_file_new_for_uri(uri);
+	GError *error = NULL;
+	GFileInfo *info =
+		g_file_query_info(file, G_FILE_ATTRIBUTE_STANDARD_TARGET_URI,
+			G_FILE_QUERY_INFO_NONE, NULL, &error);
+	g_object_unref(file);
+	if (!info) {
+		g_warning("%s", error->message);
+		g_error_free(error);
+		goto out;
+	}
+
+	const char *target_uri = g_file_info_get_attribute_string(
+		info, G_FILE_ATTRIBUTE_STANDARD_TARGET_URI);
+	if (target_uri) {
+		g_ptr_array_add(a, g_strdup(target_uri));
+	} else {
+		gsize len = 0;
+		GFile **files = fiv_collection_get_contents(&len);
+		for (gsize i = 0; i < len; i++)
+			g_ptr_array_add(a, g_file_get_uri(files[i]));
+	}
+	g_object_unref(info);
+
+out:
+	g_ptr_array_add(a, NULL);
+	return (gchar **) g_ptr_array_free(a, FALSE);
+}
+
 static void
 spawn_uri(const char *uri)
 {
-	char *argv[] = {PROJECT_NAME, (char *) uri, NULL};
+	gchar **argv = build_spawn_argv(uri);
 	GError *error = NULL;
 	if (!g_spawn_async(
 		NULL, argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, &error)) {
 		g_warning("%s", error->message);
 		g_error_free(error);
 	}
+	g_strfreev(argv);
 }
 
 static void
@@ -1005,8 +1070,13 @@ on_view_drag_data_received(G_GNUC_UNUSED GtkWidget *widget,
 		return;
 	}
 
-	// TODO(p): Once we're able to open a virtual directory, open all of them.
-	GFile *file = g_file_new_for_uri(uris[0]);
+	GFile *file = NULL;
+	if (g_strv_length(uris) == 1) {
+		file = g_file_new_for_uri(uris[0]);
+	} else {
+		fiv_collection_reload(uris);
+		file = g_file_new_for_uri(FIV_COLLECTION_SCHEME ":/");
+	}
 	open_any_file(file, FALSE);
 	g_object_unref(file);
 	gtk_drag_finish(context, TRUE, FALSE, time);
@@ -1854,10 +1924,12 @@ static const char stylesheet[] = "@define-color fiv-tile @content_view_bg; \
 	.fiv-information label { padding: 0 4px; }";
 
 static void
-output_thumbnail(const char *path_arg, gboolean extract, const char *size_arg)
+output_thumbnail(gchar **uris, gboolean extract, const char *size_arg)
 {
-	if (!path_arg)
-		exit_fatal("no path given");
+	if (!uris)
+		exit_fatal("No path given");
+	if (uris[1])
+		exit_fatal("Only one thumbnail at a time may be produced");
 
 	FivThumbnailSize size = FIV_THUMBNAIL_SIZE_COUNT;
 	if (size_arg) {
@@ -1875,7 +1947,7 @@ output_thumbnail(const char *path_arg, gboolean extract, const char *size_arg)
 #endif  // G_OS_WIN32
 
 	GError *error = NULL;
-	GFile *file = g_file_new_for_commandline_arg(path_arg);
+	GFile *file = g_file_new_for_uri(uris[0]);
 	cairo_surface_t *surface = NULL;
 	if (extract && (surface = fiv_thumbnail_extract(file, size, &error)))
 		fiv_io_serialize_to_stdout(surface, FIV_IO_SERIALIZE_LOW_QUALITY);
@@ -1898,10 +1970,10 @@ main(int argc, char *argv[])
 {
 	gboolean show_version = FALSE, show_supported_media_types = FALSE,
 		invalidate_cache = FALSE, browse = FALSE, extract_thumbnail = FALSE;
-	gchar **path_args = NULL, *thumbnail_size = NULL;
+	gchar **args = NULL, *thumbnail_size = NULL;
 	const GOptionEntry options[] = {
-		{G_OPTION_REMAINING, 0, 0, G_OPTION_ARG_FILENAME_ARRAY, &path_args,
-			NULL, "[FILE | DIRECTORY | URI]"},
+		{G_OPTION_REMAINING, 0, 0, G_OPTION_ARG_FILENAME_ARRAY, &args,
+			NULL, "[PATH | URI]..."},
 		{"list-supported-media-types", 0, G_OPTION_FLAG_IN_MAIN,
 			G_OPTION_ARG_NONE, &show_supported_media_types,
 			"Output supported media types and exit", NULL},
@@ -1941,18 +2013,21 @@ main(int argc, char *argv[])
 	if (!initialized)
 		exit_fatal("%s", error->message);
 
-	// NOTE: Firefox and Eye of GNOME both interpret multiple arguments
-	// in a special way. This is problematic, because one-element lists
-	// are unrepresentable.
-	// TODO(p): Require a command line switch, load a virtual folder.
-	// We may want or need to create a custom GVfs.
-	// TODO(p): Complain to the user if there's more than one argument.
-	// Best show the help message, if we can figure that out.
-	const gchar *path_arg = path_args ? path_args[0] : NULL;
+	// Normalize all arguments to URIs.
+	for (gsize i = 0; args && args[i]; i++) {
+		GFile *resolved = g_file_new_for_commandline_arg(args[i]);
+		g_free(args[i]);
+		args[i] = g_file_get_uri(resolved);
+		g_object_unref(resolved);
+	}
 	if (extract_thumbnail || thumbnail_size) {
-		output_thumbnail(path_arg, extract_thumbnail, thumbnail_size);
+		output_thumbnail(args, extract_thumbnail, thumbnail_size);
 		return 0;
 	}
+
+	// It doesn't make much sense to have command line arguments able to
+	// resolve to the VFS they may end up being contained within.
+	fiv_collection_register();
 
 	g.model = g_object_new(FIV_TYPE_IO_MODEL, NULL);
 	g_signal_connect(g.model, "files-changed",
@@ -2088,11 +2163,22 @@ main(int argc, char *argv[])
 	// XXX: The widget wants to read the display's profile. The realize is ugly.
 	gtk_widget_realize(g.view);
 
+	// XXX: We follow the behaviour of Firefox and Eye of GNOME, which both
+	// interpret multiple command line arguments differently, as a collection.
+	// However, single-element collections are unrepresentable this way.
+	// Should we allow multiple targets only in a special new mode?
 	g.files = g_ptr_array_new_full(0, g_free);
-	if (path_arg) {
-		GFile *file = g_file_new_for_commandline_arg(path_arg);
+	if (args) {
+		const gchar *target = *args;
+		if (args[1]) {
+			fiv_collection_reload(args);
+			target = FIV_COLLECTION_SCHEME ":/";
+		}
+
+		GFile *file = g_file_new_for_uri(target);
 		open_any_file(file, browse);
 		g_object_unref(file);
+		g_strfreev(args);
 	}
 	if (!g.directory) {
 		GFile *file = g_file_new_for_path(".");

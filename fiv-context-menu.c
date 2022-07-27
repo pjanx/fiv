@@ -17,6 +17,7 @@
 
 #include "config.h"
 
+#include "fiv-collection.h"
 #include "fiv-context-menu.h"
 
 G_DEFINE_QUARK(fiv-context-menu-cancellable-quark, fiv_context_menu_cancellable)
@@ -276,7 +277,7 @@ fiv_context_menu_information(GtkWindow *parent, const char *uri)
 	gtk_window_set_default_size(GTK_WINDOW(dialog), 600, 800);
 	gtk_widget_show_all(dialog);
 
-	// Mostly for URIs with no local path--we pipe these into ExifTool.
+	// Mostly to identify URIs with no local path--we pipe these into ExifTool.
 	GFile *file = g_file_new_for_uri(uri);
 	gchar *parse_name = g_file_get_parse_name(file);
 	gtk_header_bar_set_subtitle(
@@ -423,9 +424,10 @@ GtkMenu *
 fiv_context_menu_new(GtkWidget *widget, GFile *file)
 {
 	GFileInfo *info = g_file_query_info(file,
-		G_FILE_ATTRIBUTE_STANDARD_NAME
-		"," G_FILE_ATTRIBUTE_STANDARD_TYPE
-		"," G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE,
+		G_FILE_ATTRIBUTE_STANDARD_TYPE
+		"," G_FILE_ATTRIBUTE_STANDARD_NAME
+		"," G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE
+		"," G_FILE_ATTRIBUTE_STANDARD_TARGET_URI,
 		G_FILE_QUERY_INFO_NONE, NULL, NULL);
 	if (!info)
 		return NULL;
@@ -437,9 +439,15 @@ fiv_context_menu_new(GtkWidget *widget, GFile *file)
 	// This will have no application pre-assigned, for use with GTK+'s dialog.
 	OpenContext *ctx = g_rc_box_alloc0(sizeof *ctx);
 	g_weak_ref_init(&ctx->window, window);
-	ctx->file = g_object_ref(file);
-	ctx->content_type = g_strdup(g_file_info_get_content_type(info));
-	gboolean regular = g_file_info_get_file_type(info) == G_FILE_TYPE_REGULAR;
+	if (!(ctx->content_type = g_strdup(g_file_info_get_content_type(info))))
+		ctx->content_type = g_content_type_guess(NULL, NULL, 0, NULL);
+
+	GFileType type = g_file_info_get_file_type(info);
+	const char *target_uri = g_file_info_get_attribute_string(
+		info, G_FILE_ATTRIBUTE_STANDARD_TARGET_URI);
+	ctx->file = target_uri && g_file_has_uri_scheme(file, FIV_COLLECTION_SCHEME)
+		? g_file_new_for_uri(target_uri)
+		: g_object_ref(file);
 	g_object_unref(info);
 
 	GAppInfo *default_ =
@@ -483,7 +491,7 @@ fiv_context_menu_new(GtkWidget *widget, GFile *file)
 		ctx, open_context_unref, 0);
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
 
-	if (regular) {
+	if (type == G_FILE_TYPE_REGULAR) {
 		gtk_menu_shell_append(
 			GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
 

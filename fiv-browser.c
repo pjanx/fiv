@@ -29,6 +29,7 @@
 #endif  // GDK_WINDOWING_QUARTZ
 
 #include "fiv-browser.h"
+#include "fiv-collection.h"
 #include "fiv-context-menu.h"
 #include "fiv-io.h"
 #include "fiv-thumbnail.h"
@@ -102,6 +103,7 @@ static cairo_user_data_key_t fiv_browser_key_mtime_msec;
 
 struct entry {
 	gchar *uri;                         ///< GIO URI
+	gchar *target_uri;                  ///< GIO URI for any target
 	gint64 mtime_msec;                  ///< Modification time in milliseconds
 	cairo_surface_t *thumbnail;         ///< Prescaled thumbnail
 	GIcon *icon;                        ///< If no thumbnail, use this icon
@@ -111,6 +113,7 @@ static void
 entry_free(Entry *self)
 {
 	g_free(self->uri);
+	g_free(self->target_uri);
 	g_clear_pointer(&self->thumbnail, cairo_surface_destroy);
 	g_clear_object(&self->icon);
 }
@@ -437,6 +440,17 @@ rescale_thumbnail(cairo_surface_t *thumbnail, double row_height)
 	return scaled;
 }
 
+static char *
+entry_system_wide_uri(const Entry *self)
+{
+	// "recent" and "trash", e.g., also have "standard::target-uri" set,
+	// but we'd like to avoid saving their thumbnails.
+	if (self->target_uri && fiv_collection_uri_matches(self->uri))
+		return self->target_uri;
+
+	return self->uri;
+}
+
 static void
 entry_add_thumbnail(gpointer data, gpointer user_data)
 {
@@ -456,7 +470,7 @@ entry_add_thumbnail(gpointer data, gpointer user_data)
 		// unnecessarily; we might also shift the concern there).
 	} else {
 		cairo_surface_t *found = fiv_thumbnail_lookup(
-			self->uri, self->mtime_msec, browser->item_size);
+			entry_system_wide_uri(self), self->mtime_msec, browser->item_size);
 		self->thumbnail = rescale_thumbnail(found, browser->item_height);
 	}
 
@@ -589,7 +603,8 @@ thumbnailer_reprocess_entry(FivBrowser *self, GBytes *output, Entry *entry)
 			g_list_append(self->thumbnailers_queue, entry);
 	}
 
-	// This choice of mtime favours unnecessary thumbnail reloading.
+	// This choice of mtime favours unnecessary thumbnail reloading
+	// over retaining stale data.
 	cairo_surface_set_user_data(entry->thumbnail,
 		&fiv_browser_key_mtime_msec, (void *) (intptr_t) entry->mtime_msec,
 		NULL);
@@ -663,12 +678,13 @@ thumbnailer_next(Thumbnailer *t)
 	//  - We've found one, but we're not quite happy with it:
 	//    always run the full process for a high-quality wide thumbnail.
 	//  - We can't end up here in any other cases.
+	const char *uri = entry_system_wide_uri(t->target);
 	const char *argv_faster[] = {PROJECT_NAME, "--extract-thumbnail",
 		"--thumbnail", fiv_thumbnail_sizes[self->item_size].thumbnail_spec_name,
-		"--", t->target->uri, NULL};
+		"--", uri, NULL};
 	const char *argv_slower[] = {PROJECT_NAME,
 		"--thumbnail", fiv_thumbnail_sizes[self->item_size].thumbnail_spec_name,
-		"--", t->target->uri, NULL};
+		"--", uri, NULL};
 
 	GError *error = NULL;
 	t->minion = g_subprocess_newv(t->target->icon ? argv_faster : argv_slower,
@@ -1259,7 +1275,7 @@ fiv_browser_drag_data_get(GtkWidget *widget,
 	FivBrowser *self = FIV_BROWSER(widget);
 	if (self->selected) {
 		(void) gtk_selection_data_set_uris(
-			data, (gchar *[]){self->selected->uri, NULL});
+			data, (gchar *[]) {entry_system_wide_uri(self->selected), NULL});
 	}
 }
 
@@ -1466,10 +1482,9 @@ fiv_browser_query_tooltip(GtkWidget *widget, gint x, gint y,
 		return FALSE;
 
 	GFile *file = g_file_new_for_uri(entry->uri);
-	GFileInfo *info = g_file_query_info(file,
-		G_FILE_ATTRIBUTE_STANDARD_NAME
-		"," G_FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME,
-		G_FILE_QUERY_INFO_NONE, NULL, NULL);
+	GFileInfo *info =
+		g_file_query_info(file, G_FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME,
+			G_FILE_QUERY_INFO_NONE, NULL, NULL);
 	g_object_unref(file);
 	if (!info)
 		return FALSE;
@@ -1740,8 +1755,11 @@ on_model_files_changed(FivIoModel *model, FivBrowser *self)
 	gsize len = 0;
 	const FivIoModelEntry *files = fiv_io_model_get_files(self->model, &len);
 	for (gsize i = 0; i < len; i++) {
-		g_array_append_val(self->entries, ((Entry) {.thumbnail = NULL,
-			.uri = g_strdup(files[i].uri), .mtime_msec = files[i].mtime_msec}));
+		Entry e = {.thumbnail = NULL,
+			.uri = g_strdup(files[i].uri),
+			.target_uri = g_strdup(files[i].target_uri),
+			.mtime_msec = files[i].mtime_msec};
+		g_array_append_val(self->entries, e);
 	}
 
 	fiv_browser_select(self, selected_uri);
