@@ -1209,13 +1209,18 @@ info(FivView *self)
 	GtkWindow *window = get_toplevel(GTK_WIDGET(self));
 	int flags = G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_PIPE;
 
-	GError *error = NULL;
-	gchar *path = g_filename_from_uri(self->uri, NULL, &error);
+	GFile *file = g_file_new_for_uri(self->uri);
+	gchar *path = g_file_get_path(file);
+	g_object_unref(file);
 	if (!path) {
-		show_error_dialog(window, error);
+		// TODO(p): Support piping to exiftool (use "-" as path).
+		show_error_dialog(window,
+			g_error_new_literal(G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+				"files without a local path aren't supported"));
 		return;
 	}
 
+	GError *error = NULL;
 	GSubprocess *subprocess = g_subprocess_new(flags, &error, "exiftool",
 		"-tab", "-groupNames", "-duplicates", "-extractEmbedded", "--binary",
 		"-quiet", "--", path, NULL);
