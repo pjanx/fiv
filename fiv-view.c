@@ -1209,39 +1209,46 @@ info(FivView *self)
 	GtkWindow *window = get_toplevel(GTK_WIDGET(self));
 	int flags = G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_PIPE;
 
+	// TODO(p): Make this all cancellable, especially considering downloading.
+	// Do this by showing the dialog window immediately.
 	GFile *file = g_file_new_for_uri(self->uri);
 	gchar *path = g_file_get_path(file);
-	g_object_unref(file);
-	if (!path) {
-		// TODO(p): Support piping to exiftool (use "-" as path).
-		show_error_dialog(window,
-			g_error_new_literal(G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
-				"files without a local path aren't supported"));
-		return;
-	}
 
 	GError *error = NULL;
+	GBytes *inbytes = NULL, *outbytes = NULL, *errbytes = NULL;
+	gchar *file_data = NULL;
+	gsize file_len = 0;
+	if (!path &&
+		g_file_load_contents(file, NULL, &file_data, &file_len, NULL, &error)) {
+		flags |= G_SUBPROCESS_FLAGS_STDIN_PIPE;
+		path = g_strdup("-");
+		inbytes = g_bytes_new_take(file_data, file_len);
+	}
+
+	g_object_unref(file);
+	if (error)
+		goto out;
+
 	GSubprocess *subprocess = g_subprocess_new(flags, &error, "exiftool",
 		"-tab", "-groupNames", "-duplicates", "-extractEmbedded", "--binary",
 		"-quiet", "--", path, NULL);
 	g_free(path);
-	if (error) {
-		show_error_dialog(window, error);
-		return;
-	}
-
-	gchar *out = NULL, *err = NULL;
-	if (!g_subprocess_communicate_utf8(
-			subprocess, NULL, NULL, &out, &err, &error)) {
-		show_error_dialog(window, error);
-		return;
-	}
+	if (error || !g_subprocess_communicate(
+		subprocess, inbytes, NULL, &outbytes, &errbytes, &error))
+		goto out;
 
 	GtkWidget *dialog = gtk_widget_new(GTK_TYPE_DIALOG,
 		"use-header-bar", TRUE,
 		"title", "Information",
 		"transient-for", window,
 		"destroy-with-parent", TRUE, NULL);
+
+	gchar *out = g_utf8_make_valid(
+		g_bytes_get_data(outbytes, NULL), g_bytes_get_size(outbytes));
+	gchar *err = g_utf8_make_valid(
+		g_bytes_get_data(errbytes, NULL), g_bytes_get_size(errbytes));
+	g_bytes_unref(outbytes);
+	g_bytes_unref(errbytes);
 
 	GtkWidget *content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
 	if (*err) {
@@ -1275,6 +1282,12 @@ info(FivView *self)
 	g_free(err);
 	g_object_unref(subprocess);
 	gtk_widget_show_all(dialog);
+
+out:
+	if (error)
+		show_error_dialog(window, error);
+	if (inbytes)
+		g_bytes_unref(inbytes);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
