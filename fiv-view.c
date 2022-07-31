@@ -1224,6 +1224,16 @@ get_target_path(GFile *file, GCancellable *cancellable)
 	return path;
 }
 
+static gchar *
+bytes_to_utf8(GBytes *bytes)
+{
+	gsize length = 0;
+	gconstpointer data = g_bytes_get_data(bytes, &length);
+	gchar *utf8 = data ? g_utf8_make_valid(data, length) : g_strdup("");
+	g_bytes_unref(bytes);
+	return utf8;
+}
+
 static void
 info(FivView *self)
 {
@@ -1238,14 +1248,14 @@ info(FivView *self)
 	gchar *path = g_file_get_path(file);
 
 	GError *error = NULL;
-	GBytes *inbytes = NULL, *outbytes = NULL, *errbytes = NULL;
+	GBytes *bytes_in = NULL, *bytes_out = NULL, *bytes_err = NULL;
 	gchar *file_data = NULL;
 	gsize file_len = 0;
 	if (!path && !(path = get_target_path(file, NULL)) &&
 		g_file_load_contents(file, NULL, &file_data, &file_len, NULL, &error)) {
 		flags |= G_SUBPROCESS_FLAGS_STDIN_PIPE;
 		path = g_strdup("-");
-		inbytes = g_bytes_new_take(file_data, file_len);
+		bytes_in = g_bytes_new_take(file_data, file_len);
 	}
 
 	g_object_unref(file);
@@ -1257,21 +1267,16 @@ info(FivView *self)
 		"-quiet", "--", path, NULL);
 	g_free(path);
 	if (error || !g_subprocess_communicate(
-		subprocess, inbytes, NULL, &outbytes, &errbytes, &error))
+		subprocess, bytes_in, NULL, &bytes_out, &bytes_err, &error))
 		goto out;
 
+	gchar *out = bytes_to_utf8(bytes_out);
+	gchar *err = bytes_to_utf8(bytes_err);
 	GtkWidget *dialog = gtk_widget_new(GTK_TYPE_DIALOG,
 		"use-header-bar", TRUE,
 		"title", "Information",
 		"transient-for", window,
 		"destroy-with-parent", TRUE, NULL);
-
-	gchar *out = g_utf8_make_valid(
-		g_bytes_get_data(outbytes, NULL), g_bytes_get_size(outbytes));
-	gchar *err = g_utf8_make_valid(
-		g_bytes_get_data(errbytes, NULL), g_bytes_get_size(errbytes));
-	g_bytes_unref(outbytes);
-	g_bytes_unref(errbytes);
 
 	GtkWidget *content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
 	if (*err) {
@@ -1309,8 +1314,8 @@ info(FivView *self)
 out:
 	if (error)
 		show_error_dialog(window, error);
-	if (inbytes)
-		g_bytes_unref(inbytes);
+	if (bytes_in)
+		g_bytes_unref(bytes_in);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
