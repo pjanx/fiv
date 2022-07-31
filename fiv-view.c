@@ -1201,6 +1201,29 @@ info_parse(char *tsv)
 	return vbox;
 }
 
+// Several GVfs schemes contain pseudo-symlinks that don't give out
+// filesystem paths directly.
+static gchar *
+get_target_path(GFile *file, GCancellable *cancellable)
+{
+	GFileInfo *info =
+		g_file_query_info(file, G_FILE_ATTRIBUTE_STANDARD_TARGET_URI,
+			G_FILE_QUERY_INFO_NONE, cancellable, NULL);
+	if (!info)
+		return NULL;
+
+	gchar *path = NULL;
+	const char *target_uri = g_file_info_get_attribute_string(
+		info, G_FILE_ATTRIBUTE_STANDARD_TARGET_URI);
+	if (target_uri) {
+		GFile *target = g_file_new_for_uri(target_uri);
+		path = g_file_get_path(target);
+		g_object_unref(target);
+	}
+	g_object_unref(info);
+	return path;
+}
+
 static void
 info(FivView *self)
 {
@@ -1218,7 +1241,7 @@ info(FivView *self)
 	GBytes *inbytes = NULL, *outbytes = NULL, *errbytes = NULL;
 	gchar *file_data = NULL;
 	gsize file_len = 0;
-	if (!path &&
+	if (!path && !(path = get_target_path(file, NULL)) &&
 		g_file_load_contents(file, NULL, &file_data, &file_len, NULL, &error)) {
 		flags |= G_SUBPROCESS_FLAGS_STDIN_PIPE;
 		path = g_strdup("-");
