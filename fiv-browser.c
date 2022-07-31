@@ -257,7 +257,7 @@ item_extents(FivBrowser *self, const Item *item, const Row *row)
 	int height = cairo_image_surface_get_height(item->entry->thumbnail);
 	return (GdkRectangle) {
 		.x = row->x_offset + item->x_offset,
-		.y = row->y_offset + self->item_height - height,
+		.y = row->y_offset + (self->item_height - height) / 2,
 		.width = width,
 		.height = height,
 	};
