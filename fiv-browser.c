@@ -1085,11 +1085,18 @@ fiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 		gtk_widget_get_focus_on_click(widget))
 		gtk_widget_grab_focus(widget);
 
+	// In accordance with Nautilus, Thunar, and the mildly confusing
+	// Apple Human Interface Guidelines, but not with the ugly Windows User
+	// Experience Interaction Guidelines, open the context menu on button press.
+	// (Originally our own behaviour, but the GDK3 function also does this.)
+	gboolean triggers_menu =
+		gdk_event_triggers_context_menu((const GdkEvent *) event);
+
 	const Entry *entry = entry_at(self, event->x, event->y);
-	if (!entry && state == 0) {
-		if (event->button == GDK_BUTTON_SECONDARY)
+	if (!entry) {
+		if (triggers_menu)
 			show_context_menu(widget, fiv_io_model_get_location(self->model));
-		else if (event->button != GDK_BUTTON_PRIMARY)
+		else if (state || event->button != GDK_BUTTON_PRIMARY)
 			return GDK_EVENT_PROPAGATE;
 
 		if (self->selected) {
@@ -1099,10 +1106,7 @@ fiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 		return GDK_EVENT_STOP;
 	}
 
-	// In accordance with Nautilus, Thunar, and the mildly confusing
-	// Apple Human Interface Guidelines, but not with the ugly Windows User
-	// Experience Interaction Guidelines, open the context menu on button press.
-	if (entry && event->button == GDK_BUTTON_SECONDARY) {
+	if (entry && triggers_menu) {
 		self->selected = entry;
 		gtk_widget_queue_draw(widget);
 

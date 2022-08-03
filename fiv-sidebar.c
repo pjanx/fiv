@@ -196,14 +196,13 @@ static gboolean
 on_breadcrumb_button_press(GtkWidget *widget, GdkEventButton *event,
 	G_GNUC_UNUSED gpointer user_data)
 {
-	if (event->type != GDK_BUTTON_PRESS ||
-		event->button != GDK_BUTTON_SECONDARY)
-		return FALSE;
+	if (!gdk_event_triggers_context_menu((const GdkEvent *) event))
+		return GDK_EVENT_PROPAGATE;
 
 	GFile *location =
 		g_object_get_qdata(G_OBJECT(widget), fiv_sidebar_location_quark());
 	gtk_menu_popup_at_pointer(fiv_context_menu_new(widget, location), NULL);
-	return TRUE;
+	return GDK_EVENT_STOP;
 }
 
 static gboolean
