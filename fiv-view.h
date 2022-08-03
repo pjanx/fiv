@@ -50,6 +50,7 @@ typedef enum _FivViewCommand {
 	XX(FIV_VIEW_COMMAND_TOGGLE_FILTER,       "toggle-filter")                  \
 	XX(FIV_VIEW_COMMAND_TOGGLE_CHECKERBOARD, "toggle-checkerboard")            \
 	XX(FIV_VIEW_COMMAND_TOGGLE_ENHANCE,      "toggle-enhance")                 \
+	XX(FIV_VIEW_COMMAND_COPY,                "copy")                           \
 	XX(FIV_VIEW_COMMAND_PRINT,               "print")                          \
 	XX(FIV_VIEW_COMMAND_SAVE_PAGE,           "save-page")                      \
 	XX(FIV_VIEW_COMMAND_SAVE_FRAME,          "save-frame")                     \

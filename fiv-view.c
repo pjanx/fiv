@@ -991,6 +991,34 @@ get_toplevel(GtkWidget *widget)
 }
 
 static void
+copy(FivView *self)
+{
+	double fractional_width = 0, fractional_height = 0;
+	cairo_matrix_t matrix = fiv_io_orientation_apply(
+		self->frame, self->orientation, &fractional_width, &fractional_height);
+	int w = ceil(fractional_width), h = ceil(fractional_height);
+
+	// XXX: SVG is rendered pre-scaled.
+	cairo_surface_t *transformed =
+		cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+	cairo_t *cr = cairo_create(transformed);
+	cairo_set_source_surface(cr, self->frame, 0, 0);
+	cairo_pattern_set_matrix(cairo_get_source(cr), &matrix);
+	cairo_paint(cr);
+	cairo_destroy(cr);
+
+	// TODO(p): Use 16-bit PNGs for >8-bit Cairo surfaces: PNG-encode them
+	// ourselves and fall back to gtk_selection_data_set_pixbuf().
+	GdkPixbuf *pixbuf = gdk_pixbuf_get_from_surface(transformed, 0, 0, w, h);
+	cairo_surface_destroy(transformed);
+	gtk_clipboard_set_image(
+		gtk_clipboard_get_for_display(
+			gtk_widget_get_display(GTK_WIDGET(self)), GDK_SELECTION_CLIPBOARD),
+		pixbuf);
+	g_object_unref(pixbuf);
+}
+
+static void
 on_draw_page(G_GNUC_UNUSED GtkPrintOperation *operation,
 	GtkPrintContext *context, G_GNUC_UNUSED int page_nr, FivView *self)
 {
@@ -1428,6 +1456,7 @@ fiv_view_class_init(FivViewClass *klass)
 	bind(bs, GDK_KEY_0,      primary,       FIV_VIEW_COMMAND_ZOOM_1);
 	bind(bs, GDK_KEY_plus,   primary,       FIV_VIEW_COMMAND_ZOOM_IN);
 	bind(bs, GDK_KEY_minus,  primary,       FIV_VIEW_COMMAND_ZOOM_OUT);
+	bind(bs, GDK_KEY_c,      primary,       FIV_VIEW_COMMAND_COPY);
 	bind(bs, GDK_KEY_p,      primary,       FIV_VIEW_COMMAND_PRINT);
 	bind(bs, GDK_KEY_r,      primary,       FIV_VIEW_COMMAND_RELOAD);
 	bind(bs, GDK_KEY_s,      primary,       FIV_VIEW_COMMAND_SAVE_PAGE);
@@ -1672,6 +1701,8 @@ fiv_view_command(FivView *self, FivViewCommand command)
 			G_OBJECT(self), view_properties[PROP_ENHANCE]);
 		swap_enhanced_image(self);
 
+	break; case FIV_VIEW_COMMAND_COPY:
+		copy(self);
 	break; case FIV_VIEW_COMMAND_PRINT:
 		print(self);
 	break; case FIV_VIEW_COMMAND_SAVE_PAGE:

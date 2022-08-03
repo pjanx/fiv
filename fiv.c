@@ -175,6 +175,7 @@ static struct key_group help_keys_viewer[] = {
 		{}
 	}},
 	{"Tools", (struct key[]) {
+		{"<Primary>c", "Copy frame to clipboard"},
 		{"<Primary>p", "Print..."},
 		{"<Primary>s", "Save page as..."},
 		{"<Primary><Shift>s", "Save frame as..."},
