@@ -82,23 +82,23 @@ struct key_section {
 static struct key help_keys_general[] = {
 	{"F1", "Show help"},
 	{"F10", "Open menu"},
-	{"<control>question", "Keyboard shortcuts"},
-	{"q <control>q", "Quit"},
-	{"<control>w", "Quit"},
+	{"<Control>question", "Keyboard shortcuts"},
+	{"q <Control>q", "Quit"},
+	{"<Control>w", "Quit"},
 	{}
 };
 
 static struct key help_keys_navigation[] = {
-	{"<control>l", "Open location..."},
-	{"<control>n", "Open a new window"},
-	{"<alt>Left", "Go back in history"},
-	{"<alt>Right", "Go forward in history"},
+	{"<Control>l", "Open location..."},
+	{"<Control>n", "Open a new window"},
+	{"<Alt>Left", "Go back in history"},
+	{"<Alt>Right", "Go forward in history"},
 	{}
 };
 
 static struct key help_keys_view[] = {
 	{"F11 f", "Toggle fullscreen"},
-	{"<alt><shift>d", "Toggle dark theme variant"},
+	{"<Alt><Shift>d", "Toggle dark theme variant"},
 	{}
 };
 
@@ -107,17 +107,17 @@ static struct key_group help_keys_browser[] = {
 	{"General: Navigation", help_keys_navigation},
 	{"General: View", help_keys_view},
 	{"Navigation", (struct key[]) {
-		{"<alt>Up", "Go to parent directory"},
-		{"<alt>Home", "Go home"},
+		{"<Alt>Up", "Go to parent directory"},
+		{"<Alt>Home", "Go home"},
 		{"Return", "Open selected item"},
 		{}
 	}},
 	{"View", (struct key[]) {
 		{"F9", "Toggle navigation sidebar"},
-		{"F5 r <control>r", "Reload"},
-		{"h <control>h", "Toggle hiding unsupported files"},
-		{"<control>plus", "Larger thumbnails"},
-		{"<control>minus", "Smaller thumbnails"},
+		{"F5 r <Control>r", "Reload"},
+		{"h <Control>h", "Toggle hiding unsupported files"},
+		{"<Control>plus", "Larger thumbnails"},
+		{"<Control>minus", "Smaller thumbnails"},
 		{}
 	}},
 	{}
@@ -135,14 +135,14 @@ static struct key_group help_keys_viewer[] = {
 	}},
 	{"View", (struct key[]) {
 		{"F8", "Toggle toolbar"},
-		{"F5 r <control>r", "Reload"},
+		{"F5 r <Primary>r", "Reload"},
 		{}
 	}},
 	{"Zoom", (struct key[]) {
-		{"<control>0", "Set zoom to 100%"},
+		{"<Primary>0", "Set zoom to 100%"},
 		{"1...9", "Set zoom to N:1"},
-		{"plus <control>plus", "Zoom in"},
-		{"minus <control>minus", "Zoom out"},
+		{"plus <Primary>plus", "Zoom in"},
+		{"minus <Primary>minus", "Zoom out"},
 		{"w", "Zoom to fit width if larger"},
 		{"h", "Zoom to fit height if larger"},
 		{}
@@ -175,10 +175,10 @@ static struct key_group help_keys_viewer[] = {
 		{}
 	}},
 	{"Tools", (struct key[]) {
-		{"<control>p", "Print..."},
-		{"<control>s", "Save page as..."},
-		{"<control><shift>s", "Save frame as..."},
-		{"<alt>Return", "Show file information"},
+		{"<Primary>p", "Print..."},
+		{"<Primary>s", "Save page as..."},
+		{"<Primary><Shift>s", "Save frame as..."},
+		{"<Alt>Return", "Show file information"},
 		{}
 	}},
 	{}

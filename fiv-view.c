@@ -1419,16 +1419,20 @@ fiv_view_class_init(FivViewClass *klass)
 	widget_class->scroll_event = fiv_view_scroll_event;
 	widget_class->key_press_event = fiv_view_key_press_event;
 
+	// _gtk_get_primary_accel_mod() is private.
+	GdkModifierType primary = GDK_CONTROL_MASK;
+	gtk_accelerator_parse_with_keycode("<Primary>", NULL, NULL, &primary);
+
 	GtkBindingSet *bs = gtk_binding_set_by_class(klass);
 	// First, the standard, intuitive bindings.
-	bind(bs, GDK_KEY_0,      GDK_CONTROL_MASK, FIV_VIEW_COMMAND_ZOOM_1);
-	bind(bs, GDK_KEY_plus,   GDK_CONTROL_MASK, FIV_VIEW_COMMAND_ZOOM_IN);
-	bind(bs, GDK_KEY_minus,  GDK_CONTROL_MASK, FIV_VIEW_COMMAND_ZOOM_OUT);
-	bind(bs, GDK_KEY_p,      GDK_CONTROL_MASK, FIV_VIEW_COMMAND_PRINT);
-	bind(bs, GDK_KEY_r,      GDK_CONTROL_MASK, FIV_VIEW_COMMAND_RELOAD);
-	bind(bs, GDK_KEY_s,      GDK_CONTROL_MASK, FIV_VIEW_COMMAND_SAVE_PAGE);
-	bind(bs, GDK_KEY_s,      GDK_MOD1_MASK,    FIV_VIEW_COMMAND_SAVE_FRAME);
-	bind(bs, GDK_KEY_Return, GDK_MOD1_MASK,    FIV_VIEW_COMMAND_INFO);
+	bind(bs, GDK_KEY_0,      primary,       FIV_VIEW_COMMAND_ZOOM_1);
+	bind(bs, GDK_KEY_plus,   primary,       FIV_VIEW_COMMAND_ZOOM_IN);
+	bind(bs, GDK_KEY_minus,  primary,       FIV_VIEW_COMMAND_ZOOM_OUT);
+	bind(bs, GDK_KEY_p,      primary,       FIV_VIEW_COMMAND_PRINT);
+	bind(bs, GDK_KEY_r,      primary,       FIV_VIEW_COMMAND_RELOAD);
+	bind(bs, GDK_KEY_s,      primary,       FIV_VIEW_COMMAND_SAVE_PAGE);
+	bind(bs, GDK_KEY_s,      GDK_MOD1_MASK, FIV_VIEW_COMMAND_SAVE_FRAME);
+	bind(bs, GDK_KEY_Return, GDK_MOD1_MASK, FIV_VIEW_COMMAND_INFO);
 
 	// The scale-to-fit binding is from gThumb, which has more such modes.
 	bind(bs, GDK_KEY_F5,           0, FIV_VIEW_COMMAND_RELOAD);
