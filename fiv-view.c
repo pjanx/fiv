@@ -1095,24 +1095,24 @@ save_as(FivView *self, cairo_surface_t *frame)
 	gtk_file_chooser_set_do_overwrite_confirmation(chooser, TRUE);
 
 	GFile *file = g_file_new_for_uri(self->uri);
-	const gchar *path = g_file_peek_path(file);
-	// TODO(p): Use g_file_info_get_display_name().
-	gchar *basename = g_filename_display_basename(path ? path : self->uri);
+	GFileInfo *info =
+		g_file_query_info(file, G_FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME,
+			G_FILE_QUERY_INFO_NONE, NULL, NULL);
 
 	// Note that GTK+'s save dialog is too stupid to automatically change
 	// the extension when user changes the filter. Presumably,
 	// gtk_file_chooser_set_extra_widget() can be used to circumvent this.
-	gchar *name =
-		g_strdup_printf(frame ? "%s.frame.webp" : "%s.webp", basename);
+	const char *basename = info ? g_file_info_get_display_name(info) : "image";
+	gchar *name = g_strconcat(basename, frame ? "-frame.webp" : ".webp", NULL);
 	gtk_file_chooser_set_current_name(chooser, name);
 	g_free(name);
-	if (path) {
-		gchar *dirname = g_path_get_dirname(path);
-		gtk_file_chooser_set_current_folder(chooser, dirname);
-		g_free(dirname);
+	if (g_file_peek_path(file)) {
+		GFile *parent = g_file_get_parent(file);
+		(void) gtk_file_chooser_set_current_folder_file(chooser, parent, NULL);
+		g_object_unref(parent);
 	}
-	g_free(basename);
 	g_object_unref(file);
+	g_clear_object(&info);
 
 	// This is the best general format: supports lossless encoding, animations,
 	// alpha channel, and Exif and ICC profile metadata.
