@@ -17,4 +17,5 @@
 
 #include <gtk/gtk.h>
 
+void fiv_context_menu_information(GtkWindow *parent, const char *uri);
 GtkMenu *fiv_context_menu_new(GtkWidget *widget, GFile *file);

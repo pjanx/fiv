@@ -19,22 +19,306 @@
 
 #include "fiv-context-menu.h"
 
+G_DEFINE_QUARK(fiv-context-menu-cancellable-quark, fiv_context_menu_cancellable)
+
+static GtkWidget *
+info_start_group(GtkWidget *vbox, const char *group)
+{
+	GtkWidget *label = gtk_label_new(group);
+	gtk_widget_set_hexpand(label, TRUE);
+	gtk_widget_set_halign(label, GTK_ALIGN_FILL);
+	PangoAttrList *attrs = pango_attr_list_new();
+	pango_attr_list_insert(attrs, pango_attr_weight_new(PANGO_WEIGHT_BOLD));
+	gtk_label_set_attributes(GTK_LABEL(label), attrs);
+	pango_attr_list_unref(attrs);
+
+	GtkWidget *grid = gtk_grid_new();
+	GtkWidget *expander = gtk_expander_new(NULL);
+	gtk_expander_set_label_widget(GTK_EXPANDER(expander), label);
+	gtk_expander_set_expanded(GTK_EXPANDER(expander), TRUE);
+	gtk_container_add(GTK_CONTAINER(expander), grid);
+	gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
+	gtk_box_pack_start(GTK_BOX(vbox), expander, FALSE, FALSE, 0);
+	return grid;
+}
+
+static GtkWidget *
+info_parse(char *tsv)
+{
+	GtkSizeGroup *sg = gtk_size_group_new(GTK_SIZE_GROUP_HORIZONTAL);
+	GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+
+	const char *last_group = NULL;
+	GtkWidget *grid = NULL;
+	int line = 1, row = 0;
+	for (char *nl; (nl = strchr(tsv, '\n')); line++, tsv = ++nl) {
+		*nl = 0;
+		if (nl > tsv && nl[-1] == '\r')
+			nl[-1] = 0;
+
+		char *group = tsv, *tag = strchr(group, '\t');
+		if (!tag) {
+			g_warning("ExifTool parse error on line %d", line);
+			continue;
+		}
+
+		*tag++ = 0;
+		for (char *p = group; *p; p++)
+			if (*p == '_')
+				*p = ' ';
+
+		char *value = strchr(tag, '\t');
+		if (!value) {
+			g_warning("ExifTool parse error on line %d", line);
+			continue;
+		}
+
+		*value++ = 0;
+		if (!last_group || strcmp(last_group, group)) {
+			grid = info_start_group(vbox, (last_group = group));
+			row = 0;
+		}
+
+		GtkWidget *a = gtk_label_new(tag);
+		gtk_size_group_add_widget(sg, a);
+		gtk_label_set_selectable(GTK_LABEL(a), TRUE);
+		gtk_label_set_xalign(GTK_LABEL(a), 0.);
+		gtk_grid_attach(GTK_GRID(grid), a, 0, row, 1, 1);
+
+		GtkWidget *b = gtk_label_new(value);
+		gtk_label_set_selectable(GTK_LABEL(b), TRUE);
+		gtk_label_set_xalign(GTK_LABEL(b), 0.);
+		gtk_label_set_line_wrap(GTK_LABEL(b), TRUE);
+		gtk_widget_set_hexpand(b, TRUE);
+		gtk_grid_attach(GTK_GRID(grid), b, 1, row, 1, 1);
+		row++;
+	}
+	g_object_unref(sg);
+	return vbox;
+}
+
+static GtkWidget *
+info_make_bar(const char *message)
+{
+	GtkWidget *info = gtk_info_bar_new();
+	gtk_info_bar_set_message_type(GTK_INFO_BAR(info), GTK_MESSAGE_WARNING);
+	GtkWidget *info_area = gtk_info_bar_get_content_area(GTK_INFO_BAR(info));
+	gtk_container_add(GTK_CONTAINER(info_area), gtk_label_new(message));
+	return info;
+}
+
+static void
+info_redirect_error(gpointer dialog, GError *error)
+{
+	// The dialog has been closed and destroyed.
+	if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
+		g_error_free(error);
+		return;
+	}
+
+	GtkContainer *content_area =
+		GTK_CONTAINER(gtk_dialog_get_content_area(GTK_DIALOG(dialog)));
+	gtk_container_foreach(content_area, (GtkCallback) gtk_widget_destroy, NULL);
+	gtk_container_add(content_area, info_make_bar(error->message));
+	if (g_error_matches(error, G_SPAWN_ERROR, G_SPAWN_ERROR_NOENT)) {
+		gtk_box_pack_start(GTK_BOX(content_area),
+			gtk_label_new("Please install ExifTool."), TRUE, FALSE, 12);
+	}
+
+	g_error_free(error);
+	gtk_widget_show_all(GTK_WIDGET(dialog));
+}
+
+static gchar *
+bytes_to_utf8(GBytes *bytes)
+{
+	gsize length = 0;
+	gconstpointer data = g_bytes_get_data(bytes, &length);
+	gchar *utf8 = data ? g_utf8_make_valid(data, length) : g_strdup("");
+	g_bytes_unref(bytes);
+	return utf8;
+}
+
+static void
+on_info_finished(GObject *source_object, GAsyncResult *res, gpointer user_data)
+{
+	GError *error = NULL;
+	GBytes *bytes_out = NULL, *bytes_err = NULL;
+	if (!g_subprocess_communicate_finish(
+			G_SUBPROCESS(source_object), res, &bytes_out, &bytes_err, &error)) {
+		info_redirect_error(user_data, error);
+		return;
+	}
+
+	gchar *out = bytes_to_utf8(bytes_out);
+	gchar *err = bytes_to_utf8(bytes_err);
+
+	GtkWidget *dialog = GTK_WIDGET(user_data);
+	GtkWidget *content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
+	gtk_container_foreach(
+		GTK_CONTAINER(content_area), (GtkCallback) gtk_widget_destroy, NULL);
+
+	GtkWidget *scroller = gtk_scrolled_window_new(NULL, NULL);
+	gtk_box_pack_start(GTK_BOX(content_area), scroller, TRUE, TRUE, 0);
+	GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	gtk_container_add(GTK_CONTAINER(scroller), vbox);
+	if (*err)
+		gtk_container_add(GTK_CONTAINER(vbox), info_make_bar(g_strstrip(err)));
+
+	GtkWidget *info = info_parse(out);
+	gtk_style_context_add_class(
+		gtk_widget_get_style_context(info), "fiv-information");
+	gtk_box_pack_start(GTK_BOX(vbox), info, TRUE, TRUE, 0);
+
+	g_free(out);
+	g_free(err);
+	gtk_widget_show_all(dialog);
+}
+
+static void
+info_spawn(GtkWidget *dialog, const char *path, GBytes *bytes_in)
+{
+	int flags = G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_PIPE;
+	if (bytes_in)
+		flags |= G_SUBPROCESS_FLAGS_STDIN_PIPE;
+
+	// TODO(p): Add a fallback to internal capabilities.
+	// The simplest is to specify the filename and the resolution.
+	GError *error = NULL;
+	GSubprocess *subprocess = g_subprocess_new(flags, &error, "exiftool",
+		"-tab", "-groupNames", "-duplicates", "-extractEmbedded", "--binary",
+		"-quiet", "--", path, NULL);
+	if (error) {
+		info_redirect_error(dialog, error);
+		return;
+	}
+
+	GCancellable *cancellable = g_object_get_qdata(
+		G_OBJECT(dialog), fiv_context_menu_cancellable_quark());
+	g_subprocess_communicate_async(
+		subprocess, bytes_in, cancellable, on_info_finished, dialog);
+	g_object_unref(subprocess);
+}
+
+static void
+on_info_loaded(GObject *source_object, GAsyncResult *res, gpointer user_data)
+{
+	gchar *file_data = NULL;
+	gsize file_len = 0;
+	GError *error = NULL;
+	if (!g_file_load_contents_finish(
+			G_FILE(source_object), res, &file_data, &file_len, NULL, &error)) {
+		info_redirect_error(user_data, error);
+		return;
+	}
+
+	GtkWidget *dialog = GTK_WIDGET(user_data);
+	GBytes *bytes_in = g_bytes_new_take(file_data, file_len);
+	info_spawn(dialog, "-", bytes_in);
+	g_bytes_unref(bytes_in);
+}
+
+static void
+on_info_queried(GObject *source_object, GAsyncResult *res, gpointer user_data)
+{
+	GFile *file = G_FILE(source_object);
+	GError *error = NULL;
+	GFileInfo *info = g_file_query_info_finish(file, res, &error);
+	gboolean cancelled =
+		error && g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED);
+	g_clear_error(&error);
+	if (cancelled)
+		return;
+
+	gchar *path = NULL;
+	const char *target_uri = g_file_info_get_attribute_string(
+		info, G_FILE_ATTRIBUTE_STANDARD_TARGET_URI);
+	if (target_uri) {
+		GFile *target = g_file_new_for_uri(target_uri);
+		path = g_file_get_path(target);
+		g_object_unref(target);
+	}
+	g_object_unref(info);
+
+	GtkWidget *dialog = GTK_WIDGET(user_data);
+	GCancellable *cancellable = g_object_get_qdata(
+		G_OBJECT(dialog), fiv_context_menu_cancellable_quark());
+	if (path) {
+		info_spawn(dialog, path, NULL);
+		g_free(path);
+	} else {
+		g_file_load_contents_async(file, cancellable, on_info_loaded, dialog);
+	}
+}
+
+void
+fiv_context_menu_information(GtkWindow *parent, const char *uri)
+{
+	GtkWidget *dialog = gtk_widget_new(GTK_TYPE_DIALOG,
+		"use-header-bar", TRUE,
+		"title", "Information",
+		"transient-for", parent,
+		"destroy-with-parent", TRUE, NULL);
+
+	// When the window closes, we cancel all asynchronous calls.
+	GCancellable *cancellable = g_cancellable_new();
+	g_object_set_qdata_full(G_OBJECT(dialog),
+		fiv_context_menu_cancellable_quark(), cancellable, g_object_unref);
+	g_signal_connect_swapped(
+		dialog, "destroy", G_CALLBACK(g_cancellable_cancel), cancellable);
+
+	GtkWidget *spinner = gtk_spinner_new();
+	gtk_spinner_start(GTK_SPINNER(spinner));
+	gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(dialog))),
+		spinner, TRUE, TRUE, 12);
+	gtk_window_set_default_size(GTK_WINDOW(dialog), 600, 800);
+	gtk_widget_show_all(dialog);
+
+	// Mostly for URIs with no local path--we pipe these into ExifTool.
+	GFile *file = g_file_new_for_uri(uri);
+	gchar *parse_name = g_file_get_parse_name(file);
+	gtk_header_bar_set_subtitle(
+		GTK_HEADER_BAR(gtk_dialog_get_header_bar(GTK_DIALOG(dialog))),
+		parse_name);
+	g_free(parse_name);
+
+	gchar *path = g_file_get_path(file);
+	if (path) {
+		info_spawn(dialog, path, NULL);
+		g_free(path);
+	} else {
+		// Several GVfs schemes contain pseudo-symlinks
+		// that don't give out filesystem paths directly.
+		g_file_query_info_async(file, G_FILE_ATTRIBUTE_STANDARD_TARGET_URI,
+			G_FILE_QUERY_INFO_NONE, G_PRIORITY_DEFAULT, cancellable,
+			on_info_queried, dialog);
+	}
+	g_object_unref(file);
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
 typedef struct _OpenContext {
-	GWeakRef widget;
-	GFile *file;
+	GWeakRef window;                    ///< Parent window for any dialogs
+	GFile *file;                        ///< The file in question
 	gchar *content_type;
 	GAppInfo *app_info;
 } OpenContext;
 
 static void
-open_context_notify(gpointer data, G_GNUC_UNUSED GClosure *closure)
+open_context_finalize(gpointer data)
 {
 	OpenContext *self = data;
-	g_weak_ref_clear(&self->widget);
+	g_weak_ref_clear(&self->window);
 	g_clear_object(&self->app_info);
 	g_clear_object(&self->file);
 	g_free(self->content_type);
-	g_free(self);
+}
+
+static void
+open_context_unref(gpointer data, G_GNUC_UNUSED GClosure *closure)
+{
+	g_rc_box_release_full(data, open_context_finalize);
 }
 
 static void
@@ -62,8 +346,8 @@ open_context_launch(GtkWidget *widget, OpenContext *self)
 static void
 append_opener(GtkWidget *menu, GAppInfo *opener, const OpenContext *template)
 {
-	OpenContext *ctx = g_malloc0(sizeof *ctx);
-	g_weak_ref_init(&ctx->widget, NULL);
+	OpenContext *ctx = g_rc_box_alloc0(sizeof *ctx);
+	g_weak_ref_init(&ctx->window, NULL);
 	ctx->file = g_object_ref(template->file);
 	ctx->content_type = g_strdup(template->content_type);
 	ctx->app_info = opener;
@@ -94,7 +378,7 @@ append_opener(GtkWidget *menu, GAppInfo *opener, const OpenContext *template)
 
 	g_free(name);
 	g_signal_connect_data(item, "activate", G_CALLBACK(open_context_launch),
-		ctx, open_context_notify, 0);
+		ctx, open_context_unref, 0);
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
 }
 
@@ -102,20 +386,26 @@ static void
 on_chooser_activate(GtkMenuItem *item, gpointer user_data)
 {
 	OpenContext *ctx = user_data;
-	GtkWindow *window = NULL;
-	GtkWidget *widget = g_weak_ref_get(&ctx->widget);
-	if (widget) {
-		if (GTK_IS_WINDOW((widget = gtk_widget_get_toplevel(widget))))
-			window = GTK_WINDOW(widget);
-	}
-
+	GtkWindow *window = g_weak_ref_get(&ctx->window);
 	GtkWidget *dialog = gtk_app_chooser_dialog_new_for_content_type(window,
 		GTK_DIALOG_DESTROY_WITH_PARENT | GTK_DIALOG_MODAL, ctx->content_type);
+	g_clear_object(&window);
 	if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK) {
 		ctx->app_info = gtk_app_chooser_get_app_info(GTK_APP_CHOOSER(dialog));
 		open_context_launch(GTK_WIDGET(item), ctx);
 	}
 	gtk_widget_destroy(dialog);
+}
+
+static void
+on_info_activate(G_GNUC_UNUSED GtkMenuItem *item, gpointer user_data)
+{
+	OpenContext *ctx = user_data;
+	GtkWindow *window = g_weak_ref_get(&ctx->window);
+	gchar *uri = g_file_get_uri(ctx->file);
+	fiv_context_menu_information(window, uri);
+	g_clear_object(&window);
+	g_free(uri);
 }
 
 static gboolean
@@ -132,16 +422,22 @@ fiv_context_menu_new(GtkWidget *widget, GFile *file)
 {
 	GFileInfo *info = g_file_query_info(file,
 		G_FILE_ATTRIBUTE_STANDARD_NAME
+		"," G_FILE_ATTRIBUTE_STANDARD_TYPE
 		"," G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE,
 		G_FILE_QUERY_INFO_NONE, NULL, NULL);
 	if (!info)
 		return NULL;
 
+	GtkWindow *window = NULL;
+	if (widget && GTK_IS_WINDOW((widget = gtk_widget_get_toplevel(widget))))
+		window = GTK_WINDOW(widget);
+
 	// This will have no application pre-assigned, for use with GTK+'s dialog.
-	OpenContext *ctx = g_malloc0(sizeof *ctx);
-	g_weak_ref_init(&ctx->widget, widget);
+	OpenContext *ctx = g_rc_box_alloc0(sizeof *ctx);
+	g_weak_ref_init(&ctx->window, window);
 	ctx->file = g_object_ref(file);
 	ctx->content_type = g_strdup(g_file_info_get_content_type(info));
+	gboolean regular = g_file_info_get_file_type(info) == G_FILE_TYPE_REGULAR;
 	g_object_unref(info);
 
 	GAppInfo *default_ =
@@ -182,8 +478,18 @@ fiv_context_menu_new(GtkWidget *widget, GFile *file)
 
 	GtkWidget *item = gtk_menu_item_new_with_label("Open With...");
 	g_signal_connect_data(item, "activate", G_CALLBACK(on_chooser_activate),
-		ctx, open_context_notify, 0);
+		ctx, open_context_unref, 0);
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
+
+	if (regular) {
+		gtk_menu_shell_append(
+			GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
+
+		item = gtk_menu_item_new_with_label("Information...");
+		g_signal_connect_data(item, "activate", G_CALLBACK(on_info_activate),
+			g_rc_box_acquire(ctx), open_context_unref, 0);
+		gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
+	}
 
 	// As per GTK+ 3 Common Questions, 1.5.
 	g_object_ref_sink(menu);
