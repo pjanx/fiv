@@ -1408,7 +1408,14 @@ info(FivView *self)
 	gtk_window_set_default_size(GTK_WINDOW(dialog), 600, 800);
 	gtk_widget_show_all(dialog);
 
+	// Mostly for URIs with no local path--we pipe these into ExifTool.
 	GFile *file = g_file_new_for_uri(self->uri);
+	gchar *parse_name = g_file_get_parse_name(file);
+	gtk_header_bar_set_subtitle(
+		GTK_HEADER_BAR(gtk_dialog_get_header_bar(GTK_DIALOG(dialog))),
+		parse_name);
+	g_free(parse_name);
+
 	gchar *path = g_file_get_path(file);
 	if (path) {
 		info_spawn(dialog, path, NULL);
