@@ -82,6 +82,7 @@ struct key_section {
 static struct key help_keys_general[] = {
 	{"F1", "Show help"},
 	{"F10", "Open menu"},
+	{"<Control>comma", "Preferences"},
 	{"<Control>question", "Keyboard shortcuts"},
 	{"q <Control>q", "Quit"},
 	{"<Control>w", "Quit"},
@@ -1127,6 +1128,20 @@ show_help_shortcuts(void)
 }
 
 static void
+show_preferences(void)
+{
+	char *argv[] = {"dconf-editor", PROJECT_NS PROJECT_NAME, NULL};
+	GError *error = NULL;
+	if (!g_spawn_async(
+		NULL, argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, &error)) {
+		if (g_error_matches(error, G_SPAWN_ERROR, G_SPAWN_ERROR_NOENT))
+			g_prefix_error_literal(&error,
+				"Please install dconf-editor, or use the gsettings utility.\n");
+		show_error_dialog(error);
+	}
+}
+
+static void
 toggle_sunlight(void)
 {
 	GtkSettings *settings = gtk_settings_get_default();
@@ -1181,6 +1196,9 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 
 		case GDK_KEY_question:
 			show_help_shortcuts();
+			return TRUE;
+		case GDK_KEY_comma:
+			show_preferences();
 			return TRUE;
 		}
 		break;
