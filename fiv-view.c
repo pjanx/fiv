@@ -87,6 +87,8 @@ struct _FivView {
 G_DEFINE_TYPE_EXTENDED(FivView, fiv_view, GTK_TYPE_WIDGET, 0,
 	G_IMPLEMENT_INTERFACE(GTK_TYPE_SCROLLABLE, NULL))
 
+G_DEFINE_QUARK(fiv-view-cancellable-quark, fiv_view_cancellable)
+
 typedef struct _Dimensions {
 	double width, height;
 } Dimensions;
@@ -1229,27 +1231,36 @@ info_parse(char *tsv)
 	return vbox;
 }
 
-// Several GVfs schemes contain pseudo-symlinks that don't give out
-// filesystem paths directly.
-static gchar *
-get_target_path(GFile *file, GCancellable *cancellable)
+static GtkWidget *
+info_make_bar(const char *message)
 {
-	GFileInfo *info =
-		g_file_query_info(file, G_FILE_ATTRIBUTE_STANDARD_TARGET_URI,
-			G_FILE_QUERY_INFO_NONE, cancellable, NULL);
-	if (!info)
-		return NULL;
+	GtkWidget *info = gtk_info_bar_new();
+	gtk_info_bar_set_message_type(GTK_INFO_BAR(info), GTK_MESSAGE_WARNING);
+	GtkWidget *info_area = gtk_info_bar_get_content_area(GTK_INFO_BAR(info));
+	gtk_container_add(GTK_CONTAINER(info_area), gtk_label_new(message));
+	return info;
+}
 
-	gchar *path = NULL;
-	const char *target_uri = g_file_info_get_attribute_string(
-		info, G_FILE_ATTRIBUTE_STANDARD_TARGET_URI);
-	if (target_uri) {
-		GFile *target = g_file_new_for_uri(target_uri);
-		path = g_file_get_path(target);
-		g_object_unref(target);
+static void
+info_redirect_error(gpointer dialog, GError *error)
+{
+	// The dialog has been closed and destroyed.
+	if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
+		g_error_free(error);
+		return;
 	}
-	g_object_unref(info);
-	return path;
+
+	GtkContainer *content_area =
+		GTK_CONTAINER(gtk_dialog_get_content_area(GTK_DIALOG(dialog)));
+	gtk_container_foreach(content_area, (GtkCallback) gtk_widget_destroy, NULL);
+	gtk_container_add(content_area, info_make_bar(error->message));
+	if (g_error_matches(error, G_SPAWN_ERROR, G_SPAWN_ERROR_NOENT)) {
+		gtk_box_pack_start(GTK_BOX(content_area),
+			gtk_label_new("Please install ExifTool."), TRUE, FALSE, 12);
+	}
+
+	g_error_free(error);
+	gtk_widget_show_all(GTK_WIDGET(dialog));
 }
 
 static gchar *
@@ -1263,87 +1274,153 @@ bytes_to_utf8(GBytes *bytes)
 }
 
 static void
-info(FivView *self)
+on_info_finished(GObject *source_object, GAsyncResult *res, gpointer user_data)
 {
-	// TODO(p): Add a fallback to internal capabilities.
-	// The simplest is to specify the filename and the resolution.
-	GtkWindow *window = get_toplevel(GTK_WIDGET(self));
-	int flags = G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_PIPE;
-
-	// TODO(p): Make this all cancellable, especially considering downloading.
-	// Do this by showing the dialog window immediately.
-	GFile *file = g_file_new_for_uri(self->uri);
-	gchar *path = g_file_get_path(file);
-
 	GError *error = NULL;
-	GBytes *bytes_in = NULL, *bytes_out = NULL, *bytes_err = NULL;
-	gchar *file_data = NULL;
-	gsize file_len = 0;
-	if (!path && !(path = get_target_path(file, NULL)) &&
-		g_file_load_contents(file, NULL, &file_data, &file_len, NULL, &error)) {
-		flags |= G_SUBPROCESS_FLAGS_STDIN_PIPE;
-		path = g_strdup("-");
-		bytes_in = g_bytes_new_take(file_data, file_len);
+	GBytes *bytes_out = NULL, *bytes_err = NULL;
+	if (!g_subprocess_communicate_finish(
+			G_SUBPROCESS(source_object), res, &bytes_out, &bytes_err, &error)) {
+		info_redirect_error(user_data, error);
+		return;
 	}
-
-	g_object_unref(file);
-	if (error)
-		goto out;
-
-	GSubprocess *subprocess = g_subprocess_new(flags, &error, "exiftool",
-		"-tab", "-groupNames", "-duplicates", "-extractEmbedded", "--binary",
-		"-quiet", "--", path, NULL);
-	g_free(path);
-	if (error || !g_subprocess_communicate(
-		subprocess, bytes_in, NULL, &bytes_out, &bytes_err, &error))
-		goto out;
 
 	gchar *out = bytes_to_utf8(bytes_out);
 	gchar *err = bytes_to_utf8(bytes_err);
-	GtkWidget *dialog = gtk_widget_new(GTK_TYPE_DIALOG,
-		"use-header-bar", TRUE,
-		"title", "Information",
-		"transient-for", window,
-		"destroy-with-parent", TRUE, NULL);
 
+	GtkWidget *dialog = GTK_WIDGET(user_data);
 	GtkWidget *content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
-	if (*err) {
-		GtkWidget *info = gtk_info_bar_new();
-		GtkInfoBar *info_bar = GTK_INFO_BAR(info);
-		gtk_info_bar_set_message_type(info_bar, GTK_MESSAGE_WARNING);
-
-		GtkWidget *info_area = gtk_info_bar_get_content_area(info_bar);
-		GtkWidget *label = gtk_label_new(g_strstrip(err));
-		gtk_container_add(GTK_CONTAINER(info_area), label);
-
-		gtk_container_add(GTK_CONTAINER(content_area), info);
-	}
+	gtk_container_foreach(
+		GTK_CONTAINER(content_area), (GtkCallback) gtk_widget_destroy, NULL);
 
 	GtkWidget *scroller = gtk_scrolled_window_new(NULL, NULL);
-	GtkScrolledWindow *sw = GTK_SCROLLED_WINDOW(scroller);
-	gtk_scrolled_window_set_max_content_width(sw, 600);
-	gtk_scrolled_window_set_max_content_height(sw, 800);
-	gtk_scrolled_window_set_propagate_natural_width(sw, TRUE);
-	gtk_scrolled_window_set_propagate_natural_height(sw, TRUE);
+	gtk_box_pack_start(GTK_BOX(content_area), scroller, TRUE, TRUE, 0);
+	GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	gtk_container_add(GTK_CONTAINER(scroller), vbox);
+	if (*err)
+		gtk_container_add(GTK_CONTAINER(vbox), info_make_bar(g_strstrip(err)));
 
 	GtkWidget *info = info_parse(out);
-	gtk_widget_set_hexpand(info, TRUE);
-	gtk_widget_set_vexpand(info, TRUE);
 	gtk_style_context_add_class(
-		gtk_widget_get_style_context(GTK_WIDGET(info)), "fiv-information");
-	gtk_container_add(GTK_CONTAINER(scroller), info);
-	gtk_container_add(GTK_CONTAINER(content_area), scroller);
+		gtk_widget_get_style_context(info), "fiv-information");
+	gtk_box_pack_start(GTK_BOX(vbox), info, TRUE, TRUE, 0);
 
 	g_free(out);
 	g_free(err);
+	gtk_widget_show_all(dialog);
+}
+
+static void
+info_spawn(GtkWidget *dialog, const char *path, GBytes *bytes_in)
+{
+	int flags = G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_PIPE;
+	if (bytes_in)
+		flags |= G_SUBPROCESS_FLAGS_STDIN_PIPE;
+
+	// TODO(p): Add a fallback to internal capabilities.
+	// The simplest is to specify the filename and the resolution.
+	GError *error = NULL;
+	GSubprocess *subprocess = g_subprocess_new(flags, &error, "exiftool",
+		"-tab", "-groupNames", "-duplicates", "-extractEmbedded", "--binary",
+		"-quiet", "--", path, NULL);
+	if (error) {
+		info_redirect_error(dialog, error);
+		return;
+	}
+
+	GCancellable *cancellable =
+		g_object_get_qdata(G_OBJECT(dialog), fiv_view_cancellable_quark());
+	g_subprocess_communicate_async(
+		subprocess, bytes_in, cancellable, on_info_finished, dialog);
 	g_object_unref(subprocess);
+}
+
+static void
+on_info_loaded(GObject *source_object, GAsyncResult *res, gpointer user_data)
+{
+	gchar *file_data = NULL;
+	gsize file_len = 0;
+	GError *error = NULL;
+	if (!g_file_load_contents_finish(
+			G_FILE(source_object), res, &file_data, &file_len, NULL, &error)) {
+		info_redirect_error(user_data, error);
+		return;
+	}
+
+	GtkWidget *dialog = GTK_WIDGET(user_data);
+	GBytes *bytes_in = g_bytes_new_take(file_data, file_len);
+	info_spawn(dialog, "-", bytes_in);
+	g_bytes_unref(bytes_in);
+}
+
+static void
+on_info_queried(GObject *source_object, GAsyncResult *res, gpointer user_data)
+{
+	GFile *file = G_FILE(source_object);
+	GError *error = NULL;
+	GFileInfo *info = g_file_query_info_finish(file, res, &error);
+	gboolean cancelled =
+		error && g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED);
+	g_clear_error(&error);
+	if (cancelled)
+		return;
+
+	gchar *path = NULL;
+	const char *target_uri = g_file_info_get_attribute_string(
+		info, G_FILE_ATTRIBUTE_STANDARD_TARGET_URI);
+	if (target_uri) {
+		GFile *target = g_file_new_for_uri(target_uri);
+		path = g_file_get_path(target);
+		g_object_unref(target);
+	}
+	g_object_unref(info);
+
+	GtkWidget *dialog = GTK_WIDGET(user_data);
+	GCancellable *cancellable =
+		g_object_get_qdata(G_OBJECT(dialog), fiv_view_cancellable_quark());
+	if (path) {
+		info_spawn(dialog, path, NULL);
+		g_free(path);
+	} else {
+		g_file_load_contents_async(file, cancellable, on_info_loaded, dialog);
+	}
+}
+
+static void
+info(FivView *self)
+{
+	GtkWidget *dialog = gtk_widget_new(GTK_TYPE_DIALOG,
+		"use-header-bar", TRUE,
+		"title", "Information",
+		"transient-for", get_toplevel(GTK_WIDGET(self)),
+		"destroy-with-parent", TRUE, NULL);
+
+	// When the window closes, we cancel all asynchronous calls.
+	GCancellable *cancellable = g_cancellable_new();
+	g_object_set_qdata_full(G_OBJECT(dialog), fiv_view_cancellable_quark(),
+		cancellable, g_object_unref);
+	g_signal_connect_swapped(
+		dialog, "destroy", G_CALLBACK(g_cancellable_cancel), cancellable);
+
+	GtkWidget *spinner = gtk_spinner_new();
+	gtk_spinner_start(GTK_SPINNER(spinner));
+	gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(dialog))),
+		spinner, TRUE, TRUE, 12);
+	gtk_window_set_default_size(GTK_WINDOW(dialog), 600, 800);
 	gtk_widget_show_all(dialog);
 
-out:
-	if (error)
-		show_error_dialog(window, error);
-	if (bytes_in)
-		g_bytes_unref(bytes_in);
+	GFile *file = g_file_new_for_uri(self->uri);
+	gchar *path = g_file_get_path(file);
+	if (path) {
+		info_spawn(dialog, path, NULL);
+		g_free(path);
+	} else {
+		// Several GVfs schemes contain pseudo-symlinks
+		// that don't give out filesystem paths directly.
+		g_file_query_info_async(file, G_FILE_ATTRIBUTE_STANDARD_TARGET_URI,
+			G_FILE_QUERY_INFO_NONE, G_PRIORITY_DEFAULT, cancellable,
+			on_info_queried, dialog);
+	}
+	g_object_unref(file);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
