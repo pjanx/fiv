@@ -103,6 +103,7 @@ info_make_bar(const char *message)
 	GtkWidget *info = gtk_info_bar_new();
 	gtk_info_bar_set_message_type(GTK_INFO_BAR(info), GTK_MESSAGE_WARNING);
 	GtkWidget *info_area = gtk_info_bar_get_content_area(GTK_INFO_BAR(info));
+	// When the label is made selectable, Escape doesn't work when it has focus.
 	gtk_container_add(GTK_CONTAINER(info_area), gtk_label_new(message));
 	return info;
 }
@@ -173,6 +174,7 @@ on_info_finished(GObject *source_object, GAsyncResult *res, gpointer user_data)
 	g_free(out);
 	g_free(err);
 	gtk_widget_show_all(dialog);
+	gtk_widget_grab_focus(scroller);
 }
 
 static void
