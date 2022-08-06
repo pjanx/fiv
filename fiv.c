@@ -111,6 +111,7 @@ static struct key_group help_keys_browser[] = {
 		{"<Alt>Up", "Go to parent directory"},
 		{"<Alt>Home", "Go home"},
 		{"Return", "Open selected item"},
+		{"<Alt>Return", "Show file information"},
 		{}
 	}},
 	{"View", (struct key[]) {

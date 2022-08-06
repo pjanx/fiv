@@ -1430,6 +1430,16 @@ fiv_browser_key_press_event(GtkWidget *widget, GdkEventKey *event)
 			return GDK_EVENT_STOP;
 		}
 		break;
+	case GDK_MOD1_MASK:
+		switch (event->keyval) {
+		case GDK_KEY_Return:
+			if (self->selected) {
+				GtkWindow *window = GTK_WINDOW(gtk_widget_get_toplevel(widget));
+				fiv_context_menu_information(window, self->selected->uri);
+			}
+			return GDK_EVENT_STOP;
+		}
+		break;
 	case GDK_CONTROL_MASK:
 	case GDK_CONTROL_MASK | GDK_SHIFT_MASK:
 		switch (event->keyval) {
