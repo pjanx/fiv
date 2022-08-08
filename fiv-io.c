@@ -1892,14 +1892,15 @@ open_resvg(
 
 	resvg_options *opt = resvg_options_create();
 	resvg_options_load_system_fonts(opt);
-	resvg_options_set_resources_dir(opt, g_file_peek_path(base_file));
+	if (base_file)
+		resvg_options_set_resources_dir(opt, g_file_peek_path(base_file));
 	if (ctx->screen_dpi)
 		resvg_options_set_dpi(opt, ctx->screen_dpi);
 
 	resvg_render_tree *tree = NULL;
 	int err = resvg_parse_tree_from_data(data, len, opt, &tree);
 	resvg_options_destroy(opt);
-	g_object_unref(base_file);
+	g_clear_object(&base_file);
 	if (err != RESVG_OK) {
 		set_error(error, load_resvg_error(err));
 		return NULL;

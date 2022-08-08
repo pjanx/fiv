@@ -634,7 +634,11 @@ switch_to_view(void)
 static gchar *
 parent_uri(GFile *child_file)
 {
+	// The empty URI results in a convenient dummy GFile implementation.
 	GFile *parent = g_file_get_parent(child_file);
+	if (!parent)
+		return g_strdup("");
+
 	gchar *parent_uri = g_file_get_uri(parent);
 	g_object_unref(parent);
 	return parent_uri;
