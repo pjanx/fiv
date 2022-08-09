@@ -48,20 +48,31 @@ get_xdg_home_dir(const char *var, const char *default_)
 	if (env && g_path_is_absolute(env))
 		return g_strdup(env);
 
+#ifdef G_OS_WIN32
+	return g_build_filename(g_get_home_dir(), default_, NULL);
+#else
 	// The specification doesn't handle a missing HOME variable explicitly.
 	// Implicitly, assuming Bourne shell semantics, it simply resolves empty.
 	const char *home = getenv("HOME");
 	return g_build_filename(home ? home : "", default_, NULL);
+#endif
 }
 
+// Reïmplemented partly due to https://gitlab.gnome.org/GNOME/glib/-/issues/2501
 static gchar **
 get_xdg_data_dirs(void)
 {
 	// GStrvBuilder is too new, it would help a little bit.
 	GPtrArray *output = g_ptr_array_new_with_free_func(g_free);
+
+#ifdef G_OS_WIN32
+	g_ptr_array_add(output, g_strdup(g_get_user_data_dir()));
+	for (const gchar *const *p = g_get_system_data_dirs(); *p; p++)
+		g_ptr_array_add(output, g_strdup(*p));
+#else
 	g_ptr_array_add(output, get_xdg_home_dir("XDG_DATA_HOME", ".local/share"));
 
-	const char *xdg_data_dirs;
+	const char *xdg_data_dirs = "";
 	if (!(xdg_data_dirs = getenv("XDG_DATA_DIRS")) || !*xdg_data_dirs)
 		xdg_data_dirs = "/usr/local/share/:/usr/share/";
 
@@ -73,6 +84,7 @@ get_xdg_data_dirs(void)
 			g_free(*p);
 	}
 	g_free(candidates);
+#endif
 	g_ptr_array_add(output, NULL);
 	return (gchar **) g_ptr_array_free(output, FALSE);
 }
