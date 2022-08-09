@@ -25,6 +25,7 @@
 #include <errno.h>
 #include <math.h>
 #include <stdbool.h>
+#include <string.h>
 
 #include "fiv-io.h"
 #include "fiv-thumbnail.h"
@@ -93,13 +94,30 @@ mark_thumbnail_lq(cairo_surface_t *surface)
 		surface, &fiv_thumbnail_key_lq, (void *) (intptr_t) 1, NULL);
 }
 
-gchar *
+static gchar *
 fiv_thumbnail_get_root(void)
 {
 	gchar *cache_dir = get_xdg_home_dir("XDG_CACHE_HOME", ".cache");
 	gchar *thumbnails_dir = g_build_filename(cache_dir, "thumbnails", NULL);
 	g_free(cache_dir);
 	return thumbnails_dir;
+}
+
+static gboolean
+might_be_a_thumbnail(const char *path_or_uri)
+{
+	// It is generally difficult to discern case in/sensitivity of subpaths,
+	// so err on the side of false positives.
+	gchar *normalized = g_ascii_strdown(path_or_uri, -1);
+
+	// The Windows path separator must be percent-encoded in URIs,
+	// and the file scheme always uses forward slashes.
+	if (G_DIR_SEPARATOR != '/')
+		g_strdelimit(normalized, G_DIR_SEPARATOR_S, '/');
+
+	gboolean matches = strstr(normalized, "/.cache/thumbnails/") != NULL;
+	g_free(normalized);
+	return matches;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -440,8 +458,10 @@ fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size, GError **error)
 	g_return_val_if_fail(max_size >= FIV_THUMBNAIL_SIZE_MIN &&
 		max_size <= FIV_THUMBNAIL_SIZE_MAX, FALSE);
 
+	// Don't save thumbnails for FUSE mounts, such as sftp://.
+	// Moreover, it doesn't make sense to save thumbnails of thumbnails.
 	const gchar *path = g_file_peek_path(target);
-	if (!path || !g_file_is_native(target) /* Don't save sftp://. */)
+	if (!path || !g_file_is_native(target) || might_be_a_thumbnail(path))
 		return produce_fallback(target, max_size, error);
 
 	// Make the TOCTTOU issue favour unnecessary reloading.
@@ -619,6 +639,11 @@ fiv_thumbnail_lookup(const char *uri, gint64 mtime_msec, FivThumbnailSize size)
 {
 	g_return_val_if_fail(size >= FIV_THUMBNAIL_SIZE_MIN &&
 		size <= FIV_THUMBNAIL_SIZE_MAX, NULL);
+
+	// Don't waste time looking up something that shouldn't exist--
+	// thumbnail directories tend to get huge, and syscalls are expensive.
+	if (might_be_a_thumbnail(uri))
+		return NULL;
 
 	gchar *sum = g_compute_checksum_for_string(G_CHECKSUM_MD5, uri, -1);
 	gchar *thumbnails_dir = fiv_thumbnail_get_root();

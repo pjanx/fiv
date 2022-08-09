@@ -729,17 +729,6 @@ thumbnailers_start(FivBrowser *self)
 	if (!self->model)
 		return;
 
-	// TODO(p): Leave out all paths containing .cache/thumbnails altogether.
-	gchar *thumbnails_dir = fiv_thumbnail_get_root();
-	GFile *thumbnails = g_file_new_for_path(thumbnails_dir);
-	g_free(thumbnails_dir);
-
-	GFile *current = fiv_io_model_get_location(self->model);
-	gboolean is_a_thumbnail = current && g_file_has_prefix(current, thumbnails);
-	g_object_unref(thumbnails);
-	if (is_a_thumbnail)
-		return;
-
 	GList *missing = NULL, *lq = NULL;
 	for (guint i = self->entries->len; i--; ) {
 		Entry *entry = &g_array_index(self->entries, Entry, i);

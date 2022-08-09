@@ -52,9 +52,6 @@ extern FivThumbnailSizeInfo fiv_thumbnail_sizes[FIV_THUMBNAIL_SIZE_COUNT];
 /// If non-NULL, indicates a thumbnail of insufficient quality.
 extern cairo_user_data_key_t fiv_thumbnail_key_lq;
 
-/// Returns this user's root thumbnail directory.
-gchar *fiv_thumbnail_get_root(void);
-
 /// Attempts to extract any low-quality thumbnail from fast targets.
 /// If `max_size` is a valid value, the image will be downscaled as appropriate.
 cairo_surface_t *fiv_thumbnail_extract(
