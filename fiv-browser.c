@@ -988,7 +988,6 @@ fiv_browser_realize(GtkWidget *widget)
 		attributes.event_mask |= GDK_SMOOTH_SCROLL_MASK;
 
 	// We need this window to receive input events at all.
-	// TODO(p): See if input events bubble up to parents.
 	GdkWindow *window = gdk_window_new(gtk_widget_get_parent_window(widget),
 		&attributes, GDK_WA_X | GDK_WA_Y | GDK_WA_VISUAL);
 	gtk_widget_register_window(widget, window);
