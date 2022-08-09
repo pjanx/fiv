@@ -85,7 +85,7 @@ struct _FivBrowser {
 
 	Thumbnailer *thumbnailers;          ///< Parallelized thumbnailers
 	size_t thumbnailers_len;            ///< Thumbnailers array size
-	GList *thumbnailers_queue;          ///< Queued up Entry pointers
+	GQueue thumbnailers_queue;          ///< Queued up Entry pointers
 
 	GdkCursor *pointer;                 ///< Cached pointer cursor
 	cairo_pattern_t *glow;              ///< CAIRO_FORMAT_A8 mask for corners
@@ -597,10 +597,7 @@ thumbnailer_reprocess_entry(FivBrowser *self, GBytes *output, Entry *entry)
 	if ((flags & FIV_IO_SERIALIZE_LOW_QUALITY)) {
 		cairo_surface_set_user_data(entry->thumbnail, &fiv_thumbnail_key_lq,
 			(void *) (intptr_t) 1, NULL);
-
-		// TODO(p): Improve complexity; this will iterate the whole linked list.
-		self->thumbnailers_queue =
-			g_list_append(self->thumbnailers_queue, entry);
+		g_queue_push_tail(&self->thumbnailers_queue, entry);
 	}
 
 	// This choice of mtime favours unnecessary thumbnail reloading
@@ -663,13 +660,8 @@ thumbnailer_next(Thumbnailer *t)
 {
 	// TODO(p): Try to keep the minions alive (stdout will be a problem).
 	FivBrowser *self = t->self;
-	GList *link = self->thumbnailers_queue;
-	if (!link)
+	if (!(t->target = g_queue_pop_head(&self->thumbnailers_queue)))
 		return FALSE;
-
-	t->target = link->data;
-	self->thumbnailers_queue =
-		g_list_delete_link(self->thumbnailers_queue, self->thumbnailers_queue);
 
 	// Case analysis:
 	//  - We haven't found any thumbnail for the entry at all
@@ -706,8 +698,7 @@ thumbnailer_next(Thumbnailer *t)
 static void
 thumbnailers_abort(FivBrowser *self)
 {
-	g_list_free(self->thumbnailers_queue);
-	self->thumbnailers_queue = NULL;
+	g_queue_clear(&self->thumbnailers_queue);
 
 	for (size_t i = 0; i < self->thumbnailers_len; i++) {
 		Thumbnailer *t = self->thumbnailers + i;
@@ -729,17 +720,20 @@ thumbnailers_start(FivBrowser *self)
 	if (!self->model)
 		return;
 
-	GList *missing = NULL, *lq = NULL;
-	for (guint i = self->entries->len; i--; ) {
+	GQueue lq = G_QUEUE_INIT;
+	for (guint i = 0; i < self->entries->len; i++) {
 		Entry *entry = &g_array_index(self->entries, Entry, i);
 		if (entry->icon)
-			missing = g_list_prepend(missing, entry);
+			g_queue_push_tail(&self->thumbnailers_queue, entry);
 		else if (cairo_surface_get_user_data(
 			entry->thumbnail, &fiv_thumbnail_key_lq))
-			lq = g_list_prepend(lq, entry);
+			g_queue_push_tail(&lq, entry);
+	}
+	while (!g_queue_is_empty(&lq)) {
+		g_queue_push_tail_link(
+			&self->thumbnailers_queue, g_queue_pop_head_link(&lq));
 	}
 
-	self->thumbnailers_queue = g_list_concat(missing, lq);
 	for (size_t i = 0; i < self->thumbnailers_len; i++) {
 		if (!thumbnailer_next(self->thumbnailers + i))
 			break;
@@ -1706,6 +1700,7 @@ fiv_browser_init(FivBrowser *self)
 		g_malloc0_n(self->thumbnailers_len, sizeof *self->thumbnailers);
 	for (size_t i = 0; i < self->thumbnailers_len; i++)
 		self->thumbnailers[i].self = self;
+	g_queue_init(&self->thumbnailers_queue);
 
 	set_item_size(self, FIV_THUMBNAIL_SIZE_NORMAL);
 	self->glow_padded = cairo_pattern_create_rgba(0, 0, 0, 0);
