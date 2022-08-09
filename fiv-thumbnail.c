@@ -657,8 +657,8 @@ fiv_thumbnail_lookup(const char *uri, gint64 mtime_msec, FivThumbnailSize size)
 			use = FIV_THUMBNAIL_SIZE_MAX - i;
 
 		const char *name = fiv_thumbnail_sizes[use].thumbnail_spec_name;
-		gchar *wide =
-			g_strdup_printf("%s/wide-%s/%s.webp", thumbnails_dir, name, sum);
+		gchar *wide = g_strconcat(thumbnails_dir, G_DIR_SEPARATOR_S "wide-",
+			name, G_DIR_SEPARATOR_S, sum, ".webp", NULL);
 		result = read_wide_thumbnail(wide, uri, mtime_msec / 1000, &error);
 		if (error) {
 			g_debug("%s: %s", wide, error->message);
@@ -673,8 +673,8 @@ fiv_thumbnail_lookup(const char *uri, gint64 mtime_msec, FivThumbnailSize size)
 			break;
 		}
 
-		gchar *path =
-			g_strdup_printf("%s/%s/%s.png", thumbnails_dir, name, sum);
+		gchar *path = g_strconcat(thumbnails_dir, G_DIR_SEPARATOR_S,
+			name, G_DIR_SEPARATOR_S, sum, ".png", NULL);
 		result = read_png_thumbnail(path, uri, mtime_msec / 1000, &error);
 		if (error) {
 			g_debug("%s: %s", path, error->message);
