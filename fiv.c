@@ -148,7 +148,7 @@ static struct key_group help_keys_viewer[] = {
 		{}
 	}},
 	{"View", (struct key[]) {
-		{"F8", "Toggle toolbar"},
+		{"F9", "Toggle toolbar"},
 		{"F5 r <Primary>r", "Reload"},
 		{}
 	}},
@@ -1311,10 +1311,6 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 		case GDK_KEY_F1:
 			show_help_contents();
 			return TRUE;
-		case GDK_KEY_F9:
-			gtk_widget_set_visible(g.browser_sidebar,
-				!gtk_widget_is_visible(g.browser_sidebar));
-			return TRUE;
 		case GDK_KEY_F11:
 		case GDK_KEY_f:
 			toggle_fullscreen();
@@ -1351,8 +1347,7 @@ on_key_press_view(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 	switch (event->state & gtk_accelerator_get_default_mod_mask()) {
 	case 0:
 		switch (event->keyval) {
-		// XXX: The same shortcut focuses GtkPaned's handle.
-		case GDK_KEY_F8:
+		case GDK_KEY_F9:
 			gtk_widget_set_visible(g.view_toolbar,
 				!gtk_widget_is_visible(g.view_toolbar));
 			return TRUE;
@@ -1411,6 +1406,11 @@ on_key_press_browser_paned(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 		break;
 	case 0:
 		switch (event->keyval) {
+		case GDK_KEY_F9:
+			gtk_widget_set_visible(g.browser_sidebar,
+				!gtk_widget_is_visible(g.browser_sidebar));
+			return TRUE;
+
 		case GDK_KEY_Escape:
 			fiv_browser_select(FIV_BROWSER(g.browser), NULL);
 			return TRUE;
