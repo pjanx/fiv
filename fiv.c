@@ -791,7 +791,8 @@ on_sort_direction(G_GNUC_UNUSED GtkMenuItem *item, gpointer data)
 }
 
 static void
-on_notify_view_messages(FivView *view, G_GNUC_UNUSED gpointer user_data)
+on_notify_view_messages(FivView *view, G_GNUC_UNUSED GParamSpec *param_spec,
+	G_GNUC_UNUSED gpointer user_data)
 {
 	gchar *messages = NULL;
 	g_object_get(view, "messages", &messages, NULL);
