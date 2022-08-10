@@ -267,6 +267,56 @@ on_motion(G_GNUC_UNUSED GtkWidget *self, GdkEventMotion *event,
 	return FALSE;
 }
 
+static void
+on_drag_begin(
+	GtkGestureDrag *self, gdouble start_x, gdouble start_y, gpointer user_data)
+{
+	// The middle mouse button will never be triggered by touch screens,
+	// so there is only the NULL sequence to care about.
+	gtk_gesture_set_state(GTK_GESTURE(self), GTK_EVENT_SEQUENCE_CLAIMED);
+
+	GdkWindow *window = gtk_widget_get_window(g.view);
+	GdkCursor *cursor =
+		gdk_cursor_new_from_name(gdk_window_get_display(window), "grabbing");
+	gdk_window_set_cursor(window, cursor);
+	g_object_unref(cursor);
+
+	double *last = user_data;
+	last[0] = start_x;
+	last[1] = start_y;
+}
+
+static void
+on_drag_update(GtkGestureDrag *self, gdouble offset_x, gdouble offset_y,
+	gpointer user_data)
+{
+	double start_x = 0, start_y = 0;
+	gtk_gesture_drag_get_start_point(self, &start_x, &start_y);
+
+	double *last = user_data,
+		diff_x = (start_x + offset_x) - last[0],
+		diff_y = (start_y + offset_y) - last[1];
+
+	last[0] = start_x + offset_x;
+	last[1] = start_y + offset_y;
+
+	GtkScrolledWindow *sw = GTK_SCROLLED_WINDOW(g.scrolled);
+	GtkAdjustment *h = gtk_scrolled_window_get_hadjustment(sw);
+	GtkAdjustment *v = gtk_scrolled_window_get_vadjustment(sw);
+	if (diff_x)
+		gtk_adjustment_set_value(h, gtk_adjustment_get_value(h) - diff_x);
+	if (diff_y)
+		gtk_adjustment_set_value(v, gtk_adjustment_get_value(v) - diff_y);
+}
+
+static void
+on_drag_end(G_GNUC_UNUSED GtkGestureDrag *self, G_GNUC_UNUSED gdouble start_x,
+	G_GNUC_UNUSED gdouble start_y, G_GNUC_UNUSED gpointer user_data)
+{
+	// Cursors follow the widget hierarchy.
+	gdk_window_set_cursor(gtk_widget_get_window(g.view), NULL);
+}
+
 static gboolean
 open_jpeg(const char *data, gsize len, GError **error)
 {
@@ -405,15 +455,16 @@ main(int argc, char *argv[])
 
 	g.view = gtk_drawing_area_new();
 	gtk_widget_set_size_request(g.view, g.width + 2, g.height + 2);
-	gtk_widget_add_events(
-		g.view, GDK_BUTTON_PRESS_MASK | GDK_POINTER_MOTION_MASK);
-	g_signal_connect(g.view, "draw", G_CALLBACK(on_draw), NULL);
+	gtk_widget_add_events(g.view,
+		GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK |
+			GDK_POINTER_MOTION_MASK);
+	g_signal_connect(g.view, "draw",
+		G_CALLBACK(on_draw), NULL);
 	g_signal_connect(g.view, "button-press-event",
 		G_CALLBACK(on_press), NULL);
 	g_signal_connect(g.view, "motion-notify-event",
 		G_CALLBACK(on_motion), NULL);
 
-	// TODO(p): Track middle mouse button drags, adjust the adjustments.
 	g.scrolled = gtk_scrolled_window_new(NULL, NULL);
 	gtk_scrolled_window_set_overlay_scrolling(
 		GTK_SCROLLED_WINDOW(g.scrolled), FALSE);
@@ -422,13 +473,26 @@ main(int argc, char *argv[])
 	gtk_scrolled_window_set_propagate_natural_height(
 		GTK_SCROLLED_WINDOW(g.scrolled), TRUE);
 
+	GtkGesture *drag = gtk_gesture_drag_new(g.scrolled);
+	gtk_event_controller_set_propagation_phase(
+		GTK_EVENT_CONTROLLER(drag), GTK_PHASE_CAPTURE);
+	gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(drag), GDK_BUTTON_MIDDLE);
+
+	double last_drag_point[2] = {};
+	g_signal_connect(drag, "drag-begin",
+		G_CALLBACK(on_drag_begin), last_drag_point);
+	g_signal_connect(drag, "drag-update",
+		G_CALLBACK(on_drag_update), last_drag_point);
+	g_signal_connect(drag, "drag-end",
+		G_CALLBACK(on_drag_end), last_drag_point);
+
 	gtk_container_add(GTK_CONTAINER(g.scrolled), g.view);
 	gtk_container_add(GTK_CONTAINER(g.window), g.scrolled);
 	gtk_window_set_default_size(GTK_WINDOW(g.window), 800, 600);
 	gtk_widget_show_all(g.window);
 
 	// It probably needs to be realized.
-	GdkWindow *window = gtk_widget_get_window(g.view);
+	GdkWindow *window = gtk_widget_get_window(g.scrolled);
 	GdkCursor *cursor =
 		gdk_cursor_new_from_name(gdk_window_get_display(window), "crosshair");
 	gdk_window_set_cursor(window, cursor);
