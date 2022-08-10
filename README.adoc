@@ -56,6 +56,19 @@ direct installations via `ninja install`.  To test the program:
 
 The lossless JPEG cropper is intended to be invoked from a context menu.
 
+Windows
+~~~~~~~
+'fiv' can be cross-compiled for Windows, provided that you install a bunch of
+dependencies listed at the beginning of 'msys2-cross-configure.sh',
+plus rsvg-convert from librsvg2, and icotool from icoutils.
+Beware that the build will take up close to a gigabyte of disk space.
+
+ $ sh msys2-cross-configure.sh builddir
+ $ meson install -C builddir
+
+If everything succeeds, you will find a portable build of the application
+in the 'builddir/package' subdirectory.  Keep your expectations low.
+
 Documentation
 -------------
 For information concerning usage, refer to link:docs/fiv.html[the user guide],

@@ -91,8 +91,32 @@ configure_file(
 	configuration : conf,
 )
 
+rc = []
+if host_machine.system() == 'windows'
+	windows = import('windows')
+	rsvg_convert = find_program('rsvg-convert')
+	icotool = find_program('icotool')
+
+	# Meson is brain-dead and retarded, so these PNGs cannot be installed,
+	# only because they must all have the same name when installed.
+	# The largest size is mainly for an appropriately sized Windows icon.
+	icon_png_list = []
+	foreach size : ['16', '32', '48', '256']
+		icon_dimensions = size + 'x' + size
+		icon_png_list += custom_target(icon_dimensions + ' icon',
+			input : 'fiv.svg',
+			output : 'fiv.' + icon_dimensions + '.png',
+			command : [rsvg_convert, '--output', '@OUTPUT@',
+				'--width', size, '--height', size, '@INPUT@'])
+	endforeach
+
+	icon_ico = custom_target(input : icon_png_list, output : 'fiv.ico',
+		command : [icotool, '-c', '-o', '@OUTPUT@', '@INPUT@'])
+	rc += windows.compile_resources('fiv.rc', depends : icon_ico)
+endif
+
 gnome = import('gnome')
-resources = gnome.compile_resources('resources',
+gresources = gnome.compile_resources('resources',
 	'resources/resources.gresource.xml',
 	source_dir : 'resources',
 	c_name : 'resources',
@@ -108,9 +132,11 @@ tiff_tables = custom_target('tiff-tables.h',
 desktops = ['fiv.desktop', 'fiv-browse.desktop']
 exe = executable('fiv', 'fiv.c', 'fiv-view.c', 'fiv-io.c', 'fiv-context-menu.c',
 	'fiv-browser.c', 'fiv-sidebar.c', 'fiv-thumbnail.c', 'fiv-collection.c',
-	'xdg.c', resources,
+	'xdg.c', gresources, rc,
 	install : true,
-	dependencies : dependencies)
+	dependencies : dependencies,
+	win_subsystem : 'windows',
+)
 if gdkpixbuf.found()
 	executable('io-benchmark', 'fiv-io-benchmark.c', 'fiv-io.c', 'xdg.c',
 		build_by_default : false,
@@ -118,12 +144,14 @@ if gdkpixbuf.found()
 endif
 
 desktops += 'fiv-jpegcrop.desktop'
-jpegcrop = executable('fiv-jpegcrop', 'fiv-jpegcrop.c',
+jpegcrop = executable('fiv-jpegcrop', 'fiv-jpegcrop.c', rc,
 	install : true,
 	dependencies : [
 		dependency('gtk+-3.0'),
 		dependency('libturbojpeg'),
-	])
+	],
+	win_subsystem : 'windows',
+)
 
 if get_option('tools').enabled()
 	# libjq 1.6 lacks a pkg-config file, and there is no release in sight.
@@ -170,6 +198,15 @@ if host_machine.system() != 'windows'
 	if not meson.is_cross_build()
 		meson.add_install_script(updater, skip_if_destdir : dynamic_desktops)
 	endif
+elif meson.is_cross_build()
+	msys2_root = meson.get_external_property('msys2_root')
+	meson.add_install_script('msys2-cross-install.sh', msys2_root)
+
+	# This is the minimum to run targets from msys2-cross-configure.sh builds.
+	meson.add_devenv({
+		'WINEPATH' : msys2_root / 'bin',
+		'XDG_DATA_DIRS' : msys2_root / 'share',
+	})
 endif
 
 install_data('fiv.svg',
