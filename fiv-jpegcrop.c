@@ -96,16 +96,10 @@ on_draw(G_GNUC_UNUSED GtkWidget *widget, cairo_t *cr,
 }
 
 static GFile *
-choose_filename(void)
+run_chooser(GtkWidget *dialog)
 {
-	GtkWidget *dialog = gtk_file_chooser_dialog_new("Saved cropped image as",
-		GTK_WINDOW(g.window), GTK_FILE_CHOOSER_ACTION_SAVE,
-		"_Cancel", GTK_RESPONSE_CANCEL,
-		"_Save", GTK_RESPONSE_ACCEPT, NULL);
 	GtkFileChooser *chooser = GTK_FILE_CHOOSER(dialog);
 	gtk_file_chooser_set_local_only(chooser, FALSE);
-	gtk_file_chooser_set_do_overwrite_confirmation(chooser, TRUE);
-	(void) gtk_file_chooser_set_file(chooser, g.location, NULL);
 
 	GtkFileFilter *jpeg = gtk_file_filter_new();
 	gtk_file_filter_add_mime_type(jpeg, "image/jpeg");
@@ -132,6 +126,30 @@ choose_filename(void)
 		gtk_widget_destroy(dialog);
 		return file;
 	}
+}
+
+static GFile *
+choose_file_to_open(void)
+{
+	GtkWidget *dialog = gtk_file_chooser_dialog_new("Open image",
+		NULL, GTK_FILE_CHOOSER_ACTION_OPEN,
+		"_Cancel", GTK_RESPONSE_CANCEL,
+		"_Open", GTK_RESPONSE_ACCEPT, NULL);
+	return run_chooser(dialog);
+}
+
+static GFile *
+choose_file_to_save(void)
+{
+	GtkWidget *dialog = gtk_file_chooser_dialog_new("Saved cropped image as",
+		GTK_WINDOW(g.window), GTK_FILE_CHOOSER_ACTION_SAVE,
+		"_Cancel", GTK_RESPONSE_CANCEL,
+		"_Save", GTK_RESPONSE_ACCEPT, NULL);
+
+	GtkFileChooser *chooser = GTK_FILE_CHOOSER(dialog);
+	gtk_file_chooser_set_do_overwrite_confirmation(chooser, TRUE);
+	(void) gtk_file_chooser_set_file(chooser, g.location, NULL);
+	return run_chooser(dialog);
 }
 
 static void
@@ -162,7 +180,7 @@ on_save_as(G_GNUC_UNUSED GtkButton *button, G_GNUC_UNUSED gpointer user_data)
 		goto out;
 	}
 
-	GFile *file = choose_filename();
+	GFile *file = choose_file_to_save();
 	GError *error = NULL;
 	if (file &&
 		!g_file_replace_contents(file, (const char *) data, len, NULL, FALSE,
@@ -315,10 +333,10 @@ int
 main(int argc, char *argv[])
 {
 	gboolean show_version = FALSE;
-	gchar **path_args = NULL;
+	gchar **args = NULL;
 
 	const GOptionEntry options[] = {
-		{G_OPTION_REMAINING, 0, 0, G_OPTION_ARG_FILENAME_ARRAY, &path_args,
+		{G_OPTION_REMAINING, 0, 0, G_OPTION_ARG_FILENAME_ARRAY, &args,
 			NULL, "[FILE | URI]"},
 		{"version", 'V', G_OPTION_FLAG_IN_MAIN, G_OPTION_ARG_NONE,
 			&show_version, "Output version information and exit", NULL},
@@ -335,15 +353,18 @@ main(int argc, char *argv[])
 	if (!initialized)
 		exit_fatal("%s", error->message);
 
+	gtk_window_set_default_icon_name(PROJECT_NAME);
+
 	// TODO(p): Rather use G_OPTION_ARG_CALLBACK with G_OPTION_FLAG_FILENAME.
 	// Alternatively, GOptionContext with gtk_get_option_group(TRUE).
 	// Then we can show the help string here instead (in fiv as well).
-	if (!path_args || !path_args[0] || path_args[1])
-		exit_fatal("invalid arguments");
+	if (args && args[1])
+		exit_fatal("Too many arguments");
+	else if (args)
+		g.location = g_file_new_for_commandline_arg(args[0]);
+	else if (!(g.location = choose_file_to_open()))
+		exit(EXIT_SUCCESS);
 
-	gtk_window_set_default_icon_name(PROJECT_NAME);
-
-	g.location = g_file_new_for_commandline_arg(path_args[0]);
 	g.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	g_signal_connect(g.window, "destroy", G_CALLBACK(gtk_main_quit), NULL);
 
