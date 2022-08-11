@@ -1166,7 +1166,13 @@ static void
 show_help_contents(void)
 {
 	gchar *filename = g_strdup_printf("%s.html", PROJECT_NAME);
+#ifdef G_OS_WIN32
+	gchar *prefix = g_win32_get_package_installation_directory_of_module(NULL);
+	gchar *path = g_build_filename(prefix, PROJECT_DOCDIR, filename, NULL);
+	g_free(prefix);
+#else
 	gchar *path = g_build_filename(PROJECT_DOCDIR, filename, NULL);
+#endif
 	g_free(filename);
 	GError *error = NULL;
 	gchar *uri = g_filename_to_uri(path, NULL, &error);
@@ -1945,7 +1951,7 @@ output_thumbnail(gchar **uris, gboolean extract, const char *size_arg)
 
 #ifdef G_OS_WIN32
 	_setmode(fileno(stdout), _O_BINARY);
-#endif  // G_OS_WIN32
+#endif
 
 	GError *error = NULL;
 	GFile *file = g_file_new_for_uri(uris[0]);

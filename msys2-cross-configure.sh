@@ -33,6 +33,11 @@ fetch() {
 		status Fetching "$name"
 		[ -f "packages/$name" ] || curl -#o "packages/$name" "$repository/$name"
 	done
+
+	name=exiftool-$(curl -# https://exiftool.org/ver.txt).zip
+	status Fetching "$name"
+	[ -f "$name" ] || curl -#o "$name" "https://exiftool.org/$name"
+	ln -sf "$name" exiftool.zip
 }
 
 verify() {
@@ -48,6 +53,8 @@ extract() {
 	for i in packages/*
 	do bsdtar -xf "$i" --strip-components 1 mingw64
 	done
+
+	bsdtar -xOf exiftool.zip > bin/exiftool.exe
 }
 
 configure() {

@@ -3,14 +3,17 @@ export LC_ALL=C
 cd "$MESON_INSTALL_DESTDIR_PREFIX"
 msys2_root=$1
 
-# Copy libraries we depend on, and a few files required by GTK+.
+# Copy libraries we depend on, and a few files required by GLib/GTK+.
+cp -p "$msys2_root"/bin/exiftool.exe .
 cp -p "$msys2_root"/bin/*.dll .
+# The console helper is only useful for debug builds.
+cp -p "$msys2_root"/bin/gspawn-*-helper*.exe .
 cp -pR "$msys2_root"/etc/ .
 
 mkdir -p lib
 cp -pR "$msys2_root"/lib/gdk-pixbuf-2.0/ lib
-mkdir -p share/glib-2.0
-cp -pR "$msys2_root"/share/glib-2.0/schemas/ share/glib-2.0
+mkdir -p share/glib-2.0/schemas
+cp -pR "$msys2_root"/share/glib-2.0/schemas/*.Settings.* share/glib-2.0/schemas
 mkdir -p share
 cp -pR "$msys2_root"/share/mime/ share
 mkdir -p share/icons

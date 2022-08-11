@@ -77,6 +77,10 @@ conf.set_quoted('PROJECT_NAME', meson.project_name())
 conf.set_quoted('PROJECT_VERSION', meson.project_version())
 conf.set_quoted('PROJECT_NS', application_ns)
 conf.set_quoted('PROJECT_DOCDIR', get_option('prefix') / docdir)
+if host_machine.system() == 'windows'
+	conf.set_quoted('PROJECT_DOCDIR', docdir)
+endif
+
 conf.set('HAVE_JPEG_QS', libjpegqs.found())
 conf.set('HAVE_LCMS2', lcms2.found())
 conf.set('HAVE_LIBRAW', libraw.found())
@@ -86,6 +90,7 @@ conf.set('HAVE_XCURSOR', xcursor.found())
 conf.set('HAVE_LIBHEIF', libheif.found())
 conf.set('HAVE_LIBTIFF', libtiff.found())
 conf.set('HAVE_GDKPIXBUF', gdkpixbuf.found())
+
 configure_file(
 	output : 'config.h',
 	configuration : conf,

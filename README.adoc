@@ -63,7 +63,7 @@ dependencies listed at the beginning of 'msys2-cross-configure.sh',
 plus rsvg-convert from librsvg2, and icotool from icoutils.
 Beware that the build will take up close to a gigabyte of disk space.
 
- $ sh msys2-cross-configure.sh builddir
+ $ sh -e msys2-cross-configure.sh builddir
  $ meson install -C builddir
 
 If everything succeeds, you will find a portable build of the application
