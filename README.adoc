@@ -61,7 +61,7 @@ Windows
 'fiv' can be cross-compiled for Windows, provided that you install a bunch of
 dependencies listed at the beginning of 'msys2-cross-configure.sh',
 plus rsvg-convert from librsvg2, and icotool from icoutils.
-Beware that the build will take up close to a gigabyte of disk space.
+Beware that the build will take up about a gigabyte of disk space.
 
  $ sh -e msys2-cross-configure.sh builddir
  $ meson install -C builddir

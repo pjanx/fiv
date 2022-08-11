@@ -34,10 +34,11 @@ fetch() {
 		[ -f "packages/$name" ] || curl -#o "packages/$name" "$repository/$name"
 	done
 
-	name=exiftool-$(curl -# https://exiftool.org/ver.txt).zip
-	status Fetching "$name"
-	[ -f "$name" ] || curl -#o "$name" "https://exiftool.org/$name"
-	ln -sf "$name" exiftool.zip
+	version=$(curl -# https://exiftool.org/ver.txt)
+	name=exiftool-$version.tar.gz remotename=Image-ExifTool-$version.tar.gz
+	status Fetching "$remotename"
+	[ -f "$name" ] || curl -#o "$name" "https://exiftool.org/$remotename"
+	ln -sf "$name" exiftool.tar.gz
 }
 
 verify() {
@@ -54,7 +55,10 @@ extract() {
 	do bsdtar -xf "$i" --strip-components 1 mingw64
 	done
 
-	bsdtar -xOf exiftool.zip > bin/exiftool.exe
+	bsdtar -xf exiftool.tar.gz
+	mv Image-ExifTool-*/exiftool bin
+	mv Image-ExifTool-*/lib/* lib/perl5/site_perl
+	rm -rf Image-ExifTool-*
 }
 
 configure() {
@@ -111,6 +115,7 @@ cd "$msys2_root"
 dbsync
 fetch mingw-w64-x86_64-gtk3 mingw-w64-x86_64-lcms2 \
 	mingw-w64-x86_64-libraw mingw-w64-x86_64-libheif \
+	mingw-w64-x86_64-perl mingw-w64-x86_64-perl-win32-api \
 	mingw-w64-x86_64-libwinpthread-git # Because we don't do "provides"?
 verify
 extract

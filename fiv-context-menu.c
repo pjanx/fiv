@@ -188,9 +188,12 @@ info_spawn(GtkWidget *dialog, const char *path, GBytes *bytes_in)
 	// TODO(p): Add a fallback to internal capabilities.
 	// The simplest is to specify the filename and the resolution.
 	GError *error = NULL;
-	GSubprocess *subprocess = g_subprocess_new(flags, &error, "exiftool",
-		"-tab", "-groupNames", "-duplicates", "-extractEmbedded", "--binary",
-		"-quiet", "--", path, NULL);
+	GSubprocess *subprocess = g_subprocess_new(flags, &error,
+#ifdef G_OS_WIN32
+		"wperl",
+#endif
+		"exiftool", "-tab", "-groupNames", "-duplicates", "-extractEmbedded",
+		"--binary", "-quiet", "--", path, NULL);
 	if (error) {
 		info_redirect_error(dialog, error);
 		return;
