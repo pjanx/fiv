@@ -397,7 +397,8 @@ main(int argc, char *argv[])
 	gboolean initialized = gtk_init_with_args(
 		&argc, &argv, " - Lossless JPEG cropper", options, NULL, &error);
 	if (show_version) {
-		printf("fiv-jpegcrop " PROJECT_VERSION "\n");
+		const char *version = PROJECT_VERSION;
+		printf("%s %s\n", "fiv-jpegcrop", &version[*version == 'v']);
 		return 0;
 	}
 	if (!initialized)

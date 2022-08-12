@@ -450,8 +450,12 @@ show_about_dialog(GtkWidget *parent)
 	// The rest is approximately copying GTK+'s own gtkaboutdialog.ui.
 	GtkWidget *name = gtk_label_new(NULL);
 	gtk_label_set_selectable(GTK_LABEL(name), TRUE);
-	gtk_label_set_markup(
-		GTK_LABEL(name), "<b>" PROJECT_NAME "</b> " PROJECT_VERSION);
+
+	const char *version = PROJECT_VERSION;
+	gchar *markup = g_strdup_printf(
+		"<b>%s</b> %s", PROJECT_NAME, &version[*version == 'v']);
+	gtk_label_set_markup(GTK_LABEL(name), markup);
+	g_free(markup);
 
 	GtkWidget *website = gtk_label_new(NULL);
 	gtk_label_set_selectable(GTK_LABEL(website), TRUE);
@@ -2005,7 +2009,8 @@ main(int argc, char *argv[])
 	gboolean initialized = gtk_init_with_args(
 		&argc, &argv, " - Image browser and viewer", options, NULL, &error);
 	if (show_version) {
-		printf(PROJECT_NAME " " PROJECT_VERSION "\n");
+		const char *version = PROJECT_VERSION;
+		printf("%s %s\n", PROJECT_NAME, &version[*version == 'v']);
 		return 0;
 	}
 	if (show_supported_media_types) {

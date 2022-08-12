@@ -74,7 +74,7 @@ application_ns = 'name.janouch.'
 
 conf = configuration_data()
 conf.set_quoted('PROJECT_NAME', meson.project_name())
-conf.set_quoted('PROJECT_VERSION', meson.project_version())
+conf.set_quoted('PROJECT_VERSION', '@VCS_TAG@')
 conf.set_quoted('PROJECT_NS', application_ns)
 conf.set_quoted('PROJECT_DOCDIR', get_option('prefix') / docdir)
 if host_machine.system() == 'windows'
@@ -91,9 +91,10 @@ conf.set('HAVE_LIBHEIF', libheif.found())
 conf.set('HAVE_LIBTIFF', libtiff.found())
 conf.set('HAVE_GDKPIXBUF', gdkpixbuf.found())
 
-configure_file(
+config = vcs_tag(
+	command : ['git', 'describe', '--always', '--dirty=+'],
+	input : configure_file(output : 'config.h.in', configuration : conf),
 	output : 'config.h',
-	configuration : conf,
 )
 
 rc = []
@@ -137,7 +138,7 @@ tiff_tables = custom_target('tiff-tables.h',
 desktops = ['fiv.desktop', 'fiv-browse.desktop']
 exe = executable('fiv', 'fiv.c', 'fiv-view.c', 'fiv-io.c', 'fiv-context-menu.c',
 	'fiv-browser.c', 'fiv-sidebar.c', 'fiv-thumbnail.c', 'fiv-collection.c',
-	'xdg.c', gresources, rc,
+	'xdg.c', gresources, rc, config,
 	install : true,
 	dependencies : dependencies,
 	win_subsystem : 'windows',
@@ -149,7 +150,7 @@ if gdkpixbuf.found()
 endif
 
 desktops += 'fiv-jpegcrop.desktop'
-jpegcrop = executable('fiv-jpegcrop', 'fiv-jpegcrop.c', rc,
+jpegcrop = executable('fiv-jpegcrop', 'fiv-jpegcrop.c', rc, config,
 	install : true,
 	dependencies : [
 		dependency('gtk+-3.0'),
