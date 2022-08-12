@@ -172,12 +172,43 @@ if get_option('tools').enabled()
 endif
 
 gsettings_schemas = ['fiv.gschema.xml']
-install_data(gsettings_schemas,
-	rename : [application_ns + gsettings_schemas[0]],
-	install_dir : get_option('datadir') / 'glib-2.0' / 'schemas')
+foreach schema : gsettings_schemas
+	install_data(schema,
+		rename : [application_ns + schema],
+		install_dir : get_option('datadir') / 'glib-2.0' / 'schemas')
+endforeach
 
 # For the purposes of development: make the program find its GSettings schemas.
 gnome.compile_schemas(depend_files : files(gsettings_schemas))
+
+# Validate various files, if there are tools around to do it.
+xmls = ['fiv.svg', 'fiv.manifest', 'resources/resources.gresource.xml'] + \
+	gsettings_schemas
+xmls += run_command(find_program('sed', required : false, disabler : true),
+	'-n', 's@.*>\([^<>]*[.]svg\)<.*@resources/\\1@p',
+	configure_file(
+		input : 'resources/resources.gresource.xml',
+		output : 'resources.gresource.xml.stamp',
+		copy : true,
+	), capture : true, check : true).stdout().strip().split('\n')
+
+xmlwf = find_program('xmlwf', required : false, disabler : true)
+xmllint = find_program('xmllint', required : false, disabler : true)
+foreach xml : xmls
+	test('xmlwf ' + xml, xmlwf, args : files(xml))
+	test('xmllint ' + xml, xmllint, args : ['--noout', files(xml)])
+endforeach
+
+dfv = find_program('desktop-file-validate', required : false, disabler : true)
+foreach desktop : desktops
+	test(desktop, dfv, args : files(desktop))
+endforeach
+
+# Finish the installation.
+install_data('fiv.svg',
+	install_dir : get_option('datadir') / 'icons/hicolor/scalable/apps')
+install_subdir('docs',
+	install_dir : docdir, strip_directory : true)
 
 if host_machine.system() != 'windows'
 	foreach desktop : desktops
@@ -213,7 +244,3 @@ elif meson.is_cross_build()
 		'XDG_DATA_DIRS' : msys2_root / 'share',
 	})
 endif
-
-install_data('fiv.svg',
-	install_dir : get_option('datadir') / 'icons/hicolor/scalable/apps')
-install_subdir('docs', install_dir : docdir, strip_directory : true)
