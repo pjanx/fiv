@@ -1,3 +1,4 @@
+/meson.build.user
 /subprojects/*
 !/subprojects/*.wrap
 !/subprojects/packagefiles
