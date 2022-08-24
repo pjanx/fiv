@@ -16,6 +16,8 @@ add_project_arguments(
 #	add_project_link_arguments(flags, language : ['c'])
 #endif
 
+win32 = host_machine.system() == 'windows'
+
 # The likelihood of this being installed is nearly zero. Enable the wrap.
 libjpegqs = dependency('libjpegqs', required : get_option('libjpegqs'),
 	allow_fallback : true)
@@ -77,7 +79,7 @@ conf.set_quoted('PROJECT_NAME', meson.project_name())
 conf.set_quoted('PROJECT_VERSION', '@VCS_TAG@')
 conf.set_quoted('PROJECT_NS', application_ns)
 conf.set_quoted('PROJECT_DOCDIR', get_option('prefix') / docdir)
-if host_machine.system() == 'windows'
+if win32
 	conf.set_quoted('PROJECT_DOCDIR', docdir)
 endif
 
@@ -98,7 +100,7 @@ config = vcs_tag(
 )
 
 rc = []
-if host_machine.system() == 'windows'
+if win32
 	windows = import('windows')
 	rsvg_convert = find_program('rsvg-convert')
 	icotool = find_program('icotool')
@@ -211,7 +213,30 @@ install_data('fiv.svg',
 install_subdir('docs',
 	install_dir : docdir, strip_directory : true)
 
-if host_machine.system() != 'windows'
+if not win32
+	asciidoctor = find_program('asciidoctor', required : false)
+	a2x = find_program('a2x', required : false)
+	if not asciidoctor.found() and not a2x.found()
+		error('Neither asciidoctor nor a2x were found')
+	endif
+	foreach page : [meson.project_name()]
+		if asciidoctor.found()
+			command = [asciidoctor, '-b', 'manpage',
+				'-a', 'release-version=' + meson.project_version(),
+				'-o', '@OUTPUT@', '@INPUT@']
+		elif a2x.found()
+			command = [a2x, '--doctype', 'manpage', '--format', 'manpage',
+				'-a', 'release-version=' + meson.project_version(),
+				'-D', '@OUTDIR@', '@INPUT@']
+		endif
+		custom_target('manpage for ' + page,
+			input : 'docs' / page + '.adoc',
+			output : page + '.1',
+			command : command,
+			install : true,
+			install_dir : get_option('mandir') / 'man1')
+	endforeach
+
 	foreach desktop : desktops
 		install_data(desktop,
 			rename : application_ns + desktop,

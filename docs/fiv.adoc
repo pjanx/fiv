@@ -1,0 +1,74 @@
+fiv(1)
+======
+:doctype: manpage
+:manmanual: fiv Manual
+:mansource: fiv {release-version}
+
+Name
+----
+fiv - Image browser and viewer
+
+Synopsis
+--------
+*fiv* [_OPTION_]... [_PATH_ | _URI_]...
+
+Description
+-----------
+*fiv* is a general-purpose image browser and viewer: pass it a directory path
+or URI to open it for browsing, or pass an image to open it for viewing.
+In case that multiple arguments are passed, they'll be opened as a virtual
+directory containing all of them.
+
+For more information concerning usage, press *F1* in the application to open
+the _User Guide_.
+
+// TODO(p): Try to merge the two, though this one focuses on command line usage.
+
+Options
+-------
+*--invalidate-cache*::
+	Invalidate the wide thumbnail cache, removing thumbnails for files that can
+	no longer be found.
+
+*--list-supported-media-types*::
+	Output supported media types and exit.  This is used by a script to update
+	the list of MIME types within *fiv*'s desktop file when the list
+	of GdkPixbuf loaders changes.
+
+*--browse*::
+	When an image is passed, start in browsing mode, and preselect that
+	image in its containing directory.  This is used by *fiv*'s inode/directory
+	handler to implement the "Open Containing Folder" feature of certain
+	applications.
+
+*--thumbnail*=_SIZE_::
+	Generate thumbnails for the first argument, in all sizes not exceeding
+	_SIZE_, and present the largest of them on the standard output
+	in an application-specific bitmap format.  Available sizes follow directory
+	names in the _Thumbnail Managing Standard_.
+
+*--extract-thumbnail*::
+	Present any embedded thumbnail of the first argument on the standard output
+	in an application-specific bitmap format.  When both *--thumbnail*
+	and *--extract-thumbnail* are passed, this option takes precedence,
+	exiting early if successful.  This is used to enhance responsivity
+	of thumbnail procurement.
+
+*-V*, *--version*::
+	Output version information and exit.
+
+*--help-all*::
+	Show the full list of options, including those provided by GTK+.
+
+Reporting bugs
+--------------
+Use https://git.janouch.name/p/fiv to report bugs, request features,
+or submit pull requests.
+
+See also
+--------
+_Desktop Entry Specification_,
+https://specifications.freedesktop.org/desktop-entry-spec/latest/[].
+
+_Thumbnail Managing Standard_,
+https://specifications.freedesktop.org/thumbnail-spec/thumbnail-spec-latest.html[].
