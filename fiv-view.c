@@ -921,8 +921,18 @@ on_drag_begin(GtkGestureDrag *drag, G_GNUC_UNUSED gdouble start_x,
 	G_GNUC_UNUSED gdouble start_y, gpointer user_data)
 {
 	GtkGesture *gesture = GTK_GESTURE(drag);
-	GdkEventSequence *sequence = gtk_gesture_get_last_updated_sequence(gesture);
+	switch (
+		gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture))) {
+	case GDK_BUTTON_PRIMARY:
+	case GDK_BUTTON_MIDDLE:
+		break;
+	default:
+		gtk_gesture_set_state(gesture, GTK_EVENT_SEQUENCE_DENIED);
+		return;
+	}
+
 	GdkModifierType state = 0;
+	GdkEventSequence *sequence = gtk_gesture_get_last_updated_sequence(gesture);
 	gdk_event_get_state(gtk_gesture_get_last_event(gesture, sequence), &state);
 	if (state & gtk_accelerator_get_default_mod_mask()) {
 		gtk_gesture_set_state(gesture, GTK_EVENT_SEQUENCE_DENIED);
@@ -1325,6 +1335,7 @@ fiv_view_init(FivView *self)
 	// so we can't change this), hopefully this is mutually exclusive with that.
 	// Though note that the GdkWindow doesn't register for touch events now.
 	gtk_gesture_single_set_exclusive(GTK_GESTURE_SINGLE(drag), TRUE);
+	gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(drag), 0);
 
 	g_signal_connect(drag, "drag-begin",
 		G_CALLBACK(on_drag_begin), self);
