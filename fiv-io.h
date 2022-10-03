@@ -165,7 +165,8 @@ typedef enum _FivIoOrientation {
 	FivIoOrientation270       = 8
 } FivIoOrientation;
 
-/// Returns a rendering matrix for a surface, and its target dimensions.
+/// Returns a rendering matrix for a surface (user space to pattern space),
+/// and its target dimensions.
 cairo_matrix_t fiv_io_orientation_apply(cairo_surface_t *surface,
 	FivIoOrientation orientation, double *width, double *height);
 void fiv_io_orientation_dimensions(cairo_surface_t *surface,

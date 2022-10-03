@@ -191,20 +191,19 @@ get_display_dimensions(FivView *self, int *width, int *height)
 static void
 update_adjustments(FivView *self)
 {
-	int w = 0, h = 0;
-	get_display_dimensions(self, &w, &h);
-
+	int dw = 0, dh = 0;
+	get_display_dimensions(self, &dw, &dh);
 	GtkAllocation alloc;
 	gtk_widget_get_allocation(GTK_WIDGET(self), &alloc);
 
 	if (self->hadjustment) {
 		gtk_adjustment_configure(self->hadjustment,
-			gtk_adjustment_get_value(self->hadjustment), 0, w,
+			gtk_adjustment_get_value(self->hadjustment), 0, dw,
 			alloc.width * 0.1, alloc.width * 0.9, alloc.width);
 	}
 	if (self->vadjustment) {
 		gtk_adjustment_configure(self->vadjustment,
-			gtk_adjustment_get_value(self->vadjustment), 0, h,
+			gtk_adjustment_get_value(self->vadjustment), 0, dh,
 			alloc.height * 0.1, alloc.height * 0.9, alloc.height);
 	}
 }
@@ -576,8 +575,8 @@ fiv_view_draw(GtkWidget *widget, cairo_t *cr)
 		!gtk_cairo_should_draw_window(cr, gtk_widget_get_window(widget)))
 		return TRUE;
 
-	int w, h;
-	get_display_dimensions(self, &w, &h);
+	int dw, dh;
+	get_display_dimensions(self, &dw, &dh);
 
 	double x = 0;
 	double y = 0;
@@ -585,11 +584,13 @@ fiv_view_draw(GtkWidget *widget, cairo_t *cr)
 		x = -floor(gtk_adjustment_get_value(self->hadjustment));
 	if (self->vadjustment)
 		y = -floor(gtk_adjustment_get_value(self->vadjustment));
-	if (w < allocation.width)
-		x = round((allocation.width - w) / 2.);
-	if (h < allocation.height)
-		y = round((allocation.height - h) / 2.);
+	if (dw < allocation.width)
+		x = round((allocation.width - dw) / 2.);
+	if (dh < allocation.height)
+		y = round((allocation.height - dh) / 2.);
 
+	// XXX: This naming is confusing, because it isn't actually for the surface,
+	// but rather for our possibly rotated rendition of it.
 	Dimensions surface_dimensions = {};
 	cairo_matrix_t matrix = fiv_io_orientation_apply(
 		self->page_scaled ? self->page_scaled : self->page, self->orientation,
@@ -599,7 +600,7 @@ fiv_view_draw(GtkWidget *widget, cairo_t *cr)
 	if (self->checkerboard) {
 		gtk_style_context_save(style);
 		gtk_style_context_add_class(style, "checkerboard");
-		gtk_render_background(style, cr, 0, 0, w, h);
+		gtk_render_background(style, cr, 0, 0, dw, dh);
 		gtk_style_context_restore(style);
 	}
 
@@ -615,7 +616,7 @@ fiv_view_draw(GtkWidget *widget, cairo_t *cr)
 	// we always get a shitty pixmap, where transparency contains junk.
 	if (cairo_surface_get_type(self->frame) == CAIRO_SURFACE_TYPE_RECORDING) {
 		cairo_surface_t *image =
-			cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+			cairo_image_surface_create(CAIRO_FORMAT_ARGB32, dw, dh);
 		cairo_t *tcr = cairo_create(image);
 		cairo_scale(tcr, self->scale, self->scale);
 		cairo_set_source_surface(tcr, self->frame, 0, 0);
@@ -631,7 +632,7 @@ fiv_view_draw(GtkWidget *widget, cairo_t *cr)
 
 	// XXX: The rounding together with padding may result in up to
 	// a pixel's worth of made-up picture data.
-	cairo_rectangle(cr, 0, 0, w, h);
+	cairo_rectangle(cr, 0, 0, dw, dh);
 	cairo_clip(cr);
 
 	cairo_scale(cr, self->scale, self->scale);
@@ -689,6 +690,28 @@ set_scale_to_fit(FivView *self, bool scale_to_fit)
 	return TRUE;
 }
 
+static void
+widget_to_surface(FivView *self, double *x, double *y)
+{
+	int dw, dh;
+	get_display_dimensions(self, &dw, &dh);
+	GtkAllocation allocation;
+	gtk_widget_get_allocation(GTK_WIDGET(self), &allocation);
+
+	// Unneeded, thus unimplemented: this means zero adjustment values.
+	if (!self->hadjustment || !self->vadjustment)
+		return;
+
+	*x = (*x + (dw < allocation.width
+		? -round((allocation.width - dw) / 2.)
+		: +floor(gtk_adjustment_get_value(self->hadjustment))))
+			/ self->scale;
+	*y = (*y + (dh < allocation.height
+		? -round((allocation.height - dh) / 2.)
+		: +floor(gtk_adjustment_get_value(self->vadjustment))))
+			/ self->scale;
+}
+
 static gboolean
 set_scale(FivView *self, double scale, const GdkEvent *event)
 {
@@ -703,34 +726,25 @@ set_scale(FivView *self, double scale, const GdkEvent *event)
 
 	GtkAllocation allocation;
 	gtk_widget_get_allocation(GTK_WIDGET(self), &allocation);
-
-	double focus_x = 0, focus_y = 0, surface_x = 0, surface_y = 0;
+	double focus_x = 0, focus_y = 0;
 	if (!event || !gdk_event_get_coords(event, &focus_x, &focus_y)) {
 		focus_x = 0.5 * allocation.width;
 		focus_y = 0.5 * allocation.height;
 	}
-	if (self->hadjustment && self->vadjustment) {
-		int w, h;
-		get_display_dimensions(self, &w, &h);
 
-		surface_x = (focus_x + (w < allocation.width
-			? -round((allocation.width - w) / 2.)
-			: +floor(gtk_adjustment_get_value(self->hadjustment))))
-				/ self->scale;
-		surface_y = (focus_y + (h < allocation.height
-			? -round((allocation.height - h) / 2.)
-			: +floor(gtk_adjustment_get_value(self->vadjustment))))
-				/ self->scale;
-	}
+	double surface_x = focus_x;
+	double surface_y = focus_y;
+	widget_to_surface(self, &surface_x, &surface_y);
 
 	self->scale = scale;
 	g_object_notify_by_pspec(G_OBJECT(self), view_properties[PROP_SCALE]);
 	prescale_page(self);
 
+	// Similar to set_orientation().
 	if (self->hadjustment && self->vadjustment) {
+		Dimensions surface_dimensions = get_surface_dimensions(self);
 		update_adjustments(self);
 
-		Dimensions surface_dimensions = get_surface_dimensions(self);
 		if (surface_dimensions.width * self->scale > allocation.width)
 			gtk_adjustment_set_value(
 				self->hadjustment, surface_x * self->scale - focus_x);
@@ -1036,6 +1050,7 @@ on_draw_page(G_GNUC_UNUSED GtkPrintOperation *operation,
 	// Any DPI will be wrong, unless we import that information from the image.
 	double scale = 1 / 96.;
 	Dimensions surface_dimensions = {};
+	// XXX: Perhaps use self->frame, even though their sizes should match.
 	cairo_matrix_t matrix =
 		fiv_io_orientation_apply(self->page, self->orientation,
 			&surface_dimensions.width, &surface_dimensions.height);
@@ -1457,6 +1472,53 @@ swap_enhanced_image(FivView *self)
 	}
 }
 
+static void
+transformed_to_real(FivView *self, double *x, double *y)
+{
+	double sw = 0, sh = 0;
+	cairo_matrix_t matrix =
+		fiv_io_orientation_apply(self->page, self->orientation, &sw, &sh);
+	cairo_matrix_transform_point(&matrix, x, y);
+}
+
+static void
+set_orientation(FivView *self, FivIoOrientation orientation)
+{
+	GtkAllocation allocation;
+	gtk_widget_get_allocation(GTK_WIDGET(self), &allocation);
+
+	// In the future, rotating gestures can pick another centre point.
+	double focus_x = 0.5 * allocation.width;
+	double focus_y = 0.5 * allocation.height;
+
+	double surface_x = focus_x;
+	double surface_y = focus_y;
+	widget_to_surface(self, &surface_x, &surface_y);
+	transformed_to_real(self, &surface_x, &surface_y);
+
+	self->orientation = orientation;
+
+	// Similar to set_scale().
+	Dimensions surface_dimensions = {};
+	cairo_matrix_t matrix =
+		fiv_io_orientation_apply(self->page, self->orientation,
+			&surface_dimensions.width, &surface_dimensions.height);
+	if (self->hadjustment && self->vadjustment &&
+			cairo_matrix_invert(&matrix) == CAIRO_STATUS_SUCCESS) {
+		cairo_matrix_transform_point(&matrix, &surface_x, &surface_y);
+		update_adjustments(self);
+
+		if (surface_dimensions.width * self->scale > allocation.width)
+			gtk_adjustment_set_value(
+				self->hadjustment, surface_x * self->scale - focus_x);
+		if (surface_dimensions.height * self->scale > allocation.height)
+			gtk_adjustment_set_value(
+				self->vadjustment, surface_y * self->scale - focus_y);
+	}
+
+	gtk_widget_queue_resize(GTK_WIDGET(self));
+}
+
 void
 fiv_view_command(FivView *self, FivViewCommand command)
 {
@@ -1471,14 +1533,11 @@ fiv_view_command(FivView *self, FivViewCommand command)
 		reload(self);
 
 	break; case FIV_VIEW_COMMAND_ROTATE_LEFT:
-		self->orientation = view_left[self->orientation];
-		gtk_widget_queue_resize(widget);
+		set_orientation(self, view_left[self->orientation]);
 	break; case FIV_VIEW_COMMAND_MIRROR:
-		self->orientation = view_mirror[self->orientation];
-		gtk_widget_queue_resize(widget);
+		set_orientation(self, view_mirror[self->orientation]);
 	break; case FIV_VIEW_COMMAND_ROTATE_RIGHT:
-		self->orientation = view_right[self->orientation];
-		gtk_widget_queue_resize(widget);
+		set_orientation(self, view_right[self->orientation]);
 
 	break; case FIV_VIEW_COMMAND_PAGE_FIRST:
 		switch_page(self, self->image);
