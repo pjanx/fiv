@@ -38,11 +38,12 @@ a package with the latest development version from Archlinux's AUR.
 
 Building and Running
 --------------------
-Build-only dependencies: Meson, pkg-config, asciidoctor or asciidoc +
-Runtime dependencies: gtk+-3.0, glib>=2.64, pixman-1, shared-mime-info,
-libturbojpeg, libwebp +
+Build-only dependencies:
+ Meson, pkg-config, asciidoctor or asciidoc (recommended but optional) +
+Runtime dependencies:
+ gtk+-3.0, glib>=2.64, pixman-1, shared-mime-info, libturbojpeg, libwebp +
 Optional dependencies: lcms2, LibRaw, librsvg-2.0, xcursor, libheif, libtiff,
-ExifTool, resvg (unstable API, needs to be requested explicitly)
+ ExifTool, resvg (unstable API, needs to be requested explicitly)
 
  $ git clone --recursive https://git.janouch.name/p/fiv.git
  $ meson builddir

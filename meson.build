@@ -217,9 +217,11 @@ if not win32
 	asciidoctor = find_program('asciidoctor', required : false)
 	a2x = find_program('a2x', required : false)
 	if not asciidoctor.found() and not a2x.found()
-		error('Neither asciidoctor nor a2x were found')
+		warning('Neither asciidoctor nor a2x were found, ' +
+			'falling back to a substandard manual page generator')
 	endif
 	foreach page : [meson.project_name()]
+		man_capture = false
 		if asciidoctor.found()
 			command = [asciidoctor, '-b', 'manpage',
 				'-a', 'release-version=' + meson.project_version(),
@@ -228,10 +230,16 @@ if not win32
 			command = [a2x, '--doctype', 'manpage', '--format', 'manpage',
 				'-a', 'release-version=' + meson.project_version(),
 				'-D', '@OUTDIR@', '@INPUT@']
+		else
+			command = ['env', 'LC_ALL=C',
+				'asciidoc-release-version=' + meson.project_version(),
+				'awk', '-f', files('liberty/tools/asciiman.awk'), '@INPUT@']
+			man_capture = true
 		endif
 		custom_target('manpage for ' + page,
 			input : 'docs' / page + '.adoc',
 			output : page + '.1',
+			capture : man_capture,
 			command : command,
 			install : true,
 			install_dir : get_option('mandir') / 'man1')
