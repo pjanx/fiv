@@ -33,6 +33,9 @@
 
 #ifdef HAVE_LIBRAW
 #include <libraw.h>
+#if LIBRAW_VERSION >= LIBRAW_MAKE_VERSION(0, 21, 0)
+#define LIBRAW_OPIONS_NO_MEMERR_CALLBACK 0
+#endif
 #endif  // HAVE_LIBRAW
 
 // TODO(p): Consider merging back with fiv-io.

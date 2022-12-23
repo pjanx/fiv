@@ -43,6 +43,9 @@
 
 #ifdef HAVE_LIBRAW
 #include <libraw.h>
+#if LIBRAW_VERSION >= LIBRAW_MAKE_VERSION(0, 21, 0)
+#define LIBRAW_OPIONS_NO_MEMERR_CALLBACK 0
+#endif
 #endif  // HAVE_LIBRAW
 #ifdef HAVE_RESVG
 #include <resvg.h>
@@ -1696,11 +1699,6 @@ fail:
 // --- Optional dependencies ---------------------------------------------------
 
 #ifdef HAVE_LIBRAW  // ---------------------------------------------------------
-
-// LibRaw 0.21.0 compatibility.
-#ifndef LIBRAW_OPIONS_NO_MEMERR_CALLBACK
-#define LIBRAW_OPIONS_NO_MEMERR_CALLBACK 0
-#endif
 
 static cairo_surface_t *
 open_libraw(const char *data, gsize len, GError **error)
