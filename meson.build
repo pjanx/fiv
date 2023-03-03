@@ -59,7 +59,7 @@ have_resvg = false
 if not get_option('resvg').disabled()
 	resvg = dependency('resvg', required : false)
 	if not resvg.found()
-		resvg = cc.find_library('libresvg', required : get_option('resvg'))
+		resvg = cc.find_library('resvg', required : get_option('resvg'))
 		if resvg.found() and not cc.has_header('resvg.h')
 			error('resvg.h not found')
 		endif
@@ -164,7 +164,7 @@ jpegcrop = executable('fiv-jpegcrop', 'fiv-jpegcrop.c', rc, config,
 if get_option('tools').enabled()
 	# libjq 1.6 lacks a pkg-config file, and there is no release in sight.
 	# libjq 1.6 is required.
-	tools_dependencies = [cc.find_library('libjq'), dependency('libpng')]
+	tools_dependencies = [cc.find_library('jq'), dependency('libpng')]
 	tools_c_args = cc.get_supported_arguments(
 		'-Wno-unused-function', '-Wno-unused-parameter')
 	foreach tool : ['pnginfo', 'jpeginfo', 'tiffinfo', 'webpinfo', 'bmffinfo']
