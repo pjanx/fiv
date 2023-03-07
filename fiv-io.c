@@ -633,9 +633,8 @@ load_wuffs_frame(struct load_wuffs_frame_context *ctx, GError **error)
 	if (!wuffs_base__status__is_ok(&status)) {
 		set_error(error, wuffs_base__status__message(&status));
 
-		// The PNG decoder, at minimum, will flush any pixel data, so use them.
-		if (status.repr != wuffs_base__suspension__short_read)
-			goto fail;
+		// The PNG decoder, at minimum, will flush any pixel data upon
+		// finding out that the input is truncated, so accept whatever we get.
 	}
 
 	if (ctx->target) {
