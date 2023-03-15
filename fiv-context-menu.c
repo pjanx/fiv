@@ -396,6 +396,15 @@ on_chooser_activate(GtkMenuItem *item, gpointer user_data)
 	GtkWidget *dialog = gtk_app_chooser_dialog_new_for_content_type(window,
 		GTK_DIALOG_DESTROY_WITH_PARENT | GTK_DIALOG_MODAL, ctx->content_type);
 	g_clear_object(&window);
+
+#if 0
+	// This exists as a concept in mimeapps.list, but GNOME infuriatingly
+	// infers it from the last used application if missing.
+	gtk_app_chooser_widget_set_show_default(
+		GTK_APP_CHOOSER_WIDGET(gtk_app_chooser_dialog_get_widget(
+			GTK_APP_CHOOSER_DIALOG(dialog))), TRUE);
+#endif
+
 	if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK) {
 		ctx->app_info = gtk_app_chooser_get_app_info(GTK_APP_CHOOSER(dialog));
 		open_context_launch(GTK_WIDGET(item), ctx);
