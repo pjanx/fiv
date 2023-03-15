@@ -1,7 +1,7 @@
 //
 // fiv-io.c: image operations
 //
-// Copyright (c) 2021 - 2022, Přemysl Eric Janouch <p@janouch.name>
+// Copyright (c) 2021 - 2023, Přemysl Eric Janouch <p@janouch.name>
 //
 // Permission to use, copy, modify, and/or distribute this software for any
 // purpose with or without fee is hereby granted.
@@ -2956,6 +2956,88 @@ fiv_io_deserialize(GBytes *bytes, guint64 *user_data)
 		surface, &key, array, (cairo_destroy_func_t) g_byte_array_unref);
 	*user_data = h.user_data;
 	return surface;
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+static cairo_status_t
+write_to_byte_array(
+	void *closure, const unsigned char *data, unsigned int length)
+{
+	g_byte_array_append(closure, data, length);
+	return CAIRO_STATUS_SUCCESS;
+}
+
+GBytes *
+fiv_io_serialize_for_search(cairo_surface_t *surface, GError **error)
+{
+	g_return_val_if_fail(
+		surface && cairo_surface_get_type(surface) == CAIRO_SURFACE_TYPE_IMAGE,
+		NULL);
+
+	cairo_format_t format = cairo_image_surface_get_format(surface);
+	if (format == CAIRO_FORMAT_ARGB32) {
+		const uint32_t *data =
+			(const uint32_t *) cairo_image_surface_get_data(surface);
+
+		bool all_solid = true;
+		for (size_t len = cairo_image_surface_get_width(surface) *
+			cairo_image_surface_get_height(surface); len--; ) {
+			if ((data[len] >> 24) != 0xFF)
+				all_solid = false;
+		}
+		if (all_solid)
+			format = CAIRO_FORMAT_RGB24;
+	}
+
+	if (format != CAIRO_FORMAT_RGB24) {
+#if CAIRO_HAS_PNG_FUNCTIONS
+		GByteArray *ba = g_byte_array_new();
+		cairo_status_t status =
+			cairo_surface_write_to_png_stream(surface, write_to_byte_array, ba);
+		if (status == CAIRO_STATUS_SUCCESS)
+			return g_byte_array_free_to_bytes(ba);
+		g_byte_array_unref(ba);
+#endif
+
+		// Last resort: remove transparency by painting over black.
+		cairo_surface_t *converted =
+			cairo_image_surface_create(CAIRO_FORMAT_RGB24,
+				cairo_image_surface_get_width(surface),
+				cairo_image_surface_get_height(surface));
+		cairo_t *cr = cairo_create(converted);
+		cairo_set_source_surface(cr, surface, 0, 0);
+		cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+		cairo_paint(cr);
+		cairo_destroy(cr);
+		GBytes *result = fiv_io_serialize_for_search(converted, error);
+		cairo_surface_destroy(converted);
+		return result;
+	}
+
+	tjhandle enc = tjInitCompress();
+	if (!enc) {
+		set_error(error, tjGetErrorStr2(enc));
+		return NULL;
+	}
+
+	unsigned char *jpeg = NULL;
+	unsigned long length = 0;
+	if (tjCompress2(enc, cairo_image_surface_get_data(surface),
+			cairo_image_surface_get_width(surface),
+			cairo_image_surface_get_stride(surface),
+			cairo_image_surface_get_height(surface),
+			(G_BYTE_ORDER == G_LITTLE_ENDIAN ? TJPF_BGRX : TJPF_XRGB),
+			&jpeg, &length, TJSAMP_444, 90, 0)) {
+		set_error(error, tjGetErrorStr2(enc));
+		tjFree(jpeg);
+		tjDestroy(enc);
+		return NULL;
+	}
+
+	tjDestroy(enc);
+	return g_bytes_new_with_free_func(
+		jpeg, length, (GDestroyNotify) tjFree, jpeg);
 }
 
 // --- Filesystem --------------------------------------------------------------

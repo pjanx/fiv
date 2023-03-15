@@ -43,7 +43,9 @@ Build-only dependencies:
 Runtime dependencies:
  gtk+-3.0, glib>=2.64, pixman-1, shared-mime-info, libturbojpeg, libwebp +
 Optional dependencies: lcms2, LibRaw, librsvg-2.0, xcursor, libheif, libtiff,
- ExifTool, resvg (unstable API, needs to be requested explicitly)
+ ExifTool, resvg (unstable API, needs to be requested explicitly) +
+Runtime dependencies for reverse image search:
+ xdg-utils, cURL, jq
 
  $ git clone --recursive https://git.janouch.name/p/fiv.git
  $ meson builddir
@@ -55,7 +57,8 @@ direct installations via `ninja install`.  To test the program:
 
  $ meson devenv fiv
 
-The lossless JPEG cropper is intended to be invoked from a context menu.
+The lossless JPEG cropper and reverse image search are intended to be invoked
+from a context menu.
 
 Windows
 ~~~~~~~

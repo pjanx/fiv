@@ -1,4 +1,8 @@
 #!/bin/sh -e
-sed -i "s|^MimeType=.*|MimeType=$(
-	"${DESTDIR:+$DESTDIR/}"'@EXE@' --list-supported-media-types | tr '\n' ';'
-)|" "${DESTDIR:+$DESTDIR/}"'@DESKTOP@'
+fiv=${DESTDIR:+$DESTDIR/}'@FIV@'
+desktopdir=${DESTDIR:+$DESTDIR/}'@DESKTOPDIR@'
+
+types=$("$fiv" --list-supported-media-types | tr '\n' ';')
+for desktop in @DESKTOPS@
+do sed -i "s|^MimeType=.*|MimeType=$types|" "$desktopdir"/"$desktop"
+done

@@ -1,7 +1,7 @@
 //
 // fiv-io.h: image operations
 //
-// Copyright (c) 2021 - 2022, Přemysl Eric Janouch <p@janouch.name>
+// Copyright (c) 2021 - 2023, Přemysl Eric Janouch <p@janouch.name>
 //
 // Permission to use, copy, modify, and/or distribute this software for any
 // purpose with or without fee is hereby granted.
@@ -106,6 +106,8 @@ enum { FIV_IO_SERIALIZE_LOW_QUALITY = 1 << 0 };
 
 void fiv_io_serialize_to_stdout(cairo_surface_t *surface, guint64 user_data);
 cairo_surface_t *fiv_io_deserialize(GBytes *bytes, guint64 *user_data);
+
+GBytes *fiv_io_serialize_for_search(cairo_surface_t *surface, GError **error);
 
 // --- Filesystem --------------------------------------------------------------
 

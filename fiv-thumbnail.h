@@ -1,7 +1,7 @@
 //
 // fiv-thumbnail.h: thumbnail management
 //
-// Copyright (c) 2021 - 2022, Přemysl Eric Janouch <p@janouch.name>
+// Copyright (c) 2021 - 2023, Přemysl Eric Janouch <p@janouch.name>
 //
 // Permission to use, copy, modify, and/or distribute this software for any
 // purpose with or without fee is hereby granted.
@@ -60,6 +60,10 @@ cairo_surface_t *fiv_thumbnail_extract(
 /// Generates wide thumbnails of up to the specified size, saves them in cache.
 /// Returns the surface used for the maximum size, or an error.
 cairo_surface_t *fiv_thumbnail_produce(
+	GFile *target, FivThumbnailSize max_size, GError **error);
+
+/// Like fiv_thumbnail_produce(), but skips the cache.
+cairo_surface_t *fiv_thumbnail_produce_for_search(
 	GFile *target, FivThumbnailSize max_size, GError **error);
 
 /// Retrieves a thumbnail of the most appropriate quality and resolution

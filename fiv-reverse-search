@@ -1,0 +1,9 @@
+#!/bin/sh -e
+if [ "$#" -ne 2 ]; then
+	echo "Usage: $0 SEARCH-ENGINE-URI-PREFIX {PATH | URI}" >&2
+	exit 1
+fi
+
+xdg-open "$1$(fiv --thumbnail-for-search large "$2" \
+	| curl --silent --show-error --upload-file - https://transfer.sh/image \
+	| jq --slurp --raw-input --raw-output @uri)"

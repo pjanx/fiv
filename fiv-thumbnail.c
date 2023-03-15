@@ -1,7 +1,7 @@
 //
 // fiv-thumbnail.c: thumbnail management
 //
-// Copyright (c) 2021 - 2022, Přemysl Eric Janouch <p@janouch.name>
+// Copyright (c) 2021 - 2023, Přemysl Eric Janouch <p@janouch.name>
 //
 // Permission to use, copy, modify, and/or distribute this software for any
 // purpose with or without fee is hereby granted.
@@ -421,6 +421,29 @@ save_thumbnail(cairo_surface_t *thumbnail, const char *path, GString *thum)
 	WebPDataClear(&assembled);
 }
 
+cairo_surface_t *
+fiv_thumbnail_produce_for_search(
+	GFile *target, FivThumbnailSize max_size, GError **error)
+{
+	g_return_val_if_fail(max_size >= FIV_THUMBNAIL_SIZE_MIN &&
+		max_size <= FIV_THUMBNAIL_SIZE_MAX, NULL);
+
+	GBytes *data = g_file_load_bytes(target, NULL, NULL, error);
+	if (!data)
+		return NULL;
+
+	gboolean color_managed = FALSE;
+	cairo_surface_t *surface = render(target, data, &color_managed, error);
+	if (!surface)
+		return NULL;
+
+	// TODO(p): Might want to keep this a square.
+	cairo_surface_t *result =
+		adjust_thumbnail(surface, fiv_thumbnail_sizes[max_size].size);
+	cairo_surface_destroy(surface);
+	return result;
+}
+
 static cairo_surface_t *
 produce_fallback(GFile *target, FivThumbnailSize size, GError **error)
 {
@@ -459,7 +482,7 @@ cairo_surface_t *
 fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size, GError **error)
 {
 	g_return_val_if_fail(max_size >= FIV_THUMBNAIL_SIZE_MIN &&
-		max_size <= FIV_THUMBNAIL_SIZE_MAX, FALSE);
+		max_size <= FIV_THUMBNAIL_SIZE_MAX, NULL);
 
 	// Don't save thumbnails for FUSE mounts, such as sftp://.
 	// Moreover, it doesn't make sense to save thumbnails of thumbnails.

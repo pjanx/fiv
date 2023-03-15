@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=fiv @NAME@ Reverse Image Search
+GenericName=@NAME@ Reverse Image Search
+Icon=fiv
+Exec=fiv-reverse-search "@URL@" %u
+NoDisplay=true
+Terminal=false
+Categories=Graphics;2DGraphics;
+MimeType=image/png;image/bmp;image/gif;image/x-tga;image/jpeg;image/webp;

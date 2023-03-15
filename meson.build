@@ -35,12 +35,12 @@ dependencies = [
 	dependency('gtk+-3.0'),
 	dependency('pixman-1'),
 
-	# Wuffs is included as a submodule.
 	dependency('libturbojpeg'),
 	dependency('libwebp'),
 	dependency('libwebpdemux'),
 	dependency('libwebpdecoder', required : false),
 	dependency('libwebpmux'),
+	# Wuffs is included as a submodule.
 
 	lcms2,
 	libjpegqs,
@@ -251,6 +251,32 @@ if not win32
 			install_dir : get_option('datadir') / 'applications')
 	endforeach
 
+	# TODO(p): Consider moving this to /usr/share or /usr/lib.
+	install_data('fiv-reverse-search',
+		install_dir : get_option('bindir'))
+
+	# As usual, handling generated files in Meson is a fucking pain.
+	updatable_desktops = [application_ns + 'fiv.desktop']
+	foreach name, uri : {
+		'Google' : 'https://lens.google.com/uploadbyurl?url=',
+		'Bing' : 'https://www.bing.com/images/searchbyimage?cbir=sbi&imgurl=',
+		'Yandex' : 'https://yandex.com/images/search?rpt=imageview&url=',
+		'TinEye' : 'https://tineye.com/search?url=',
+		'SauceNAO' : 'https://saucenao.com/search.php?url=',
+		'IQDB' : 'https://iqdb.org/?url=',
+	}
+		desktop = 'fiv-reverse-search-' + name.to_lower() + '.desktop'
+		updatable_desktops += application_ns + desktop
+
+		test(desktop, dfv, args : configure_file(
+			input : 'fiv-reverse-search.desktop.in',
+			output : application_ns + desktop,
+			configuration : {'NAME' : name, 'URL' : uri},
+			install : true,
+			install_dir : get_option('datadir') / 'applications',
+		))
+	endforeach
+
 	# With gdk-pixbuf, fiv.desktop depends on currently installed modules;
 	# the package manager needs to be told to run this script as necessary.
 	dynamic_desktops = gdkpixbuf.found()
@@ -259,9 +285,10 @@ if not win32
 		input : 'fiv-update-desktop-files.in',
 		output : 'fiv-update-desktop-files',
 		configuration : {
-			'EXE' : get_option('prefix') / get_option('bindir') / exe.name(),
-			'DESKTOP' : get_option('prefix') / get_option('datadir') \
-				/ 'applications' / application_ns + 'fiv.desktop',
+			'FIV' : get_option('prefix') / get_option('bindir') / exe.name(),
+			'DESKTOPDIR' : get_option('prefix') /
+				get_option('datadir') / 'applications',
+			'DESKTOPS' : ' \\\n\t'.join(updatable_desktops),
 		},
 		install : dynamic_desktops,
 		install_dir : get_option('bindir'))

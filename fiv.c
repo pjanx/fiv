@@ -1,7 +1,7 @@
 //
 // fiv.c: fuck-if-I-know-how-to-name-it image browser and viewer
 //
-// Copyright (c) 2021 - 2022, Přemysl Eric Janouch <p@janouch.name>
+// Copyright (c) 2021 - 2023, Přemysl Eric Janouch <p@janouch.name>
 //
 // Permission to use, copy, modify, and/or distribute this software for any
 // purpose with or without fee is hereby granted.
@@ -1934,8 +1934,8 @@ static const char stylesheet[] = "@define-color fiv-tile @content_view_bg; \
 	} \
 	.fiv-information label { padding: 0 4px; }";
 
-static void
-output_thumbnail(gchar **uris, gboolean extract, const char *size_arg)
+static FivThumbnailSize
+output_thumbnail_prologue(gchar **uris, const char *size_arg)
 {
 	if (!uris)
 		exit_fatal("No path given");
@@ -1956,6 +1956,38 @@ output_thumbnail(gchar **uris, gboolean extract, const char *size_arg)
 #ifdef G_OS_WIN32
 	_setmode(fileno(stdout), _O_BINARY);
 #endif
+	return size;
+}
+
+static void
+output_thumbnail_for_search(gchar **uris, const char *size_arg)
+{
+	FivThumbnailSize size = output_thumbnail_prologue(uris, size_arg);
+
+	GError *error = NULL;
+	GFile *file = g_file_new_for_uri(uris[0]);
+	cairo_surface_t *surface = NULL;
+	GBytes *bytes = NULL;
+	if ((surface = fiv_thumbnail_produce(file, size, &error)) &&
+		(bytes = fiv_io_serialize_for_search(surface, &error))) {
+		fwrite(
+			g_bytes_get_data(bytes, NULL), 1, g_bytes_get_size(bytes), stdout);
+		g_bytes_unref(bytes);
+	} else {
+		g_assert(error != NULL);
+	}
+
+	g_object_unref(file);
+	if (error)
+		exit_fatal("%s", error->message);
+
+	cairo_surface_destroy(surface);
+}
+
+static void
+output_thumbnail(gchar **uris, gboolean extract, const char *size_arg)
+{
+	FivThumbnailSize size = output_thumbnail_prologue(uris, size_arg);
 
 	GError *error = NULL;
 	GFile *file = g_file_new_for_uri(uris[0]);
@@ -1981,7 +2013,7 @@ main(int argc, char *argv[])
 {
 	gboolean show_version = FALSE, show_supported_media_types = FALSE,
 		invalidate_cache = FALSE, browse = FALSE, extract_thumbnail = FALSE;
-	gchar **args = NULL, *thumbnail_size = NULL;
+	gchar **args = NULL, *thumbnail_size = NULL, *thumbnail_size_search = NULL;
 	const GOptionEntry options[] = {
 		{G_OPTION_REMAINING, 0, 0, G_OPTION_ARG_FILENAME_ARRAY, &args,
 			NULL, "[PATH | URI]..."},
@@ -1991,6 +2023,9 @@ main(int argc, char *argv[])
 		{"browse", 0, G_OPTION_FLAG_IN_MAIN,
 			G_OPTION_ARG_NONE, &browse,
 			"Start in filesystem browsing mode", NULL},
+		{"thumbnail-for-search", 0, G_OPTION_FLAG_IN_MAIN,
+			G_OPTION_ARG_STRING, &thumbnail_size_search,
+			"Output an image file suitable for searching by content", "SIZE"},
 		{"extract-thumbnail", 0, G_OPTION_FLAG_IN_MAIN,
 			G_OPTION_ARG_NONE, &extract_thumbnail,
 			"Output any embedded thumbnail (superseding --thumbnail)", NULL},
@@ -2031,6 +2066,10 @@ main(int argc, char *argv[])
 		g_free(args[i]);
 		args[i] = g_file_get_uri(resolved);
 		g_object_unref(resolved);
+	}
+	if (thumbnail_size_search) {
+		output_thumbnail_for_search(args, thumbnail_size_search);
+		return 0;
 	}
 	if (extract_thumbnail || thumbnail_size) {
 		output_thumbnail(args, extract_thumbnail, thumbnail_size);
