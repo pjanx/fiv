@@ -4,6 +4,7 @@
 		<file alias="LICENSE">../LICENSE</file>
 	</gresource>
 	<gresource prefix="/org/gnome/design/IconLibrary/scalable/actions/">
+		<file preprocess="xml-stripblanks">text-symbolic.svg</file>
 		<file preprocess="xml-stripblanks">circle-filled-symbolic.svg</file>
 		<file preprocess="xml-stripblanks">funnel-symbolic.svg</file>
 		<file preprocess="xml-stripblanks">blend-tool-symbolic.svg</file>

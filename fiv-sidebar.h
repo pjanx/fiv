@@ -26,4 +26,3 @@ G_DECLARE_FINAL_TYPE(FivSidebar, fiv_sidebar, FIV, SIDEBAR, GtkScrolledWindow)
 
 GtkWidget *fiv_sidebar_new(FivIoModel *model);
 void fiv_sidebar_show_enter_location(FivSidebar *self);
-GtkBox *fiv_sidebar_get_toolbar(FivSidebar *self);

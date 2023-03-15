@@ -25,6 +25,10 @@
 			<default>true</default>
 			<summary>Show the browser's sidebar</summary>
 		</key>
+		<key name='show-browser-toolbar' type='b'>
+			<default>true</default>
+			<summary>Show a toolbar in the browser view</summary>
+		</key>
 		<key name='show-view-toolbar' type='b'>
 			<default>true</default>
 			<summary>Show a toolbar in the image view</summary>

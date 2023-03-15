@@ -25,7 +25,6 @@
 struct _FivSidebar {
 	GtkScrolledWindow parent_instance;
 	GtkPlacesSidebar *places;
-	GtkWidget *toolbar;
 	GtkWidget *listbox;
 	FivIoModel *model;
 };
@@ -78,7 +77,7 @@ fiv_sidebar_class_init(FivSidebarClass *klass)
 
 	// You're giving me no choice, Adwaita.
 	// Your style is hardcoded to match against the class' CSS name.
-	// And I need replicate the internal widget structure.
+	// And I need to replicate the internal widget structure.
 	gtk_widget_class_set_css_name(widget_class, "placessidebar");
 
 	// TODO(p): Consider a return value, and using it.
@@ -583,12 +582,6 @@ fiv_sidebar_init(FivSidebar *self)
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(self->places),
 		GTK_POLICY_NEVER, GTK_POLICY_NEVER);
 
-	// None of GtkActionBar, GtkToolbar, .inline-toolbar is appropriate.
-	// It is either side-favouring borders or excess button padding.
-	self->toolbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
-	gtk_style_context_add_class(
-		gtk_widget_get_style_context(self->toolbar), GTK_STYLE_CLASS_TOOLBAR);
-
 	self->listbox = gtk_list_box_new();
 	gtk_list_box_set_selection_mode(
 		GTK_LIST_BOX(self->listbox), GTK_SELECTION_NONE);
@@ -600,10 +593,6 @@ fiv_sidebar_init(FivSidebar *self)
 	GtkWidget *superbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	gtk_container_add(
 		GTK_CONTAINER(superbox), GTK_WIDGET(self->places));
-	gtk_container_add(
-		GTK_CONTAINER(superbox), gtk_separator_new(GTK_ORIENTATION_VERTICAL));
-	gtk_container_add(
-		GTK_CONTAINER(superbox), self->toolbar);
 	gtk_container_add(
 		GTK_CONTAINER(superbox), gtk_separator_new(GTK_ORIENTATION_VERTICAL));
 	gtk_container_add(
@@ -647,11 +636,4 @@ fiv_sidebar_show_enter_location(FivSidebar *self)
 {
 	g_return_if_fail(FIV_IS_SIDEBAR(self));
 	g_signal_emit_by_name(self->places, "show-enter-location");
-}
-
-GtkBox *
-fiv_sidebar_get_toolbar(FivSidebar *self)
-{
-	g_return_val_if_fail(FIV_IS_SIDEBAR(self), NULL);
-	return GTK_BOX(self->toolbar);
 }

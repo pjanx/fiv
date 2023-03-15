@@ -129,6 +129,7 @@ static struct key_group help_keys_browser[] = {
 		{}
 	}},
 	{"View", (struct key[]) {
+		{"F7", "Toggle toolbar"},
 		{"F9", "Toggle navigation sidebar"},
 		{"F5 r <Control>r", "Reload"},
 		{"h <Control>h", "Toggle hiding unsupported files"},
@@ -151,7 +152,7 @@ static struct key_group help_keys_viewer[] = {
 		{}
 	}},
 	{"View", (struct key[]) {
-		{"F9", "Toggle toolbar"},
+		{"F7", "Toggle toolbar"},
 		{"F5 r <Primary>r", "Reload"},
 		{}
 	}},
@@ -524,6 +525,33 @@ show_about_dialog(GtkWidget *parent)
 // by some minor amount of pixels, margin-wise.
 #define B make_toolbar_button
 #define T make_toolbar_toggle
+#define R make_toolbar_radio
+#define BROWSEBAR(XX) \
+	XX(SIDEBAR,       T("sidebar-show-symbolic", "Show sidebar")) \
+	XX(S1,            gtk_separator_new(GTK_ORIENTATION_HORIZONTAL)) \
+	XX(DIR_PREVIOUS,  B("go-previous-symbolic", "Previous directory")) \
+	XX(DIR_NEXT,      B("go-next-symbolic", "Next directory")) \
+	XX(S2,            gtk_separator_new(GTK_ORIENTATION_HORIZONTAL)) \
+	XX(PLUS,          B("zoom-in-symbolic", "Larger thumbnails")) \
+	XX(MINUS,         B("zoom-out-symbolic", "Smaller thumbnails")) \
+	XX(S3,            gtk_separator_new(GTK_ORIENTATION_HORIZONTAL)) \
+	XX(FILENAMES,     T("text-symbolic", "Show filenames")) \
+	XX(FILTER,        T("funnel-symbolic", "Hide unsupported files")) \
+	XX(S4,            gtk_separator_new(GTK_ORIENTATION_HORIZONTAL)) \
+	XX(SORT_DIR,      B("view-sort-ascending-symbolic", "Sort ascending")) \
+	XX(SORT_NAME,     R("Name", "Sort by filename")) \
+	XX(SORT_TIME,     R("Time", "Sort by time of last modification")) \
+	XX(S5,            gtk_separator_new(GTK_ORIENTATION_HORIZONTAL)) \
+	/* We are YouTube. */ \
+	XX(FULLSCREEN,    B("view-fullscreen-symbolic", "Fullscreen"))
+
+enum {
+#define XX(id, constructor) BROWSEBAR_ ## id,
+	BROWSEBAR(XX)
+#undef XX
+	BROWSEBAR_COUNT
+};
+
 #define TOOLBAR(XX) \
 	XX(BROWSE,        B("view-grid-symbolic", "Browse")) \
 	XX(FILE_PREVIOUS, B("go-previous-symbolic", "Previous file")) \
@@ -586,11 +614,8 @@ struct {
 
 	GtkWidget *browser_paned;
 	GtkWidget *browser_sidebar;
-	GtkWidget *plus;
-	GtkWidget *minus;
-	GtkWidget *funnel;
-	GtkWidget *sort_field[FIV_IO_MODEL_SORT_COUNT];
-	GtkWidget *sort_direction[2];
+	GtkWidget *browser_toolbar;
+	GtkWidget *browsebar[BROWSEBAR_COUNT];
 	GtkWidget *browser_scroller;
 	GtkWidget *browser;
 
@@ -773,6 +798,13 @@ on_model_files_changed(FivIoModel *model, G_GNUC_UNUSED gpointer user_data)
 }
 
 static void
+on_sidebar_toggled(GtkToggleButton *button, G_GNUC_UNUSED gpointer user_data)
+{
+	gboolean active = gtk_toggle_button_get_active(button);
+	gtk_widget_set_visible(g.browser_sidebar, active);
+}
+
+static void
 on_filtering_toggled(GtkToggleButton *button, G_GNUC_UNUSED gpointer user_data)
 {
 	gboolean active = gtk_toggle_button_get_active(button);
@@ -780,8 +812,19 @@ on_filtering_toggled(GtkToggleButton *button, G_GNUC_UNUSED gpointer user_data)
 }
 
 static void
-on_sort_field(G_GNUC_UNUSED GtkMenuItem *item, gpointer data)
+on_filenames_toggled(GtkToggleButton *button, G_GNUC_UNUSED gpointer user_data)
 {
+	gboolean active = gtk_toggle_button_get_active(button);
+	g_object_set(g.browser, "show-labels", active, NULL);
+}
+
+static void
+on_sort_field(G_GNUC_UNUSED GtkToggleButton *button, gpointer data)
+{
+	gboolean active = gtk_toggle_button_get_active(button);
+	if (!active)
+		return;
+
 	int old = -1, new = (int) (intptr_t) data;
 	g_object_get(g.model, "sort-field", &old, NULL);
 	if (old != new)
@@ -789,12 +832,12 @@ on_sort_field(G_GNUC_UNUSED GtkMenuItem *item, gpointer data)
 }
 
 static void
-on_sort_direction(G_GNUC_UNUSED GtkMenuItem *item, gpointer data)
+on_sort_direction(G_GNUC_UNUSED GtkToggleButton *button,
+	G_GNUC_UNUSED gpointer data)
 {
-	gboolean old = FALSE, new = (gboolean) (intptr_t) data;
+	gboolean old = FALSE;
 	g_object_get(g.model, "sort-descending", &old, NULL);
-	if (old != new)
-		g_object_set(g.model, "sort-descending", new, NULL);
+	g_object_set(g.model, "sort-descending", !old, NULL);
 }
 
 static void
@@ -1092,6 +1135,16 @@ on_view_drag_data_received(G_GNUC_UNUSED GtkWidget *widget,
 }
 
 static void
+on_notify_sidebar_visible(
+	GObject *object, GParamSpec *param_spec, G_GNUC_UNUSED gpointer user_data)
+{
+	gboolean b = FALSE;
+	g_object_get(object, g_param_spec_get_name(param_spec), &b, NULL);
+	gtk_toggle_button_set_active(
+		GTK_TOGGLE_BUTTON(g.browsebar[BROWSEBAR_SIDEBAR]), b);
+}
+
+static void
 on_dir_previous(void)
 {
 	GFile *directory = fiv_io_model_get_previous_directory(g.model);
@@ -1116,14 +1169,6 @@ on_dir_next(void)
 }
 
 static void
-on_toggle_labels(void)
-{
-	gboolean old = FALSE;
-	g_object_get(g.browser, "show-labels", &old, NULL);
-	g_object_set(g.browser, "show-labels", !old, NULL);
-}
-
-static void
 on_toolbar_zoom(G_GNUC_UNUSED GtkButton *button, gpointer user_data)
 {
 	FivThumbnailSize size = FIV_THUMBNAIL_SIZE_COUNT;
@@ -1142,8 +1187,20 @@ on_notify_thumbnail_size(
 {
 	FivThumbnailSize size = 0;
 	g_object_get(object, g_param_spec_get_name(param_spec), &size, NULL);
-	gtk_widget_set_sensitive(g.plus, size < FIV_THUMBNAIL_SIZE_MAX);
-	gtk_widget_set_sensitive(g.minus, size > FIV_THUMBNAIL_SIZE_MIN);
+	gtk_widget_set_sensitive(
+		g.browsebar[BROWSEBAR_PLUS], size < FIV_THUMBNAIL_SIZE_MAX);
+	gtk_widget_set_sensitive(
+		g.browsebar[BROWSEBAR_MINUS], size > FIV_THUMBNAIL_SIZE_MIN);
+}
+
+static void
+on_notify_show_labels(
+	GObject *object, GParamSpec *param_spec, G_GNUC_UNUSED gpointer user_data)
+{
+	gboolean show_labels = 0;
+	g_object_get(object, g_param_spec_get_name(param_spec), &show_labels, NULL);
+	gtk_toggle_button_set_active(
+		GTK_TOGGLE_BUTTON(g.browsebar[BROWSEBAR_FILENAMES]), show_labels);
 }
 
 static void
@@ -1152,7 +1209,8 @@ on_notify_filtering(
 {
 	gboolean b = FALSE;
 	g_object_get(object, g_param_spec_get_name(param_spec), &b, NULL);
-	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(g.funnel), b);
+	gtk_toggle_button_set_active(
+		GTK_TOGGLE_BUTTON(g.browsebar[BROWSEBAR_FILTER]), b);
 }
 
 static void
@@ -1161,8 +1219,8 @@ on_notify_sort_field(
 {
 	gint field = -1;
 	g_object_get(object, g_param_spec_get_name(param_spec), &field, NULL);
-	gtk_check_menu_item_set_active(
-		GTK_CHECK_MENU_ITEM(g.sort_field[field]), TRUE);
+	gtk_toggle_button_set_active(
+		GTK_TOGGLE_BUTTON(g.browsebar[BROWSEBAR_SORT_NAME + field]), TRUE);
 }
 
 static void
@@ -1171,8 +1229,18 @@ on_notify_sort_descending(
 {
 	gboolean b = FALSE;
 	g_object_get(object, g_param_spec_get_name(param_spec), &b, NULL);
-	gtk_check_menu_item_set_active(
-		GTK_CHECK_MENU_ITEM(g.sort_direction[b]), TRUE);
+
+	const char *title = b
+		? "Sort ascending"
+		: "Sort descending";
+	const char *name = b
+		? "view-sort-ascending-symbolic"
+		: "view-sort-descending-symbolic";
+
+	GtkButton *button = GTK_BUTTON(g.browsebar[BROWSEBAR_SORT_DIR]);
+	GtkImage *image = GTK_IMAGE(gtk_button_get_image(button));
+	gtk_widget_set_tooltip_text(GTK_WIDGET(button), title);
+	gtk_image_set_from_icon_name(image, name, GTK_ICON_SIZE_BUTTON);
 }
 
 static void
@@ -1196,9 +1264,14 @@ on_window_state_event(G_GNUC_UNUSED GtkWidget *widget,
 		? "view-restore-symbolic"
 		: "view-fullscreen-symbolic";
 
-	GtkButton *button = GTK_BUTTON(g.toolbar[TOOLBAR_FULLSCREEN]);
-	GtkImage *image = GTK_IMAGE(gtk_button_get_image(button));
-	gtk_image_set_from_icon_name(image, name, GTK_ICON_SIZE_BUTTON);
+	gtk_image_set_from_icon_name(
+		GTK_IMAGE(gtk_button_get_image(
+			GTK_BUTTON(g.toolbar[TOOLBAR_FULLSCREEN]))),
+		name, GTK_ICON_SIZE_BUTTON);
+	gtk_image_set_from_icon_name(
+		GTK_IMAGE(gtk_button_get_image(
+			GTK_BUTTON(g.browsebar[BROWSEBAR_FULLSCREEN]))),
+		name, GTK_ICON_SIZE_BUTTON);
 }
 
 static void
@@ -1296,7 +1369,7 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 	case GDK_CONTROL_MASK | GDK_SHIFT_MASK:
 		switch (event->keyval) {
 		case GDK_KEY_h:
-			gtk_button_clicked(GTK_BUTTON(g.funnel));
+			gtk_button_clicked(GTK_BUTTON(g.browsebar[BROWSEBAR_FILTER]));
 			return TRUE;
 		case GDK_KEY_l:
 			fiv_sidebar_show_enter_location(FIV_SIDEBAR(g.browser_sidebar));
@@ -1393,7 +1466,7 @@ on_key_press_view(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 	switch (event->state & gtk_accelerator_get_default_mod_mask()) {
 	case 0:
 		switch (event->keyval) {
-		case GDK_KEY_F9:
+		case GDK_KEY_F7:
 			gtk_widget_set_visible(g.view_toolbar,
 				!gtk_widget_is_visible(g.view_toolbar));
 			return TRUE;
@@ -1431,7 +1504,7 @@ on_key_press_browser_paned(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 			load_directory(NULL);
 			return TRUE;
 		case GDK_KEY_t:
-			on_toggle_labels();
+			gtk_button_clicked(GTK_BUTTON(g.browsebar[BROWSEBAR_FILENAMES]));
 			return TRUE;
 		}
 		break;
@@ -1455,6 +1528,10 @@ on_key_press_browser_paned(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 		break;
 	case 0:
 		switch (event->keyval) {
+		case GDK_KEY_F7:
+			gtk_widget_set_visible(g.browser_toolbar,
+				!gtk_widget_is_visible(g.browser_toolbar));
+			return TRUE;
 		case GDK_KEY_F9:
 			gtk_widget_set_visible(g.browser_sidebar,
 				!gtk_widget_is_visible(g.browser_sidebar));
@@ -1471,14 +1548,14 @@ on_key_press_browser_paned(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 			fiv_browser_select(FIV_BROWSER(g.browser), NULL);
 			return TRUE;
 		case GDK_KEY_h:
-			gtk_button_clicked(GTK_BUTTON(g.funnel));
+			gtk_button_clicked(GTK_BUTTON(g.browsebar[BROWSEBAR_FILTER]));
 			return TRUE;
 		case GDK_KEY_F5:
 		case GDK_KEY_r:
 			load_directory(NULL);
 			return TRUE;
 		case GDK_KEY_t:
-			on_toggle_labels();
+			gtk_button_clicked(GTK_BUTTON(g.browsebar[BROWSEBAR_FILENAMES]));
 			return TRUE;
 		}
 	}
@@ -1557,6 +1634,79 @@ make_toolbar_toggle(const char *symbolic, const char *tooltip)
 		gtk_widget_get_style_context(button), GTK_STYLE_CLASS_FLAT);
 	return button;
 }
+
+static GtkWidget *
+make_toolbar_radio(const char *label, const char *tooltip)
+{
+	GtkWidget *button = gtk_radio_button_new_with_label(NULL, label);
+	gtk_widget_set_tooltip_text(button, tooltip);
+	gtk_widget_set_focus_on_click(button, FALSE);
+	return button;
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+static void
+browsebar_connect(int index, GCallback callback)
+{
+	g_signal_connect_swapped(g.browsebar[index], "clicked", callback, NULL);
+}
+
+static GtkWidget *
+make_browser_toolbar(void)
+{
+#define XX(id, constructor) g.browsebar[BROWSEBAR_ ## id] = constructor;
+	BROWSEBAR(XX)
+#undef XX
+
+	// GtkStatusBar solves a problem we do not have here.
+	GtkWidget *browser_toolbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+	gtk_style_context_add_class(
+		gtk_widget_get_style_context(browser_toolbar), "fiv-toolbar");
+	GtkBox *box = GTK_BOX(browser_toolbar);
+
+	// Exploring different versions of awkward layouts.
+	for (int i = 0; i <= BROWSEBAR_S2; i++)
+		gtk_box_pack_start(box, g.browsebar[i], FALSE, FALSE, 0);
+	for (int i = BROWSEBAR_COUNT; --i >= BROWSEBAR_S5; )
+		gtk_box_pack_end(box, g.browsebar[i], FALSE, FALSE, 0);
+
+	GtkWidget *center = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+	for (int i = BROWSEBAR_S2; ++i < BROWSEBAR_S5; )
+		gtk_box_pack_start(GTK_BOX(center), g.browsebar[i], FALSE, FALSE, 0);
+	gtk_box_set_center_widget(box, center);
+
+	g_signal_connect(g.browsebar[BROWSEBAR_SIDEBAR], "toggled",
+		G_CALLBACK(on_sidebar_toggled), NULL);
+
+	browsebar_connect(BROWSEBAR_DIR_PREVIOUS, G_CALLBACK(on_dir_previous));
+	browsebar_connect(BROWSEBAR_DIR_NEXT,     G_CALLBACK(on_dir_next));
+	browsebar_connect(BROWSEBAR_SORT_DIR,     G_CALLBACK(on_sort_direction));
+	browsebar_connect(BROWSEBAR_FULLSCREEN,   G_CALLBACK(toggle_fullscreen));
+
+	g_signal_connect(g.browsebar[BROWSEBAR_PLUS], "clicked",
+		G_CALLBACK(on_toolbar_zoom), (gpointer) +1);
+	g_signal_connect(g.browsebar[BROWSEBAR_MINUS], "clicked",
+		G_CALLBACK(on_toolbar_zoom), (gpointer) -1);
+
+	g_signal_connect(g.browsebar[BROWSEBAR_FILTER], "toggled",
+		G_CALLBACK(on_filtering_toggled), NULL);
+	g_signal_connect(g.browsebar[BROWSEBAR_FILENAMES], "toggled",
+		G_CALLBACK(on_filenames_toggled), NULL);
+
+	GtkRadioButton *last = GTK_RADIO_BUTTON(g.browsebar[BROWSEBAR_SORT_NAME]);
+	for (int i = BROWSEBAR_SORT_NAME; i <= BROWSEBAR_SORT_TIME; i++) {
+		GtkRadioButton *radio = GTK_RADIO_BUTTON(g.browsebar[i]);
+		g_signal_connect(radio, "toggled", G_CALLBACK(on_sort_field),
+			(gpointer) (gintptr) i - BROWSEBAR_SORT_NAME);
+		gtk_radio_button_join_group(radio, last);
+		last = radio;
+	}
+
+	return browser_toolbar;
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 static void
 on_view_actions_changed(void)
@@ -1703,7 +1853,8 @@ make_view_toolbar(void)
 
 	// GtkStatusBar solves a problem we do not have here.
 	GtkWidget *view_toolbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_widget_set_name(view_toolbar, "toolbar");
+	gtk_style_context_add_class(
+		gtk_widget_get_style_context(view_toolbar), "fiv-toolbar");
 	GtkBox *box = GTK_BOX(view_toolbar);
 
 	// Exploring different versions of awkward layouts.
@@ -1794,86 +1945,27 @@ make_browser_sidebar(FivIoModel *model)
 	g_signal_connect(sidebar, "open-location",
 		G_CALLBACK(on_open_location), NULL);
 
-	g.plus = gtk_button_new_from_icon_name("zoom-in-symbolic",
-		GTK_ICON_SIZE_BUTTON);
-	gtk_widget_set_tooltip_text(g.plus, "Larger thumbnails");
-	g_signal_connect(g.plus, "clicked",
-		G_CALLBACK(on_toolbar_zoom), (gpointer) +1);
+	g_signal_connect(sidebar, "notify::visible",
+		G_CALLBACK(on_notify_sidebar_visible), NULL);
 
-	g.minus = gtk_button_new_from_icon_name("zoom-out-symbolic",
-		GTK_ICON_SIZE_BUTTON);
-	gtk_widget_set_tooltip_text(g.minus, "Smaller thumbnails");
-	g_signal_connect(g.minus, "clicked",
-		G_CALLBACK(on_toolbar_zoom), (gpointer) -1);
-
-	GtkWidget *zoom_group = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_style_context_add_class(
-		gtk_widget_get_style_context(zoom_group), GTK_STYLE_CLASS_LINKED);
-	gtk_box_pack_start(GTK_BOX(zoom_group), g.plus, FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(zoom_group), g.minus, FALSE, FALSE, 0);
-
-	g.funnel = gtk_toggle_button_new();
-	gtk_container_add(GTK_CONTAINER(g.funnel),
-		gtk_image_new_from_icon_name("funnel-symbolic", GTK_ICON_SIZE_BUTTON));
-	gtk_widget_set_tooltip_text(g.funnel, "Hide unsupported files");
-	g_signal_connect(g.funnel, "toggled",
-		G_CALLBACK(on_filtering_toggled), NULL);
-
-	GtkWidget *menu = gtk_menu_new();
-	g.sort_field[0] = gtk_radio_menu_item_new_with_mnemonic(NULL, "By _Name");
-	g.sort_field[1] = gtk_radio_menu_item_new_with_mnemonic(
-		gtk_radio_menu_item_get_group(GTK_RADIO_MENU_ITEM(g.sort_field[0])),
-		"By _Modification Time");
-	for (int i = FIV_IO_MODEL_SORT_MIN; i <= FIV_IO_MODEL_SORT_MAX; i++) {
-		g_signal_connect(g.sort_field[i], "activate",
-			G_CALLBACK(on_sort_field), (void *) (intptr_t) i);
-		gtk_menu_shell_append(GTK_MENU_SHELL(menu), g.sort_field[i]);
-	}
-
-	g.sort_direction[0] =
-		gtk_radio_menu_item_new_with_mnemonic(NULL, "_Ascending");
-	g.sort_direction[1] = gtk_radio_menu_item_new_with_mnemonic(
-		gtk_radio_menu_item_get_group(GTK_RADIO_MENU_ITEM(g.sort_direction[0])),
-		"_Descending");
-	g_signal_connect(g.sort_direction[0], "activate",
-		G_CALLBACK(on_sort_direction), (void *) 0);
-	g_signal_connect(g.sort_direction[1], "activate",
-		G_CALLBACK(on_sort_direction), (void *) 1);
-
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu), g.sort_direction[0]);
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu), g.sort_direction[1]);
-	gtk_widget_show_all(menu);
-
-	GtkWidget *sort = gtk_menu_button_new();
-	gtk_widget_set_tooltip_text(sort, "Sort order");
-	gtk_button_set_image(GTK_BUTTON(sort),
-		gtk_image_new_from_icon_name(
-			"view-sort-ascending-symbolic", GTK_ICON_SIZE_BUTTON));
-	gtk_menu_button_set_popup(GTK_MENU_BUTTON(sort), menu);
-
-	GtkWidget *model_group = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_style_context_add_class(
-		gtk_widget_get_style_context(model_group), GTK_STYLE_CLASS_LINKED);
-	gtk_box_pack_start(GTK_BOX(model_group), g.funnel, FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(model_group), sort, FALSE, FALSE, 0);
-
-	GtkBox *toolbar = fiv_sidebar_get_toolbar(FIV_SIDEBAR(sidebar));
-	gtk_box_pack_start(toolbar, zoom_group, FALSE, FALSE, 0);
-	gtk_box_pack_start(toolbar, model_group, FALSE, FALSE, 0);
-	gtk_widget_set_halign(GTK_WIDGET(toolbar), GTK_ALIGN_CENTER);
+	g_object_notify(G_OBJECT(sidebar), "visible");
 
 	g_signal_connect(g.browser, "notify::thumbnail-size",
 		G_CALLBACK(on_notify_thumbnail_size), NULL);
+	g_signal_connect(g.browser, "notify::show-labels",
+		G_CALLBACK(on_notify_show_labels), NULL);
 	g_signal_connect(model, "notify::filtering",
 		G_CALLBACK(on_notify_filtering), NULL);
 	g_signal_connect(model, "notify::sort-field",
 		G_CALLBACK(on_notify_sort_field), NULL);
 	g_signal_connect(model, "notify::sort-descending",
 		G_CALLBACK(on_notify_sort_descending), NULL);
+
 	on_toolbar_zoom(NULL, (gpointer) 0);
-	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(g.funnel), TRUE);
-	// TODO(p): Invoke sort configuration notifications explicitly.
+
+	g_object_notify(G_OBJECT(g.model), "filtering");
+	g_object_notify(G_OBJECT(g.model), "sort-field");
+	g_object_notify(G_OBJECT(g.model), "sort-descending");
 	return sidebar;
 }
 
@@ -1926,12 +2018,11 @@ static const char stylesheet[] = "@define-color fiv-tile @content_view_bg; \
 	@define-color fiv-semiselected \
 		mix(@theme_selected_bg_color, @content_view_bg, 0.5); \
 	fiv-view, fiv-browser { background: @content_view_bg; } \
-	placessidebar.fiv .toolbar { padding: 2px 6px; } \
 	placessidebar.fiv box > separator { margin: 4px 0; } \
-	#toolbar button { padding-left: 0; padding-right: 0; } \
-	#toolbar > button:first-child { padding-left: 4px; } \
-	#toolbar > button:last-child { padding-right: 4px; } \
-	#toolbar separator { \
+	.fiv-toolbar button { padding-left: 0; padding-right: 0; } \
+	.fiv-toolbar > button:first-child { padding-left: 4px; } \
+	.fiv-toolbar > button:last-child { padding-right: 4px; } \
+	.fiv-toolbar separator { \
 		background: mix(@insensitive_fg_color, \
 			@insensitive_bg_color, 0.4); margin: 6px 8px; \
 	} \
@@ -2161,7 +2252,7 @@ main(int argc, char *argv[])
 		G_CALLBACK(on_view_drag_data_received), NULL);
 	gtk_container_add(GTK_CONTAINER(view_scroller), g.view);
 
-	// We need to hide it together with the separator.
+	// We need to hide it together with its separator.
 	g.view_toolbar = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	gtk_box_pack_start(GTK_BOX(g.view_toolbar),
 		make_view_toolbar(), FALSE, FALSE, 0);
@@ -2201,10 +2292,23 @@ main(int argc, char *argv[])
 		G_CALLBACK(on_item_activated), NULL);
 	gtk_container_add(GTK_CONTAINER(g.browser_scroller), g.browser);
 
+	// We need to hide it together with its separator.
+	g.browser_toolbar = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	gtk_box_pack_start(GTK_BOX(g.browser_toolbar),
+		make_browser_toolbar(), FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(g.browser_toolbar),
+		gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, 0);
+
+	GtkWidget *browser_right = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	gtk_box_pack_start(GTK_BOX(browser_right),
+		g.browser_toolbar, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(browser_right),
+		g.browser_scroller, TRUE, TRUE, 0);
+
 	g.browser_sidebar = make_browser_sidebar(g.model);
 	g.browser_paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
 	gtk_paned_add1(GTK_PANED(g.browser_paned), g.browser_sidebar);
-	gtk_paned_add2(GTK_PANED(g.browser_paned), g.browser_scroller);
+	gtk_paned_add2(GTK_PANED(g.browser_paned), browser_right);
 	g_signal_connect(g.browser_paned, "key-press-event",
 		G_CALLBACK(on_key_press_browser_paned), NULL);
 	g_signal_connect(g.browser_paned, "button-press-event",
@@ -2238,6 +2342,8 @@ main(int argc, char *argv[])
 	gtk_widget_show_all(menu_box);
 	gtk_widget_set_visible(g.browser_sidebar,
 		g_settings_get_boolean(settings, "show-browser-sidebar"));
+	gtk_widget_set_visible(g.browser_toolbar,
+		g_settings_get_boolean(settings, "show-browser-toolbar"));
 	gtk_widget_set_visible(g.view_toolbar,
 		g_settings_get_boolean(settings, "show-view-toolbar"));
 
