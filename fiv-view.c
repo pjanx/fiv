@@ -110,10 +110,10 @@ static FivIoOrientation view_mirror[9] = {
 	[FivIoOrientationMirror0]   = FivIoOrientation0,
 	[FivIoOrientation180]       = FivIoOrientationMirror180,
 	[FivIoOrientationMirror180] = FivIoOrientation180,
-	[FivIoOrientationMirror270] = FivIoOrientation270,
-	[FivIoOrientation90]        = FivIoOrientationMirror90,
-	[FivIoOrientationMirror90]  = FivIoOrientation90,
-	[FivIoOrientation270]       = FivIoOrientationMirror270,
+	[FivIoOrientationMirror270] = FivIoOrientation90,
+	[FivIoOrientation90]        = FivIoOrientationMirror270,
+	[FivIoOrientationMirror90]  = FivIoOrientation270,
+	[FivIoOrientation270]       = FivIoOrientationMirror90,
 };
 
 static FivIoOrientation view_right[9] = {
