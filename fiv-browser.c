@@ -1,7 +1,7 @@
 //
 // fiv-browser.c: filesystem browsing widget
 //
-// Copyright (c) 2021 - 2022, Přemysl Eric Janouch <p@janouch.name>
+// Copyright (c) 2021 - 2023, Přemysl Eric Janouch <p@janouch.name>
 //
 // Permission to use, copy, modify, and/or distribute this software for any
 // purpose with or without fee is hereby granted.
@@ -45,9 +45,12 @@
 //                    │ n │   ┊   glow border │ n ┊
 //                    │ g ╰───────────────────╯ g ╰┄┄┄┄┄
 //                    │    s  p  a  c  i  n  g
+//                    │       l  a  b  e  l
+//                    │    s  p  a  c  i  n  g
 //                    │   ╭┄┄┄┄┄┄┄┄┄┄┄┄╮   ╭┄┄┄┄┄┄┄┄┄┄┄┄
 //
 // The glow is actually a glowing margin, the border is rendered in two parts.
+// When labels are hidden, the surrounding spacing is collapsed.
 //
 
 typedef struct entry Entry;
@@ -71,6 +74,8 @@ struct _FivBrowser {
 	FivThumbnailSize item_size;         ///< Thumbnail size
 	int item_height;                    ///< Thumbnail height in pixels
 	int item_spacing;                   ///< Space between items in pixels
+
+	gboolean show_labels;               ///< Show labels underneath items
 
 	FivIoModel *model;                  ///< Filesystem model
 	GArray *entries;                    ///< []Entry
@@ -101,10 +106,13 @@ struct _FivBrowser {
 /// The "last modified" timestamp of source images for thumbnails.
 static cairo_user_data_key_t fiv_browser_key_mtime_msec;
 
+// TODO(p): Include FivIoModelEntry data by reference.
 struct entry {
 	gchar *uri;                         ///< GIO URI
 	gchar *target_uri;                  ///< GIO URI for any target
+	gchar *display_name;                ///< Label for the file
 	gint64 mtime_msec;                  ///< Modification time in milliseconds
+
 	cairo_surface_t *thumbnail;         ///< Prescaled thumbnail
 	GIcon *icon;                        ///< If no thumbnail, use this icon
 };
@@ -114,6 +122,7 @@ entry_free(Entry *self)
 {
 	g_free(self->uri);
 	g_free(self->target_uri);
+	g_free(self->display_name);
 	g_clear_pointer(&self->thumbnail, cairo_surface_destroy);
 	g_clear_object(&self->icon);
 }
@@ -122,7 +131,8 @@ entry_free(Entry *self)
 
 struct item {
 	const Entry *entry;
-	int x_offset;                       ///< Offset within the row
+	PangoLayout *label;                 ///< Label
+	int x_offset;                       ///< X offset within the row
 };
 
 struct row {
@@ -135,10 +145,33 @@ struct row {
 static void
 row_free(Row *self)
 {
+	for (gsize i = 0; i < self->len; i++)
+		g_clear_object(&self->items[i].label);
 	g_free(self->items);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+static double
+row_subheight(const FivBrowser *self, const Row *row)
+{
+	if (!self->show_labels)
+		return 0;
+
+	// If we didn't ellipsize labels, this should be made to account
+	// for vertical centering as well.
+	int tallest_label = 0;
+	for (gsize i = 0; i < row->len; i++) {
+		PangoRectangle ink = {}, logical = {};
+		pango_layout_get_extents(row->items[i].label, &ink, &logical);
+
+		int height = (logical.y + logical.height) / PANGO_SCALE;
+		if (tallest_label < height)
+			tallest_label = height;
+	}
+
+	return self->item_spacing + tallest_label;
+}
 
 static void
 append_row(FivBrowser *self, int *y, int x, GArray *items_array)
@@ -154,6 +187,7 @@ append_row(FivBrowser *self, int *y, int x, GArray *items_array)
 	// Not trying to pack them vertically, but this would be the place to do it.
 	*y += self->item_height;
 	*y += self->item_border_y;
+	*y += row_subheight(self, &row);
 }
 
 static int
@@ -165,6 +199,9 @@ relayout(FivBrowser *self, int width)
 	GtkBorder padding = {};
 	gtk_style_context_get_padding(style, GTK_STATE_FLAG_NORMAL, &padding);
 	int available_width = width - padding.left - padding.right, max_width = 0;
+
+	// TODO(p): Remember the first visible item and the vertical offset into it,
+	// then try to ensure its visibility at the end (useful for reloads).
 
 	g_array_set_size(self->layouted_rows, 0);
 	// Whatever self->drag_begin_* used to point at might no longer be there,
@@ -189,8 +226,26 @@ relayout(FivBrowser *self, int width)
 			x = 0;
 		}
 
-		g_array_append_val(items,
-			((Item) {.entry = entry, .x_offset = x + self->item_border_x}));
+		PangoLayout *label = NULL;
+		if (self->show_labels) {
+			label = gtk_widget_create_pango_layout(widget, entry->display_name);
+			pango_layout_set_width(
+				label, (width - 2 * self->glow_w) * PANGO_SCALE);
+			pango_layout_set_alignment(label, PANGO_ALIGN_CENTER);
+			pango_layout_set_wrap(label, PANGO_WRAP_WORD_CHAR);
+			pango_layout_set_ellipsize(label, PANGO_ELLIPSIZE_END);
+
+			PangoAttrList *attrs = pango_attr_list_new();
+			pango_attr_list_insert(attrs, pango_attr_insert_hyphens_new(FALSE));
+			pango_layout_set_attributes(label, attrs);
+			pango_attr_list_unref (attrs);
+		}
+
+		g_array_append_val(items, ((Item) {
+			.entry = entry,
+			.label = label,
+			.x_offset = x + self->item_border_x,
+		}));
 
 		x += width;
 		if (max_width < width)
@@ -364,6 +419,16 @@ draw_row(FivBrowser *self, cairo_t *cr, const Row *row)
 
 			// Here, we could consider multiplying
 			// the whole rectangle with the selection color.
+		}
+
+		if (self->show_labels) {
+			gtk_style_context_save(style);
+			gtk_style_context_add_class(style, "label");
+			gtk_render_layout(style, cr, -border.left,
+				border.top + extents.height + self->item_border_y +
+					self->item_spacing,
+				item->label);
+			gtk_style_context_restore(style);
 		}
 
 		cairo_restore(cr);
@@ -747,6 +812,7 @@ G_DEFINE_TYPE_EXTENDED(FivBrowser, fiv_browser, GTK_TYPE_WIDGET, 0,
 
 enum {
 	PROP_THUMBNAIL_SIZE = 1,
+	PROP_SHOW_LABELS,
 	N_PROPERTIES,
 
 	// These are overriden, we do not register them.
@@ -827,6 +893,9 @@ fiv_browser_get_property(
 	case PROP_THUMBNAIL_SIZE:
 		g_value_set_enum(value, self->item_size);
 		break;
+	case PROP_SHOW_LABELS:
+		g_value_set_boolean(value, self->show_labels);
+		break;
 	case PROP_HADJUSTMENT:
 		g_value_set_object(value, self->hadjustment);
 		break;
@@ -871,6 +940,13 @@ fiv_browser_set_property(
 	switch (property_id) {
 	case PROP_THUMBNAIL_SIZE:
 		set_item_size(self, g_value_get_enum(value));
+		break;
+	case PROP_SHOW_LABELS:
+		if (self->show_labels != g_value_get_boolean(value)) {
+			self->show_labels = g_value_get_boolean(value);
+			gtk_widget_queue_resize(GTK_WIDGET(self));
+			g_object_notify_by_pspec(object, pspec);
+		}
 		break;
 	case PROP_HADJUSTMENT:
 		if (replace_adjustment(
@@ -1283,12 +1359,13 @@ scroll_to_row(FivBrowser *self, const Row *row)
 
 	double y1 = gtk_adjustment_get_value(self->vadjustment);
 	double ph = gtk_adjustment_get_page_size(self->vadjustment);
+	double sh = self->item_border_y + row_subheight(self, row);
 	if (row->y_offset < y1) {
 		gtk_adjustment_set_value(
 			self->vadjustment, row->y_offset - self->item_border_y);
-	} else if (row->y_offset + self->item_height > y1 + ph) {
-		gtk_adjustment_set_value(self->vadjustment,
-			row->y_offset - ph + self->item_height + self->item_border_y);
+	} else if (row->y_offset + self->item_height + sh > y1 + ph) {
+		gtk_adjustment_set_value(
+			self->vadjustment, row->y_offset - ph + self->item_height + sh);
 	}
 }
 
@@ -1459,20 +1536,16 @@ fiv_browser_query_tooltip(GtkWidget *widget, gint x, gint y,
 	G_GNUC_UNUSED gboolean keyboard_tooltip, GtkTooltip *tooltip)
 {
 	FivBrowser *self = FIV_BROWSER(widget);
+
+	// TODO(p): Consider getting rid of tooltips altogether.
+	if (self->show_labels)
+		return FALSE;
+
 	const Entry *entry = entry_at(self, x, y);
 	if (!entry)
 		return FALSE;
 
-	GFile *file = g_file_new_for_uri(entry->uri);
-	GFileInfo *info =
-		g_file_query_info(file, G_FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME,
-			G_FILE_QUERY_INFO_NONE, NULL, NULL);
-	g_object_unref(file);
-	if (!info)
-		return FALSE;
-
-	gtk_tooltip_set_text(tooltip, g_file_info_get_display_name(info));
-	g_object_unref(info);
+	gtk_tooltip_set_text(tooltip, entry->display_name);
 	return TRUE;
 }
 
@@ -1553,6 +1626,13 @@ fiv_browser_style_updated(GtkWidget *widget)
 	gtk_style_context_add_class(style, "item");
 	gtk_style_context_get_margin(style, GTK_STATE_FLAG_NORMAL, &margin);
 	gtk_style_context_get_border(style, GTK_STATE_FLAG_NORMAL, &border);
+	// XXX: Right now, specifying custom fonts within our CSS pseudo-regions
+	// has no effect, so it might be appropriate to also add .label/.symbolic
+	// classes here, remember the resulting GTK_STYLE_PROPERTY_FONT,
+	// and apply them in relayout() with pango_layout_set_font_description().
+	// There is virtually nothing to be gained from this flexibility, though.
+	// XXX: We should also invoke relayout() here, because different states
+	// might theoretically use different fonts.
 	gtk_style_context_restore(style);
 
 	self->glow_w = (margin.left + margin.right) / 2;
@@ -1634,6 +1714,9 @@ fiv_browser_class_init(FivBrowserClass *klass)
 		"thumbnail-size", "Thumbnail size", "The thumbnail height to use",
 		FIV_TYPE_THUMBNAIL_SIZE, FIV_THUMBNAIL_SIZE_NORMAL,
 		G_PARAM_READWRITE);
+	browser_properties[PROP_SHOW_LABELS] = g_param_spec_boolean(
+		"show-labels", "Show labels", "Whether to show filename labels",
+		FALSE, G_PARAM_READWRITE);
 	g_object_class_install_properties(
 		object_class, N_PROPERTIES, browser_properties);
 
@@ -1703,6 +1786,7 @@ fiv_browser_init(FivBrowser *self)
 	g_queue_init(&self->thumbnailers_queue);
 
 	set_item_size(self, FIV_THUMBNAIL_SIZE_NORMAL);
+	self->show_labels = FALSE;
 	self->glow_padded = cairo_pattern_create_rgba(0, 0, 0, 0);
 	self->glow = cairo_pattern_create_rgba(0, 0, 0, 0);
 
@@ -1741,6 +1825,7 @@ on_model_files_changed(FivIoModel *model, FivBrowser *self)
 		Entry e = {.thumbnail = NULL,
 			.uri = g_strdup(files[i].uri),
 			.target_uri = g_strdup(files[i].target_uri),
+			.display_name = g_strdup(files[i].display_name),
 			.mtime_msec = files[i].mtime_msec};
 		g_array_append_val(self->entries, e);
 	}

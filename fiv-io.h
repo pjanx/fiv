@@ -135,9 +135,14 @@ GFile *fiv_io_model_get_previous_directory(FivIoModel *self);
 /// Returns the next VFS directory in order, or NULL.
 GFile *fiv_io_model_get_next_directory(FivIoModel *self);
 
+// TODO(p): Turn this into a reference-counted object.
+//  - If using g_rc_box_*(), we should wrap the {_acquire,_release_full}()
+//    functions as fiv_io_model_entry_{ref,unref}().
+//  - Ideally, all the strings would follow the struct immediately.
 typedef struct {
 	gchar *uri;                         ///< GIO URI
 	gchar *target_uri;                  ///< GIO URI for any target
+	gchar *display_name;                ///< Label for the file
 	gchar *collate_key;                 ///< Collate key for the filename
 	gint64 mtime_msec;                  ///< Modification time in milliseconds
 } FivIoModelEntry;

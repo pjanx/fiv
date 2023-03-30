@@ -3049,6 +3049,7 @@ model_entry_finalize(FivIoModelEntry *entry)
 {
 	g_free(entry->uri);
 	g_free(entry->target_uri);
+	g_free(entry->display_name);
 	g_free(entry->collate_key);
 }
 
@@ -3171,6 +3172,7 @@ model_reload_to(FivIoModel *self, GFile *directory,
 	GFileEnumerator *enumerator = g_file_enumerate_children(directory,
 		G_FILE_ATTRIBUTE_STANDARD_TYPE ","
 		G_FILE_ATTRIBUTE_STANDARD_NAME ","
+		G_FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME ","
 		G_FILE_ATTRIBUTE_STANDARD_TARGET_URI ","
 		G_FILE_ATTRIBUTE_STANDARD_IS_HIDDEN ","
 		G_FILE_ATTRIBUTE_TIME_MODIFIED ","
@@ -3205,7 +3207,8 @@ model_reload_to(FivIoModel *self, GFile *directory,
 
 		FivIoModelEntry entry = {.uri = g_file_get_uri(child),
 			.target_uri = g_strdup(g_file_info_get_attribute_string(
-				info, G_FILE_ATTRIBUTE_STANDARD_TARGET_URI))};
+				info, G_FILE_ATTRIBUTE_STANDARD_TARGET_URI)),
+			.display_name = g_strdup(g_file_info_get_display_name(info))};
 		GDateTime *mtime = g_file_info_get_modification_date_time(info);
 		if (mtime) {
 			entry.mtime_msec = g_date_time_to_unix(mtime) * 1000 +

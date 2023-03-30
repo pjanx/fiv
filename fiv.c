@@ -132,6 +132,7 @@ static struct key_group help_keys_browser[] = {
 		{"F9", "Toggle navigation sidebar"},
 		{"F5 r <Control>r", "Reload"},
 		{"h <Control>h", "Toggle hiding unsupported files"},
+		{"t <Control>t", "Toggle showing filenames"},
 		{"<Control>plus", "Larger thumbnails"},
 		{"<Control>minus", "Smaller thumbnails"},
 		{}
@@ -1115,6 +1116,14 @@ on_dir_next(void)
 }
 
 static void
+on_toggle_labels(void)
+{
+	gboolean old = FALSE;
+	g_object_get(g.browser, "show-labels", &old, NULL);
+	g_object_set(g.browser, "show-labels", !old, NULL);
+}
+
+static void
 on_toolbar_zoom(G_GNUC_UNUSED GtkButton *button, gpointer user_data)
 {
 	FivThumbnailSize size = FIV_THUMBNAIL_SIZE_COUNT;
@@ -1421,6 +1430,9 @@ on_key_press_browser_paned(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 		case GDK_KEY_r:
 			load_directory(NULL);
 			return TRUE;
+		case GDK_KEY_t:
+			on_toggle_labels();
+			return TRUE;
 		}
 		break;
 	case GDK_MOD1_MASK:
@@ -1464,6 +1476,9 @@ on_key_press_browser_paned(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 		case GDK_KEY_F5:
 		case GDK_KEY_r:
 			load_directory(NULL);
+			return TRUE;
+		case GDK_KEY_t:
+			on_toggle_labels();
 			return TRUE;
 		}
 	}
@@ -1934,6 +1949,12 @@ static const char stylesheet[] = "@define-color fiv-tile @content_view_bg; \
 			linear-gradient(-45deg, transparent 74%, @fiv-tile 74%); \
 		background-size: 40px 40px; \
 		background-position: 0 0, 0 20px, 20px -20px, -20px 0px; \
+	} \
+	fiv-browser.item.label, fiv-browser.item.symbolic.label { \
+		color: @theme_fg_color; \
+	} \
+	fiv-browser.item.label:backdrop:not(:selected) { \
+		color: @theme_unfocused_fg_color; \
 	} \
 	fiv-browser.item:selected { \
 		color: @theme_selected_bg_color; \
