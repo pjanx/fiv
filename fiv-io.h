@@ -130,6 +130,11 @@ gboolean fiv_io_model_open(FivIoModel *self, GFile *directory, GError **error);
 /// There is no ownership transfer, and the object may be NULL.
 GFile *fiv_io_model_get_location(FivIoModel *self);
 
+/// Returns the previous VFS directory in order, or NULL.
+GFile *fiv_io_model_get_previous_directory(FivIoModel *self);
+/// Returns the next VFS directory in order, or NULL.
+GFile *fiv_io_model_get_next_directory(FivIoModel *self);
+
 typedef struct {
 	gchar *uri;                         ///< GIO URI
 	gchar *target_uri;                  ///< GIO URI for any target

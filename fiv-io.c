@@ -3052,6 +3052,14 @@ model_entry_finalize(FivIoModelEntry *entry)
 	g_free(entry->collate_key);
 }
 
+static GArray *
+model_entry_array_new(void)
+{
+	GArray *a = g_array_new(FALSE, TRUE, sizeof(FivIoModelEntry));
+	g_array_set_clear_func(a, (GDestroyNotify) model_entry_finalize);
+	return a;
+}
+
 struct _FivIoModel {
 	GObject parent_instance;
 	GPatternSpec **supported_patterns;
@@ -3151,23 +3159,16 @@ model_compare(gconstpointer a, gconstpointer b, gpointer user_data)
 	return result;
 }
 
-static void
-model_resort(FivIoModel *self)
-{
-	g_array_sort_with_data(self->subdirs, model_compare, self);
-	g_array_sort_with_data(self->files, model_compare, self);
-
-	g_signal_emit(self, model_signals[FILES_CHANGED], 0);
-	g_signal_emit(self, model_signals[SUBDIRECTORIES_CHANGED], 0);
-}
-
 static gboolean
-model_reload(FivIoModel *self, GError **error)
+model_reload_to(FivIoModel *self, GFile *directory,
+	GArray *subdirs, GArray *files, GError **error)
 {
-	g_array_set_size(self->subdirs, 0);
-	g_array_set_size(self->files, 0);
+	if (subdirs)
+		g_array_set_size(subdirs, 0);
+	if (files)
+		g_array_set_size(files, 0);
 
-	GFileEnumerator *enumerator = g_file_enumerate_children(self->directory,
+	GFileEnumerator *enumerator = g_file_enumerate_children(directory,
 		G_FILE_ATTRIBUTE_STANDARD_TYPE ","
 		G_FILE_ATTRIBUTE_STANDARD_NAME ","
 		G_FILE_ATTRIBUTE_STANDARD_TARGET_URI ","
@@ -3175,12 +3176,8 @@ model_reload(FivIoModel *self, GError **error)
 		G_FILE_ATTRIBUTE_TIME_MODIFIED ","
 		G_FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
 		G_FILE_QUERY_INFO_NONE, NULL, error);
-	if (!enumerator) {
-		// Note that this has had a side-effect of clearing all entries.
-		g_signal_emit(self, model_signals[FILES_CHANGED], 0);
-		g_signal_emit(self, model_signals[SUBDIRECTORIES_CHANGED], 0);
+	if (!enumerator)
 		return FALSE;
-	}
 
 	GFileInfo *info = NULL;
 	GFile *child = NULL;
@@ -3192,10 +3189,18 @@ model_reload(FivIoModel *self, GError **error)
 			g_clear_error(&e);
 			continue;
 		}
-
 		if (!info)
 			break;
 		if (self->filtering && g_file_info_get_is_hidden(info))
+			continue;
+
+		GArray *target = NULL;
+		if (g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY)
+			target = subdirs;
+		else if (!self->filtering ||
+			model_supports(self, g_file_info_get_name(info)))
+			target = files;
+		if (!target)
 			continue;
 
 		FivIoModelEntry entry = {.uri = g_file_get_uri(child),
@@ -3214,19 +3219,146 @@ model_reload(FivIoModel *self, GError **error)
 		entry.collate_key = g_utf8_collate_key_for_filename(parse_name, -1);
 		g_free(parse_name);
 
-		const char *name = g_file_info_get_name(info);
-		if (g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY)
-			g_array_append_val(self->subdirs, entry);
-		else if (!self->filtering || model_supports(self, name))
-			g_array_append_val(self->files, entry);
-		else
-			model_entry_finalize(&entry);
+		g_array_append_val(target, entry);
 	}
 	g_object_unref(enumerator);
 
-	// We also emit change signals there, indirectly.
-	model_resort(self);
+	if (subdirs)
+		g_array_sort_with_data(subdirs, model_compare, self);
+	if (files)
+		g_array_sort_with_data(files, model_compare, self);
 	return TRUE;
+}
+
+static gboolean
+model_reload(FivIoModel *self, GError **error)
+{
+	// Note that this will clear all entries on failure.
+	gboolean result = model_reload_to(
+		self, self->directory, self->subdirs, self->files, error);
+
+	g_signal_emit(self, model_signals[FILES_CHANGED], 0);
+	g_signal_emit(self, model_signals[SUBDIRECTORIES_CHANGED], 0);
+	return result;
+}
+
+static void
+model_resort(FivIoModel *self)
+{
+	g_array_sort_with_data(self->subdirs, model_compare, self);
+	g_array_sort_with_data(self->files, model_compare, self);
+
+	g_signal_emit(self, model_signals[FILES_CHANGED], 0);
+	g_signal_emit(self, model_signals[SUBDIRECTORIES_CHANGED], 0);
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+// This would be more efficient iteratively, but it's not that important.
+static GFile *
+model_last_deep_subdirectory(FivIoModel *self, GFile *directory)
+{
+	GFile *result = NULL;
+	GArray *subdirs = model_entry_array_new();
+	if (!model_reload_to(self, directory, subdirs, NULL, NULL))
+		goto out;
+
+	if (subdirs->len) {
+		GFile *last = g_file_new_for_uri(
+			g_array_index(subdirs, FivIoModelEntry, subdirs->len - 1).uri);
+		result = model_last_deep_subdirectory(self, last);
+		g_object_unref(last);
+	} else {
+		result = g_object_ref(directory);
+	}
+
+out:
+	g_array_free(subdirs, TRUE);
+	return result;
+}
+
+GFile *
+fiv_io_model_get_previous_directory(FivIoModel *self)
+{
+	g_return_val_if_fail(FIV_IS_IO_MODEL(self), NULL);
+
+	GFile *parent_directory = g_file_get_parent(self->directory);
+	if (!parent_directory)
+		return NULL;
+
+	GFile *result = NULL;
+	GArray *subdirs = model_entry_array_new();
+	if (!model_reload_to(self, parent_directory, subdirs, NULL, NULL))
+		goto out;
+
+	for (gsize i = 0; i < subdirs->len; i++) {
+		GFile *file = g_file_new_for_uri(
+			g_array_index(subdirs, FivIoModelEntry, i).uri);
+		if (g_file_equal(file, self->directory)) {
+			g_object_unref(file);
+			break;
+		}
+
+		g_clear_object(&result);
+		result = file;
+	}
+	if (result) {
+		GFile *last = model_last_deep_subdirectory(self, result);
+		g_object_unref(result);
+		result = last;
+	} else {
+		result = g_object_ref(parent_directory);
+	}
+
+out:
+	g_object_unref(parent_directory);
+	g_array_free(subdirs, TRUE);
+	return result;
+}
+
+// This would be more efficient iteratively, but it's not that important.
+static GFile *
+model_next_directory_within_parents(FivIoModel *self, GFile *directory)
+{
+	GFile *parent_directory = g_file_get_parent(directory);
+	if (!parent_directory)
+		return NULL;
+
+	GFile *result = NULL;
+	GArray *subdirs = model_entry_array_new();
+	if (!model_reload_to(self, parent_directory, subdirs, NULL, NULL))
+		goto out;
+
+	gboolean found_self = FALSE;
+	for (gsize i = 0; i < subdirs->len; i++) {
+		result = g_file_new_for_uri(
+			g_array_index(subdirs, FivIoModelEntry, i).uri);
+		if (found_self)
+			goto out;
+
+		found_self = g_file_equal(result, directory);
+		g_clear_object(&result);
+	}
+	if (!result)
+		result = model_next_directory_within_parents(self, parent_directory);
+
+out:
+	g_object_unref(parent_directory);
+	g_array_free(subdirs, TRUE);
+	return result;
+}
+
+GFile *
+fiv_io_model_get_next_directory(FivIoModel *self)
+{
+	g_return_val_if_fail(FIV_IS_IO_MODEL(self), NULL);
+
+	if (self->subdirs->len) {
+		return g_file_new_for_uri(
+			g_array_index(self->subdirs, FivIoModelEntry, 0).uri);
+	}
+
+	return model_next_directory_within_parents(self, self->directory);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -3348,12 +3480,8 @@ fiv_io_model_init(FivIoModel *self)
 		self->supported_patterns[n] = g_pattern_spec_new(globs[n]);
 	g_strfreev(globs);
 
-	self->files = g_array_new(FALSE, TRUE, sizeof(FivIoModelEntry));
-	self->subdirs = g_array_new(FALSE, TRUE, sizeof(FivIoModelEntry));
-	g_array_set_clear_func(
-		self->subdirs, (GDestroyNotify) model_entry_finalize);
-	g_array_set_clear_func(
-		self->files, (GDestroyNotify) model_entry_finalize);
+	self->files = model_entry_array_new();
+	self->subdirs = model_entry_array_new();
 }
 
 gboolean

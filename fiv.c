@@ -120,8 +120,10 @@ static struct key_group help_keys_browser[] = {
 	{"General: Navigation", help_keys_navigation},
 	{"General: View", help_keys_view},
 	{"Navigation", (struct key[]) {
-		{"<Alt>Up", "Go to parent directory"},
 		{"<Alt>Home", "Go home"},
+		{"<Alt>Up", "Go to parent directory"},
+		{"bracketleft", "Go to previous directory in tree"},
+		{"bracketright", "Go to next directory in tree"},
 		{"Return", "Open selected item"},
 		{"<Alt>Return", "Show file information"},
 		{}
@@ -1089,6 +1091,30 @@ on_view_drag_data_received(G_GNUC_UNUSED GtkWidget *widget,
 }
 
 static void
+on_dir_previous(void)
+{
+	GFile *directory = fiv_io_model_get_previous_directory(g.model);
+	if (directory) {
+		gchar *uri = g_file_get_uri(directory);
+		g_object_unref(directory);
+		load_directory(uri);
+		g_free(uri);
+	}
+}
+
+static void
+on_dir_next(void)
+{
+	GFile *directory = fiv_io_model_get_next_directory(g.model);
+	if (directory) {
+		gchar *uri = g_file_get_uri(directory);
+		g_object_unref(directory);
+		load_directory(uri);
+		g_free(uri);
+	}
+}
+
+static void
 on_toolbar_zoom(G_GNUC_UNUSED GtkButton *button, gpointer user_data)
 {
 	FivThumbnailSize size = FIV_THUMBNAIL_SIZE_COUNT;
@@ -1420,6 +1446,13 @@ on_key_press_browser_paned(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 		case GDK_KEY_F9:
 			gtk_widget_set_visible(g.browser_sidebar,
 				!gtk_widget_is_visible(g.browser_sidebar));
+			return TRUE;
+
+		case GDK_KEY_bracketleft:
+			on_dir_previous();
+			return TRUE;
+		case GDK_KEY_bracketright:
+			on_dir_next();
 			return TRUE;
 
 		case GDK_KEY_Escape:
