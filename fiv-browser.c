@@ -200,9 +200,6 @@ relayout(FivBrowser *self, int width)
 	gtk_style_context_get_padding(style, GTK_STATE_FLAG_NORMAL, &padding);
 	int available_width = width - padding.left - padding.right, max_width = 0;
 
-	// TODO(p): Remember the first visible item and the vertical offset into it,
-	// then try to ensure its visibility at the end (useful for reloads).
-
 	g_array_set_size(self->layouted_rows, 0);
 	// Whatever self->drag_begin_* used to point at might no longer be there,
 	// but thumbnail reloading would disrupt mouse clicks if we cleared them.
