@@ -2754,7 +2754,10 @@ fiv_io_open(const FivIoOpenContext *ctx, GError **error)
 
 	gchar *data = NULL;
 	gsize len = 0;
-	if (!g_file_load_contents(file, NULL, &data, &len, NULL, error))
+	gboolean success =
+		g_file_load_contents(file, NULL, &data, &len, NULL, error);
+	g_object_unref(file);
+	if (!success)
 		return NULL;
 
 	cairo_surface_t *surface = fiv_io_open_from_data(data, len, ctx, error);
