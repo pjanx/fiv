@@ -105,12 +105,15 @@ struct _FivBrowser {
 
 /// The "last modified" timestamp of source images for thumbnails.
 static cairo_user_data_key_t fiv_browser_key_mtime_msec;
+/// The original file size of source images for thumbnails.
+static cairo_user_data_key_t fiv_browser_key_filesize;
 
 // TODO(p): Include FivIoModelEntry data by reference.
 struct entry {
 	gchar *uri;                         ///< GIO URI
 	gchar *target_uri;                  ///< GIO URI for any target
 	gchar *display_name;                ///< Label for the file
+	guint64 filesize;                   ///< Filesize in bytes
 	gint64 mtime_msec;                  ///< Modification time in milliseconds
 
 	cairo_surface_t *thumbnail;         ///< Prescaled thumbnail
@@ -514,6 +517,19 @@ entry_system_wide_uri(const Entry *self)
 }
 
 static void
+entry_set_surface_user_data(const Entry *self)
+{
+	// This choice of mtime favours unnecessary thumbnail reloading
+	// over retaining stale data (consider both calling functions).
+	cairo_surface_set_user_data(self->thumbnail,
+		&fiv_browser_key_mtime_msec, (void *) (intptr_t) self->mtime_msec,
+		NULL);
+	cairo_surface_set_user_data(self->thumbnail,
+		&fiv_browser_key_filesize, (void *) (uintptr_t) self->filesize,
+		NULL);
+}
+
+static void
 entry_add_thumbnail(gpointer data, gpointer user_data)
 {
 	Entry *self = data;
@@ -524,23 +540,24 @@ entry_add_thumbnail(gpointer data, gpointer user_data)
 	cairo_surface_t *cached =
 		g_hash_table_lookup(browser->thumbnail_cache, self->uri);
 	if (cached &&
-		(intptr_t) cairo_surface_get_user_data(
-			cached, &fiv_browser_key_mtime_msec) == self->mtime_msec) {
+		(intptr_t) cairo_surface_get_user_data(cached,
+			&fiv_browser_key_mtime_msec) == (intptr_t) self->mtime_msec &&
+		(uintptr_t) cairo_surface_get_user_data(cached,
+			&fiv_browser_key_filesize) == (uintptr_t) self->filesize) {
 		self->thumbnail = cairo_surface_reference(cached);
 		// TODO(p): If this hit is low-quality, see if a high-quality thumbnail
 		// hasn't been produced without our knowledge (avoid launching a minion
 		// unnecessarily; we might also shift the concern there).
 	} else {
 		cairo_surface_t *found = fiv_thumbnail_lookup(
-			entry_system_wide_uri(self), self->mtime_msec, browser->item_size);
+			entry_system_wide_uri(self), self->mtime_msec, self->filesize,
+			browser->item_size);
 		self->thumbnail = rescale_thumbnail(found, browser->item_height);
 	}
 
 	if (self->thumbnail) {
-		// This choice of mtime favours unnecessary thumbnail reloading.
-		cairo_surface_set_user_data(self->thumbnail,
-			&fiv_browser_key_mtime_msec, (void *) (intptr_t) self->mtime_msec,
-			NULL);
+		// Yes, this is a pointless action in case it's been found in the cache.
+		entry_set_surface_user_data(self);
 		return;
 	}
 
@@ -662,11 +679,7 @@ thumbnailer_reprocess_entry(FivBrowser *self, GBytes *output, Entry *entry)
 		g_queue_push_tail(&self->thumbnailers_queue, entry);
 	}
 
-	// This choice of mtime favours unnecessary thumbnail reloading
-	// over retaining stale data.
-	cairo_surface_set_user_data(entry->thumbnail,
-		&fiv_browser_key_mtime_msec, (void *) (intptr_t) entry->mtime_msec,
-		NULL);
+	entry_set_surface_user_data(entry);
 	g_hash_table_insert(self->thumbnail_cache, g_strdup(entry->uri),
 		cairo_surface_reference(entry->thumbnail));
 }
@@ -1823,6 +1836,7 @@ on_model_files_changed(FivIoModel *model, FivBrowser *self)
 			.uri = g_strdup(files[i].uri),
 			.target_uri = g_strdup(files[i].target_uri),
 			.display_name = g_strdup(files[i].display_name),
+			.filesize = files[i].filesize,
 			.mtime_msec = files[i].mtime_msec};
 		g_array_append_val(self->entries, e);
 	}

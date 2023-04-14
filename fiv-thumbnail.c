@@ -524,7 +524,7 @@ fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size, GError **error)
 	g_string_append_printf(
 		thum, "%s%c%ld%c", THUMB_MTIME, 0, (long) st.st_mtime, 0);
 	g_string_append_printf(
-		thum, "%s%c%ld%c", THUMB_SIZE, 0, (long) filesize, 0);
+		thum, "%s%c%llu%c", THUMB_SIZE, 0, (unsigned long long) filesize, 0);
 
 	if (cairo_surface_get_type(surface) == CAIRO_SURFACE_TYPE_IMAGE) {
 		g_string_append_printf(thum, "%s%c%d%c", THUMB_IMAGE_WIDTH, 0,
@@ -563,9 +563,16 @@ fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size, GError **error)
 	return max_size_surface;
 }
 
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+typedef struct {
+	const char *uri;                    ///< Target URI
+	time_t mtime;                       ///< File modification time
+	guint64 size;                       ///< File size
+} Stat;
+
 static bool
-check_wide_thumbnail_texts(GBytes *thum, const char *target, time_t mtime,
-	bool *sRGB)
+check_wide_thumbnail_texts(GBytes *thum, const Stat *st, bool *sRGB)
 {
 	gsize len = 0;
 	const gchar *s = g_bytes_get_data(thum, &len), *end = s + len;
@@ -579,11 +586,14 @@ check_wide_thumbnail_texts(GBytes *thum, const char *target, time_t mtime,
 			continue;
 		} else if (!strcmp(key, THUMB_URI)) {
 			have_uri = true;
-			if (strcmp(target, s))
+			if (strcmp(st->uri, s))
 				return false;
 		} else if (!strcmp(key, THUMB_MTIME)) {
 			have_mtime = true;
-			if (atol(s) != mtime)
+			if (atol(s) != st->mtime)
+				return false;
+		} else if (!strcmp(key, THUMB_SIZE)) {
+			if (strtoull(s, NULL, 10) != st->size)
 				return false;
 		} else if (!strcmp(key, THUMB_COLORSPACE))
 			*sRGB = !strcmp(s, THUMB_COLORSPACE_SRGB);
@@ -594,8 +604,7 @@ check_wide_thumbnail_texts(GBytes *thum, const char *target, time_t mtime,
 }
 
 static cairo_surface_t *
-read_wide_thumbnail(
-	const char *path, const char *uri, time_t mtime, GError **error)
+read_wide_thumbnail(const char *path, const Stat *st, GError **error)
 {
 	gchar *thumbnail_uri = g_filename_to_uri(path, NULL, error);
 	if (!thumbnail_uri)
@@ -612,7 +621,7 @@ read_wide_thumbnail(
 	if (!thum) {
 		g_clear_error(error);
 		set_error(error, "not a thumbnail");
-	} else if (!check_wide_thumbnail_texts(thum, uri, mtime, &sRGB)) {
+	} else if (!check_wide_thumbnail_texts(thum, st, &sRGB)) {
 		g_clear_error(error);
 		set_error(error, "mismatch");
 	} else {
@@ -629,11 +638,8 @@ read_wide_thumbnail(
 	return NULL;
 }
 
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-
 static cairo_surface_t *
-read_png_thumbnail(
-	const char *path, const char *uri, time_t mtime, GError **error)
+read_png_thumbnail(const char *path, const Stat *st, GError **error)
 {
 	cairo_surface_t *surface = fiv_io_open_png_thumbnail(path, error);
 	if (!surface)
@@ -650,9 +656,15 @@ read_png_thumbnail(
 	// but those aren't interesting currently (would be for fast previews).
 	const char *text_uri = g_hash_table_lookup(texts, THUMB_URI);
 	const char *text_mtime = g_hash_table_lookup(texts, THUMB_MTIME);
-	if (!text_uri || strcmp(text_uri, uri) ||
-		!text_mtime || atol(text_mtime) != mtime) {
+	const char *text_size = g_hash_table_lookup(texts, THUMB_SIZE);
+	if (!text_uri || strcmp(text_uri, st->uri) ||
+		!text_mtime || atol(text_mtime) != st->mtime) {
 		set_error(error, "mismatch or not a thumbnail");
+		cairo_surface_destroy(surface);
+		return NULL;
+	}
+	if (text_size && strtoull(text_size, NULL, 10) != st->size) {
+		set_error(error, "file size mismatch");
 		cairo_surface_destroy(surface);
 		return NULL;
 	}
@@ -660,8 +672,11 @@ read_png_thumbnail(
 	return surface;
 }
 
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
 cairo_surface_t *
-fiv_thumbnail_lookup(const char *uri, gint64 mtime_msec, FivThumbnailSize size)
+fiv_thumbnail_lookup(const char *uri, gint64 mtime_msec, guint64 filesize,
+	FivThumbnailSize size)
 {
 	g_return_val_if_fail(size >= FIV_THUMBNAIL_SIZE_MIN &&
 		size <= FIV_THUMBNAIL_SIZE_MAX, NULL);
@@ -673,6 +688,7 @@ fiv_thumbnail_lookup(const char *uri, gint64 mtime_msec, FivThumbnailSize size)
 
 	gchar *sum = g_compute_checksum_for_string(G_CHECKSUM_MD5, uri, -1);
 	gchar *thumbnails_dir = fiv_thumbnail_get_root();
+	const Stat st = {.uri = uri, .mtime = mtime_msec / 1000, .size = filesize};
 
 	// The lookup sequence is: nominal..max, then mirroring back to ..min.
 	cairo_surface_t *result = NULL;
@@ -685,7 +701,7 @@ fiv_thumbnail_lookup(const char *uri, gint64 mtime_msec, FivThumbnailSize size)
 		const char *name = fiv_thumbnail_sizes[use].thumbnail_spec_name;
 		gchar *wide = g_strconcat(thumbnails_dir, G_DIR_SEPARATOR_S "wide-",
 			name, G_DIR_SEPARATOR_S, sum, ".webp", NULL);
-		result = read_wide_thumbnail(wide, uri, mtime_msec / 1000, &error);
+		result = read_wide_thumbnail(wide, &st, &error);
 		if (error) {
 			g_debug("%s: %s", wide, error->message);
 			g_clear_error(&error);
@@ -701,7 +717,7 @@ fiv_thumbnail_lookup(const char *uri, gint64 mtime_msec, FivThumbnailSize size)
 
 		gchar *path = g_strconcat(thumbnails_dir, G_DIR_SEPARATOR_S,
 			name, G_DIR_SEPARATOR_S, sum, ".png", NULL);
-		result = read_png_thumbnail(path, uri, mtime_msec / 1000, &error);
+		result = read_png_thumbnail(path, &st, &error);
 		if (error) {
 			g_debug("%s: %s", path, error->message);
 			g_clear_error(&error);
@@ -734,7 +750,7 @@ print_error(GFile *file, GError *error)
 }
 
 static gchar *
-identify_wide_thumbnail(GMappedFile *mf, time_t *mtime, GError **error)
+identify_wide_thumbnail(GMappedFile *mf, Stat *st, GError **error)
 {
 	WebPDemuxer *demux = WebPDemux(&(WebPData) {
 		.bytes = (const uint8_t *) g_mapped_file_get_contents(mf),
@@ -760,7 +776,9 @@ identify_wide_thumbnail(GMappedFile *mf, time_t *mtime, GError **error)
 			if (!strcmp(key, THUMB_URI) && !uri)
 				uri = g_strdup(p);
 			if (!strcmp(key, THUMB_MTIME))
-				*mtime = atol(p);
+				st->mtime = atol(p);
+			if (!strcmp(key, THUMB_SIZE))
+				st->size = strtoull(p, NULL, 10);
 			key = NULL;
 		} else {
 			key = p;
@@ -778,16 +796,17 @@ static void
 check_wide_thumbnail(GFile *thumbnail, GError **error)
 {
 	// Not all errors are enough of a reason for us to delete something.
-	GError *tolerable = NULL;
+	GError *tolerable_error = NULL;
 	const char *path = g_file_peek_path(thumbnail);
-	GMappedFile *mf = g_mapped_file_new(path, FALSE, &tolerable);
+	GMappedFile *mf = g_mapped_file_new(path, FALSE, &tolerable_error);
 	if (!mf) {
-		print_error(thumbnail, tolerable);
+		print_error(thumbnail, tolerable_error);
 		return;
 	}
 
-	time_t target_mtime = 0;
-	gchar *target_uri = identify_wide_thumbnail(mf, &target_mtime, error);
+	// Note that we could enforce the presence of the size field in our spec.
+	Stat target_st = {.uri = NULL, .mtime = 0, .size = G_MAXUINT64};
+	gchar *target_uri = identify_wide_thumbnail(mf, &target_st, error);
 	g_mapped_file_unref(mf);
 	if (!target_uri)
 		return;
@@ -809,26 +828,32 @@ check_wide_thumbnail(GFile *thumbnail, GError **error)
 	GFile *target = g_file_new_for_uri(target_uri);
 	g_free(target_uri);
 	GFileInfo *info = g_file_query_info(target,
-		G_FILE_ATTRIBUTE_STANDARD_NAME "," G_FILE_ATTRIBUTE_TIME_MODIFIED,
-		G_FILE_QUERY_INFO_NONE, NULL, &tolerable);
+		G_FILE_ATTRIBUTE_STANDARD_NAME ","
+		G_FILE_ATTRIBUTE_STANDARD_SIZE ","
+		G_FILE_ATTRIBUTE_TIME_MODIFIED,
+		G_FILE_QUERY_INFO_NONE, NULL, &tolerable_error);
 	g_object_unref(target);
-	if (g_error_matches(tolerable, G_IO_ERROR, G_IO_ERROR_NOT_FOUND)) {
-		g_propagate_error(error, tolerable);
+	if (g_error_matches(tolerable_error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND)) {
+		g_propagate_error(error, tolerable_error);
 		return;
-	} else if (tolerable) {
-		print_error(thumbnail, tolerable);
+	} else if (tolerable_error) {
+		print_error(thumbnail, tolerable_error);
 		return;
 	}
 
+	guint64 filesize = g_file_info_get_size(info);
 	GDateTime *mdatetime = g_file_info_get_modification_date_time(info);
 	g_object_unref(info);
 	if (!mdatetime) {
-		set_error(&tolerable, "cannot retrieve file modification time");
-		print_error(thumbnail, tolerable);
+		set_error(&tolerable_error, "cannot retrieve file modification time");
+		print_error(thumbnail, tolerable_error);
 		return;
 	}
-	if (g_date_time_to_unix(mdatetime) != target_mtime)
-		set_error(error, "mtime mismatch");
+	if (g_date_time_to_unix(mdatetime) != target_st.mtime)
+		set_error(error, "modification time mismatch");
+	else if (target_st.size != G_MAXUINT64 && filesize != target_st.size)
+		set_error(error, "file size mismatch");
+
 	g_date_time_unref(mdatetime);
 }
 

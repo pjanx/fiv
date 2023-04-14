@@ -68,8 +68,8 @@ cairo_surface_t *fiv_thumbnail_produce_for_search(
 
 /// Retrieves a thumbnail of the most appropriate quality and resolution
 /// for the target file.
-cairo_surface_t *fiv_thumbnail_lookup(
-	const char *uri, gint64 mtime_msec, FivThumbnailSize size);
+cairo_surface_t *fiv_thumbnail_lookup(const char *uri,
+	gint64 mtime_msec, guint64 filesize, FivThumbnailSize size);
 
 /// Invalidate the wide thumbnail cache. May write to standard streams.
 void fiv_thumbnail_invalidate(void);

@@ -3172,6 +3172,7 @@ model_reload_to(FivIoModel *self, GFile *directory,
 	GFileEnumerator *enumerator = g_file_enumerate_children(directory,
 		G_FILE_ATTRIBUTE_STANDARD_TYPE ","
 		G_FILE_ATTRIBUTE_STANDARD_NAME ","
+		G_FILE_ATTRIBUTE_STANDARD_SIZE ","
 		G_FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME ","
 		G_FILE_ATTRIBUTE_STANDARD_TARGET_URI ","
 		G_FILE_ATTRIBUTE_STANDARD_IS_HIDDEN ","
@@ -3208,7 +3209,9 @@ model_reload_to(FivIoModel *self, GFile *directory,
 		FivIoModelEntry entry = {.uri = g_file_get_uri(child),
 			.target_uri = g_strdup(g_file_info_get_attribute_string(
 				info, G_FILE_ATTRIBUTE_STANDARD_TARGET_URI)),
-			.display_name = g_strdup(g_file_info_get_display_name(info))};
+			.display_name = g_strdup(g_file_info_get_display_name(info)),
+			.filesize = (guint64) g_file_info_get_size(info)};
+
 		GDateTime *mtime = g_file_info_get_modification_date_time(info);
 		if (mtime) {
 			entry.mtime_msec = g_date_time_to_unix(mtime) * 1000 +

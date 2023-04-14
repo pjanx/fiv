@@ -144,6 +144,7 @@ typedef struct {
 	gchar *target_uri;                  ///< GIO URI for any target
 	gchar *display_name;                ///< Label for the file
 	gchar *collate_key;                 ///< Collate key for the filename
+	guint64 filesize;                   ///< Filesize in bytes
 	gint64 mtime_msec;                  ///< Modification time in milliseconds
 } FivIoModelEntry;
 
