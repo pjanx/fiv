@@ -108,14 +108,8 @@ static cairo_user_data_key_t fiv_browser_key_mtime_msec;
 /// The original file size of source images for thumbnails.
 static cairo_user_data_key_t fiv_browser_key_filesize;
 
-// TODO(p): Include FivIoModelEntry data by reference.
 struct entry {
-	gchar *uri;                         ///< GIO URI
-	gchar *target_uri;                  ///< GIO URI for any target
-	gchar *display_name;                ///< Label for the file
-	guint64 filesize;                   ///< Filesize in bytes
-	gint64 mtime_msec;                  ///< Modification time in milliseconds
-
+	FivIoModelEntry *e;                 ///< Reference to model entry
 	cairo_surface_t *thumbnail;         ///< Prescaled thumbnail
 	GIcon *icon;                        ///< If no thumbnail, use this icon
 };
@@ -123,9 +117,7 @@ struct entry {
 static void
 entry_free(Entry *self)
 {
-	g_free(self->uri);
-	g_free(self->target_uri);
-	g_free(self->display_name);
+	fiv_io_model_entry_unref(self->e);
 	g_clear_pointer(&self->thumbnail, cairo_surface_destroy);
 	g_clear_object(&self->icon);
 }
@@ -228,7 +220,8 @@ relayout(FivBrowser *self, int width)
 
 		PangoLayout *label = NULL;
 		if (self->show_labels) {
-			label = gtk_widget_create_pango_layout(widget, entry->display_name);
+			label = gtk_widget_create_pango_layout(
+				widget, entry->e->display_name);
 			pango_layout_set_width(
 				label, (width - 2 * self->glow_w) * PANGO_SCALE);
 			pango_layout_set_alignment(label, PANGO_ALIGN_CENTER);
@@ -505,15 +498,15 @@ rescale_thumbnail(cairo_surface_t *thumbnail, double row_height)
 	return scaled;
 }
 
-static char *
+static const char *
 entry_system_wide_uri(const Entry *self)
 {
 	// "recent" and "trash", e.g., also have "standard::target-uri" set,
 	// but we'd like to avoid saving their thumbnails.
-	if (self->target_uri && fiv_collection_uri_matches(self->uri))
-		return self->target_uri;
+	if (self->e->target_uri && fiv_collection_uri_matches(self->e->uri))
+		return self->e->target_uri;
 
-	return self->uri;
+	return self->e->uri;
 }
 
 static void
@@ -522,10 +515,10 @@ entry_set_surface_user_data(const Entry *self)
 	// This choice of mtime favours unnecessary thumbnail reloading
 	// over retaining stale data (consider both calling functions).
 	cairo_surface_set_user_data(self->thumbnail,
-		&fiv_browser_key_mtime_msec, (void *) (intptr_t) self->mtime_msec,
+		&fiv_browser_key_mtime_msec, (void *) (intptr_t) self->e->mtime_msec,
 		NULL);
 	cairo_surface_set_user_data(self->thumbnail,
-		&fiv_browser_key_filesize, (void *) (uintptr_t) self->filesize,
+		&fiv_browser_key_filesize, (void *) (uintptr_t) self->e->filesize,
 		NULL);
 }
 
@@ -538,19 +531,19 @@ entry_add_thumbnail(gpointer data, gpointer user_data)
 
 	FivBrowser *browser = FIV_BROWSER(user_data);
 	cairo_surface_t *cached =
-		g_hash_table_lookup(browser->thumbnail_cache, self->uri);
+		g_hash_table_lookup(browser->thumbnail_cache, self->e->uri);
 	if (cached &&
 		(intptr_t) cairo_surface_get_user_data(cached,
-			&fiv_browser_key_mtime_msec) == (intptr_t) self->mtime_msec &&
+			&fiv_browser_key_mtime_msec) == (intptr_t) self->e->mtime_msec &&
 		(uintptr_t) cairo_surface_get_user_data(cached,
-			&fiv_browser_key_filesize) == (uintptr_t) self->filesize) {
+			&fiv_browser_key_filesize) == (uintptr_t) self->e->filesize) {
 		self->thumbnail = cairo_surface_reference(cached);
 		// TODO(p): If this hit is low-quality, see if a high-quality thumbnail
 		// hasn't been produced without our knowledge (avoid launching a minion
 		// unnecessarily; we might also shift the concern there).
 	} else {
 		cairo_surface_t *found = fiv_thumbnail_lookup(
-			entry_system_wide_uri(self), self->mtime_msec, self->filesize,
+			entry_system_wide_uri(self), self->e->mtime_msec, self->e->filesize,
 			browser->item_size);
 		self->thumbnail = rescale_thumbnail(found, browser->item_height);
 	}
@@ -563,7 +556,7 @@ entry_add_thumbnail(gpointer data, gpointer user_data)
 
 	// Fall back to symbolic icons, though there's only so much we can do
 	// in parallel--GTK+ isn't thread-safe.
-	GFile *file = g_file_new_for_uri(self->uri);
+	GFile *file = g_file_new_for_uri(self->e->uri);
 	GFileInfo *info = g_file_query_info(file,
 		G_FILE_ATTRIBUTE_STANDARD_NAME
 		"," G_FILE_ATTRIBUTE_STANDARD_SYMBOLIC_ICON,
@@ -640,7 +633,7 @@ reload_thumbnails(FivBrowser *self)
 	for (guint i = 0; i < self->entries->len; i++) {
 		Entry *entry = &g_array_index(self->entries, Entry, i);
 		if (entry->thumbnail) {
-			g_hash_table_insert(self->thumbnail_cache, g_strdup(entry->uri),
+			g_hash_table_insert(self->thumbnail_cache, g_strdup(entry->e->uri),
 				cairo_surface_reference(entry->thumbnail));
 		}
 
@@ -680,7 +673,7 @@ thumbnailer_reprocess_entry(FivBrowser *self, GBytes *output, Entry *entry)
 	}
 
 	entry_set_surface_user_data(entry);
-	g_hash_table_insert(self->thumbnail_cache, g_strdup(entry->uri),
+	g_hash_table_insert(self->thumbnail_cache, g_strdup(entry->e->uri),
 		cairo_surface_reference(entry->thumbnail));
 }
 
@@ -1128,7 +1121,7 @@ fiv_browser_draw(GtkWidget *widget, cairo_t *cr)
 static gboolean
 open_entry(GtkWidget *self, const Entry *entry, gboolean new_window)
 {
-	GFile *location = g_file_new_for_uri(entry->uri);
+	GFile *location = g_file_new_for_uri(entry->e->uri);
 	g_signal_emit(self, browser_signals[ITEM_ACTIVATED], 0, location,
 		new_window ? GTK_PLACES_OPEN_NEW_WINDOW : GTK_PLACES_OPEN_NORMAL);
 	g_object_unref(location);
@@ -1198,7 +1191,7 @@ fiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 		// no matter what its new location is.
 		gdk_window_set_cursor(gtk_widget_get_window(widget), NULL);
 
-		GFile *file = g_file_new_for_uri(entry->uri);
+		GFile *file = g_file_new_for_uri(entry->e->uri);
 		show_context_menu(widget, file);
 		g_object_unref(file);
 		return GDK_EVENT_STOP;
@@ -1342,8 +1335,8 @@ fiv_browser_drag_data_get(GtkWidget *widget,
 {
 	FivBrowser *self = FIV_BROWSER(widget);
 	if (self->selected) {
-		(void) gtk_selection_data_set_uris(
-			data, (gchar *[]) {entry_system_wide_uri(self->selected), NULL});
+		(void) gtk_selection_data_set_uris(data, (gchar *[])
+			{(gchar *) entry_system_wide_uri(self->selected), NULL});
 	}
 }
 
@@ -1520,7 +1513,7 @@ fiv_browser_key_press_event(GtkWidget *widget, GdkEventKey *event)
 		case GDK_KEY_Return:
 			if (self->selected) {
 				GtkWindow *window = GTK_WINDOW(gtk_widget_get_toplevel(widget));
-				fiv_context_menu_information(window, self->selected->uri);
+				fiv_context_menu_information(window, self->selected->e->uri);
 			}
 			return GDK_EVENT_STOP;
 		}
@@ -1555,7 +1548,7 @@ fiv_browser_query_tooltip(GtkWidget *widget, gint x, gint y,
 	if (!entry)
 		return FALSE;
 
-	gtk_tooltip_set_text(tooltip, entry->display_name);
+	gtk_tooltip_set_text(tooltip, entry->e->display_name);
 	return TRUE;
 }
 
@@ -1569,7 +1562,7 @@ fiv_browser_popup_menu(GtkWidget *widget)
 	GFile *file = NULL;
 	GdkRectangle rect = {};
 	if (self->selected) {
-		file = g_file_new_for_uri(self->selected->uri);
+		file = g_file_new_for_uri(self->selected->e->uri);
 		rect = entry_rect(self, self->selected);
 		rect.x += rect.width / 2;
 		rect.y += rect.height / 2;
@@ -1607,7 +1600,7 @@ on_long_press(GtkGestureLongPress *lp, gdouble x, gdouble y, gpointer user_data)
 
 	// It might also be possible to have long-press just select items,
 	// and show some kind of toolbar with available actions.
-	GFile *file = g_file_new_for_uri(entry->uri);
+	GFile *file = g_file_new_for_uri(entry->e->uri);
 	gtk_menu_popup_at_rect(fiv_context_menu_new(widget, file), window,
 		&(GdkRectangle) {.x = x, .y = y}, GDK_GRAVITY_NORTH_WEST,
 		GDK_GRAVITY_NORTH_WEST, event);
@@ -1823,21 +1816,16 @@ on_model_files_changed(FivIoModel *model, FivBrowser *self)
 
 	gchar *selected_uri = NULL;
 	if (self->selected)
-		selected_uri = g_strdup(self->selected->uri);
+		selected_uri = g_strdup(self->selected->e->uri);
 
 	thumbnailers_abort(self);
 	g_array_set_size(self->entries, 0);
 	g_array_set_size(self->layouted_rows, 0);
 
 	gsize len = 0;
-	const FivIoModelEntry *files = fiv_io_model_get_files(self->model, &len);
+	FivIoModelEntry *const *files = fiv_io_model_get_files(self->model, &len);
 	for (gsize i = 0; i < len; i++) {
-		Entry e = {.thumbnail = NULL,
-			.uri = g_strdup(files[i].uri),
-			.target_uri = g_strdup(files[i].target_uri),
-			.display_name = g_strdup(files[i].display_name),
-			.filesize = files[i].filesize,
-			.mtime_msec = files[i].mtime_msec};
+		Entry e = {.e = fiv_io_model_entry_ref(files[i])};
 		g_array_append_val(self->entries, e);
 	}
 
@@ -1888,7 +1876,7 @@ fiv_browser_select(FivBrowser *self, const char *uri)
 
 	for (guint i = 0; i < self->entries->len; i++) {
 		const Entry *entry = &g_array_index(self->entries, Entry, i);
-		if (!g_strcmp0(entry->uri, uri)) {
+		if (!g_strcmp0(entry->e->uri, uri)) {
 			self->selected = entry;
 			scroll_to_selection(self);
 			break;

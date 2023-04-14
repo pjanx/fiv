@@ -357,10 +357,10 @@ update_location(FivSidebar *self)
 		gtk_container_add(GTK_CONTAINER(self->listbox), row);
 
 	gsize len = 0;
-	const FivIoModelEntry *subdirs =
+	FivIoModelEntry *const *subdirs =
 		fiv_io_model_get_subdirs(self->model, &len);
 	for (gsize i = 0; i < len; i++) {
-		GFile *file = g_file_new_for_uri(subdirs[i].uri);
+		GFile *file = g_file_new_for_uri(subdirs[i]->uri);
 		if ((row = create_row(self, file, "go-down-symbolic")))
 			gtk_container_add(GTK_CONTAINER(self->listbox), row);
 		g_object_unref(file);

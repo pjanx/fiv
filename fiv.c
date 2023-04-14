@@ -783,11 +783,11 @@ on_model_files_changed(FivIoModel *model, G_GNUC_UNUSED gpointer user_data)
 	g_return_if_fail(model == g.model);
 
 	gsize len = 0;
-	const FivIoModelEntry *files = fiv_io_model_get_files(g.model, &len);
+	FivIoModelEntry *const *files = fiv_io_model_get_files(g.model, &len);
 	g_ptr_array_free(g.files, TRUE);
 	g.files = g_ptr_array_new_full(len, g_free);
 	for (gsize i = 0; i < len; i++)
-		g_ptr_array_add(g.files, g_strdup(files[i].uri));
+		g_ptr_array_add(g.files, g_strdup(files[i]->uri));
 
 	update_files_index();
 

@@ -135,21 +135,21 @@ GFile *fiv_io_model_get_previous_directory(FivIoModel *self);
 /// Returns the next VFS directory in order, or NULL.
 GFile *fiv_io_model_get_next_directory(FivIoModel *self);
 
-// TODO(p): Turn this into a reference-counted object.
-//  - If using g_rc_box_*(), we should wrap the {_acquire,_release_full}()
-//    functions as fiv_io_model_entry_{ref,unref}().
-//  - Ideally, all the strings would follow the struct immediately.
+// These objects are reference-counted using GRcBox.
 typedef struct {
-	gchar *uri;                         ///< GIO URI
-	gchar *target_uri;                  ///< GIO URI for any target
-	gchar *display_name;                ///< Label for the file
-	gchar *collate_key;                 ///< Collate key for the filename
+	const char *uri;                    ///< GIO URI
+	const char *target_uri;             ///< GIO URI for any target
+	const char *display_name;           ///< Label for the file
+	const char *collate_key;            ///< Collate key for the filename
 	guint64 filesize;                   ///< Filesize in bytes
 	gint64 mtime_msec;                  ///< Modification time in milliseconds
 } FivIoModelEntry;
 
-const FivIoModelEntry *fiv_io_model_get_files(FivIoModel *self, gsize *len);
-const FivIoModelEntry *fiv_io_model_get_subdirs(FivIoModel *self, gsize *len);
+#define fiv_io_model_entry_ref(e)    g_rc_box_acquire(e)
+#define fiv_io_model_entry_unref(e)  g_rc_box_release(e)
+
+FivIoModelEntry *const *fiv_io_model_get_files(FivIoModel *self, gsize *len);
+FivIoModelEntry *const *fiv_io_model_get_subdirs(FivIoModel *self, gsize *len);
 
 // --- Export ------------------------------------------------------------------
 

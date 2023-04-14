@@ -3044,21 +3044,10 @@ fiv_io_serialize_for_search(cairo_surface_t *surface, GError **error)
 
 #include "xdg.h"
 
-static void
-model_entry_finalize(FivIoModelEntry *entry)
-{
-	g_free(entry->uri);
-	g_free(entry->target_uri);
-	g_free(entry->display_name);
-	g_free(entry->collate_key);
-}
-
-static GArray *
+static GPtrArray *
 model_entry_array_new(void)
 {
-	GArray *a = g_array_new(FALSE, TRUE, sizeof(FivIoModelEntry));
-	g_array_set_clear_func(a, (GDestroyNotify) model_entry_finalize);
-	return a;
+	return g_ptr_array_new_with_free_func(g_rc_box_release);
 }
 
 struct _FivIoModel {
@@ -3067,8 +3056,8 @@ struct _FivIoModel {
 
 	GFile *directory;                   ///< Currently loaded directory
 	GFileMonitor *monitor;              ///< "directory" monitoring
-	GArray *subdirs;                    ///< "directory" contents
-	GArray *files;                      ///< "directory" contents
+	GPtrArray *subdirs;                 ///< "directory" contents
+	GPtrArray *files;                   ///< "directory" contents
 
 	FivIoModelSort sort_field;          ///< How to sort
 	gboolean sort_descending;           ///< Whether to sort in reverse
@@ -3150,8 +3139,8 @@ model_compare_entries(FivIoModel *self,
 static gint
 model_compare(gconstpointer a, gconstpointer b, gpointer user_data)
 {
-	const FivIoModelEntry *entry1 = a;
-	const FivIoModelEntry *entry2 = b;
+	const FivIoModelEntry *entry1 = *(const FivIoModelEntry **) a;
+	const FivIoModelEntry *entry2 = *(const FivIoModelEntry **) b;
 	GFile *file1 = g_file_new_for_uri(entry1->uri);
 	GFile *file2 = g_file_new_for_uri(entry2->uri);
 	int result = model_compare_entries(user_data, entry1, file1, entry2, file2);
@@ -3160,14 +3149,81 @@ model_compare(gconstpointer a, gconstpointer b, gpointer user_data)
 	return result;
 }
 
+static size_t
+model_strsize(const char *string)
+{
+	if (!string)
+		return 0;
+
+	return strlen(string) + 1;
+}
+
+static char *
+model_strappend(char **p, const char *string, size_t size)
+{
+	if (!string)
+		return *p;
+
+	char *destination = memcpy(*p, string, size);
+	*p += size;
+	return destination;
+}
+
+static FivIoModelEntry *
+model_entry_new(GFile *file, GFileInfo *info)
+{
+	gchar *uri = g_file_get_uri(file);
+	const gchar *target_uri = g_file_info_get_attribute_string(
+		info, G_FILE_ATTRIBUTE_STANDARD_TARGET_URI);
+	const gchar *display_name = g_file_info_get_display_name(info);
+
+	// TODO(p): Make it possible to use g_utf8_collate_key() instead,
+	// which does not use natural sorting.
+	gchar *parse_name = g_file_get_parse_name(file);
+	gchar *collate_key = g_utf8_collate_key_for_filename(parse_name, -1);
+	g_free(parse_name);
+
+	// The entries are immutable. Packing them into the structure
+	// should help memory usage as well as performance.
+	size_t size_uri          = model_strsize(uri);
+	size_t size_target_uri   = model_strsize(target_uri);
+	size_t size_display_name = model_strsize(display_name);
+	size_t size_collate_key  = model_strsize(collate_key);
+
+	FivIoModelEntry *entry = g_rc_box_alloc0(sizeof *entry +
+		size_uri +
+		size_target_uri +
+		size_display_name +
+		size_collate_key);
+
+	gchar *p = (gchar *) entry + sizeof *entry;
+	entry->uri          = model_strappend(&p, uri, size_uri);
+	entry->target_uri   = model_strappend(&p, target_uri, size_target_uri);
+	entry->display_name = model_strappend(&p, display_name, size_display_name);
+	entry->collate_key  = model_strappend(&p, collate_key, size_collate_key);
+
+	entry->filesize = (guint64) g_file_info_get_size(info);
+
+	GDateTime *mtime = g_file_info_get_modification_date_time(info);
+	if (mtime) {
+		entry->mtime_msec = g_date_time_to_unix(mtime) * 1000 +
+			g_date_time_get_microsecond(mtime) / 1000;
+		g_date_time_unref(mtime);
+	}
+
+	g_free(uri);
+	g_free(collate_key);
+	return entry;
+}
+
 static gboolean
 model_reload_to(FivIoModel *self, GFile *directory,
-	GArray *subdirs, GArray *files, GError **error)
+	GPtrArray *subdirs, GPtrArray *files, GError **error)
 {
 	if (subdirs)
-		g_array_set_size(subdirs, 0);
+		g_ptr_array_set_size(subdirs, 0);
 	if (files)
-		g_array_set_size(files, 0);
+		g_ptr_array_set_size(files, 0);
 
 	GFileEnumerator *enumerator = g_file_enumerate_children(directory,
 		G_FILE_ATTRIBUTE_STANDARD_TYPE ","
@@ -3197,42 +3253,22 @@ model_reload_to(FivIoModel *self, GFile *directory,
 		if (self->filtering && g_file_info_get_is_hidden(info))
 			continue;
 
-		GArray *target = NULL;
+		GPtrArray *target = NULL;
 		if (g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY)
 			target = subdirs;
 		else if (!self->filtering ||
 			model_supports(self, g_file_info_get_name(info)))
 			target = files;
-		if (!target)
-			continue;
 
-		FivIoModelEntry entry = {.uri = g_file_get_uri(child),
-			.target_uri = g_strdup(g_file_info_get_attribute_string(
-				info, G_FILE_ATTRIBUTE_STANDARD_TARGET_URI)),
-			.display_name = g_strdup(g_file_info_get_display_name(info)),
-			.filesize = (guint64) g_file_info_get_size(info)};
-
-		GDateTime *mtime = g_file_info_get_modification_date_time(info);
-		if (mtime) {
-			entry.mtime_msec = g_date_time_to_unix(mtime) * 1000 +
-				g_date_time_get_microsecond(mtime) / 1000;
-			g_date_time_unref(mtime);
-		}
-
-		gchar *parse_name = g_file_get_parse_name(child);
-		// TODO(p): Make it possible to use g_utf8_collate_key() instead,
-		// which does not use natural sorting.
-		entry.collate_key = g_utf8_collate_key_for_filename(parse_name, -1);
-		g_free(parse_name);
-
-		g_array_append_val(target, entry);
+		if (target)
+			g_ptr_array_add(target, model_entry_new(child, info));
 	}
 	g_object_unref(enumerator);
 
 	if (subdirs)
-		g_array_sort_with_data(subdirs, model_compare, self);
+		g_ptr_array_sort_with_data(subdirs, model_compare, self);
 	if (files)
-		g_array_sort_with_data(files, model_compare, self);
+		g_ptr_array_sort_with_data(files, model_compare, self);
 	return TRUE;
 }
 
@@ -3251,8 +3287,8 @@ model_reload(FivIoModel *self, GError **error)
 static void
 model_resort(FivIoModel *self)
 {
-	g_array_sort_with_data(self->subdirs, model_compare, self);
-	g_array_sort_with_data(self->files, model_compare, self);
+	g_ptr_array_sort_with_data(self->subdirs, model_compare, self);
+	g_ptr_array_sort_with_data(self->files, model_compare, self);
 
 	g_signal_emit(self, model_signals[FILES_CHANGED], 0);
 	g_signal_emit(self, model_signals[SUBDIRECTORIES_CHANGED], 0);
@@ -3265,13 +3301,13 @@ static GFile *
 model_last_deep_subdirectory(FivIoModel *self, GFile *directory)
 {
 	GFile *result = NULL;
-	GArray *subdirs = model_entry_array_new();
+	GPtrArray *subdirs = model_entry_array_new();
 	if (!model_reload_to(self, directory, subdirs, NULL, NULL))
 		goto out;
 
 	if (subdirs->len) {
-		GFile *last = g_file_new_for_uri(
-			g_array_index(subdirs, FivIoModelEntry, subdirs->len - 1).uri);
+		FivIoModelEntry *entry = g_ptr_array_index(subdirs, subdirs->len - 1);
+		GFile *last = g_file_new_for_uri(entry->uri);
 		result = model_last_deep_subdirectory(self, last);
 		g_object_unref(last);
 	} else {
@@ -3279,7 +3315,7 @@ model_last_deep_subdirectory(FivIoModel *self, GFile *directory)
 	}
 
 out:
-	g_array_free(subdirs, TRUE);
+	g_ptr_array_free(subdirs, TRUE);
 	return result;
 }
 
@@ -3293,13 +3329,13 @@ fiv_io_model_get_previous_directory(FivIoModel *self)
 		return NULL;
 
 	GFile *result = NULL;
-	GArray *subdirs = model_entry_array_new();
+	GPtrArray *subdirs = model_entry_array_new();
 	if (!model_reload_to(self, parent_directory, subdirs, NULL, NULL))
 		goto out;
 
 	for (gsize i = 0; i < subdirs->len; i++) {
-		GFile *file = g_file_new_for_uri(
-			g_array_index(subdirs, FivIoModelEntry, i).uri);
+		FivIoModelEntry *entry = g_ptr_array_index(subdirs, i);
+		GFile *file = g_file_new_for_uri(entry->uri);
 		if (g_file_equal(file, self->directory)) {
 			g_object_unref(file);
 			break;
@@ -3318,7 +3354,7 @@ fiv_io_model_get_previous_directory(FivIoModel *self)
 
 out:
 	g_object_unref(parent_directory);
-	g_array_free(subdirs, TRUE);
+	g_ptr_array_free(subdirs, TRUE);
 	return result;
 }
 
@@ -3331,14 +3367,14 @@ model_next_directory_within_parents(FivIoModel *self, GFile *directory)
 		return NULL;
 
 	GFile *result = NULL;
-	GArray *subdirs = model_entry_array_new();
+	GPtrArray *subdirs = model_entry_array_new();
 	if (!model_reload_to(self, parent_directory, subdirs, NULL, NULL))
 		goto out;
 
 	gboolean found_self = FALSE;
 	for (gsize i = 0; i < subdirs->len; i++) {
-		result = g_file_new_for_uri(
-			g_array_index(subdirs, FivIoModelEntry, i).uri);
+		FivIoModelEntry *entry = g_ptr_array_index(subdirs, i);
+		result = g_file_new_for_uri(entry->uri);
 		if (found_self)
 			goto out;
 
@@ -3350,7 +3386,7 @@ model_next_directory_within_parents(FivIoModel *self, GFile *directory)
 
 out:
 	g_object_unref(parent_directory);
-	g_array_free(subdirs, TRUE);
+	g_ptr_array_free(subdirs, TRUE);
 	return result;
 }
 
@@ -3360,8 +3396,8 @@ fiv_io_model_get_next_directory(FivIoModel *self)
 	g_return_val_if_fail(FIV_IS_IO_MODEL(self), NULL);
 
 	if (self->subdirs->len) {
-		return g_file_new_for_uri(
-			g_array_index(self->subdirs, FivIoModelEntry, 0).uri);
+		FivIoModelEntry *entry = g_ptr_array_index(self->subdirs, 0);
+		return g_file_new_for_uri(entry->uri);
 	}
 
 	return model_next_directory_within_parents(self, self->directory);
@@ -3379,8 +3415,8 @@ fiv_io_model_finalize(GObject *gobject)
 
 	g_clear_object(&self->directory);
 	g_clear_object(&self->monitor);
-	g_array_free(self->subdirs, TRUE);
-	g_array_free(self->files, TRUE);
+	g_ptr_array_free(self->subdirs, TRUE);
+	g_ptr_array_free(self->files, TRUE);
 
 	G_OBJECT_CLASS(fiv_io_model_parent_class)->finalize(gobject);
 }
@@ -3513,18 +3549,18 @@ fiv_io_model_get_location(FivIoModel *self)
 	return self->directory;
 }
 
-const FivIoModelEntry *
+FivIoModelEntry *const *
 fiv_io_model_get_files(FivIoModel *self, gsize *len)
 {
 	*len = self->files->len;
-	return (const FivIoModelEntry *) self->files->data;
+	return (FivIoModelEntry *const *) self->files->pdata;
 }
 
-const FivIoModelEntry *
+FivIoModelEntry *const *
 fiv_io_model_get_subdirs(FivIoModel *self, gsize *len)
 {
 	*len = self->subdirs->len;
-	return (const FivIoModelEntry *) self->subdirs->data;
+	return (FivIoModelEntry *const *) self->subdirs->pdata;
 }
 
 // --- Export ------------------------------------------------------------------
