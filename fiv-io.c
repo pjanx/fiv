@@ -3165,7 +3165,7 @@ static char *
 model_strappend(char **p, const char *string, size_t size)
 {
 	if (!string)
-		return *p;
+		return NULL;
 
 	char *destination = memcpy(*p, string, size);
 	*p += size;
