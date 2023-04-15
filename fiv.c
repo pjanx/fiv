@@ -603,10 +603,9 @@ struct {
 	gchar *directory;          ///< URI of the currently browsed directory
 	GList *directory_back;     ///< History paths as URIs going backwards
 	GList *directory_forward;  ///< History paths as URIs going forwards
-	GPtrArray *files;          ///< "directory" contents as URIs
 
 	gchar *uri;                ///< Current image URI, if any
-	gint files_index;          ///< Where "uri" is within "files"
+	gint files_index;          ///< Where "uri" is within the model's files
 
 	GtkWidget *window;
 	GtkWidget *menu;
@@ -691,9 +690,12 @@ parent_uri(GFile *child_file)
 static void
 update_files_index(void)
 {
+	gsize files_len = 0;
+	FivIoModelEntry *const *files = fiv_io_model_get_files(g.model, &files_len);
+
 	g.files_index = -1;
-	for (guint i = 0; i < g.files->len; i++)
-		if (!g_strcmp0(g.uri, g_ptr_array_index(g.files, i)))
+	for (guint i = 0; i < files_len; i++)
+		if (!g_strcmp0(g.uri, files[i]->uri))
 			g.files_index = i;
 }
 
@@ -782,19 +784,13 @@ on_model_files_changed(FivIoModel *model, G_GNUC_UNUSED gpointer user_data)
 {
 	g_return_if_fail(model == g.model);
 
-	gsize len = 0;
-	FivIoModelEntry *const *files = fiv_io_model_get_files(g.model, &len);
-	g_ptr_array_free(g.files, TRUE);
-	g.files = g_ptr_array_new_full(len, g_free);
-	for (gsize i = 0; i < len; i++)
-		g_ptr_array_add(g.files, g_strdup(files[i]->uri));
+	gsize files_len = 0;
+	(void) fiv_io_model_get_files(g.model, &files_len);
 
 	update_files_index();
 
-	gtk_widget_set_sensitive(
-		g.toolbar[TOOLBAR_FILE_PREVIOUS], g.files->len > 1);
-	gtk_widget_set_sensitive(
-		g.toolbar[TOOLBAR_FILE_NEXT], g.files->len > 1);
+	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_FILE_PREVIOUS], files_len > 1);
+	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_FILE_NEXT], files_len > 1);
 }
 
 static void
@@ -874,8 +870,8 @@ open_image(const char *uri)
 	// So that load_directory() itself can be used for reloading.
 	gchar *parent = parent_uri(file);
 	g_object_unref(file);
-	if (!g.files->len /* hack to always load the directory after launch */ ||
-		!g.directory || strcmp(parent, g.directory))
+	if (!fiv_io_model_get_location(g.model) || !g.directory ||
+		strcmp(parent, g.directory))
 		load_directory_without_switching(parent);
 	else
 		update_files_index();
@@ -948,18 +944,22 @@ on_open(void)
 static void
 on_previous(void)
 {
+	gsize files_len = 0;
+	FivIoModelEntry *const *files = fiv_io_model_get_files(g.model, &files_len);
 	if (g.files_index >= 0) {
-		int previous = (g.files->len + g.files_index - 1) % g.files->len;
-		open_image(g_ptr_array_index(g.files, previous));
+		int previous = (files_len + g.files_index - 1) % files_len;
+		open_image(files[previous]->uri);
 	}
 }
 
 static void
 on_next(void)
 {
+	gsize files_len = 0;
+	FivIoModelEntry *const *files = fiv_io_model_get_files(g.model, &files_len);
 	if (g.files_index >= 0) {
-		int next = (g.files_index + 1) % g.files->len;
-		open_image(g_ptr_array_index(g.files, next));
+		int next = (g.files_index + 1) % files_len;
+		open_image(files[next]->uri);
 	}
 }
 
@@ -2378,7 +2378,7 @@ main(int argc, char *argv[])
 	// interpret multiple command line arguments differently, as a collection.
 	// However, single-element collections are unrepresentable this way.
 	// Should we allow multiple targets only in a special new mode?
-	g.files = g_ptr_array_new_full(0, g_free);
+	g.files_index = -1;
 	if (args) {
 		const gchar *target = *args;
 		if (args[1]) {
