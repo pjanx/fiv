@@ -700,7 +700,7 @@ update_files_index(void)
 }
 
 static void
-load_directory_without_reload(const char *uri)
+change_directory_without_reload(const char *uri)
 {
 	gchar *uri_duplicated = g_strdup(uri);
 	if (g.directory_back && !strcmp(uri, g.directory_back->data)) {
@@ -742,7 +742,7 @@ static void
 load_directory_without_switching(const char *uri)
 {
 	if (uri) {
-		load_directory_without_reload(uri);
+		change_directory_without_reload(uri);
 
 		GtkAdjustment *vadjustment = gtk_scrolled_window_get_vadjustment(
 			GTK_SCROLLED_WINDOW(g.browser_scroller));
@@ -768,14 +768,31 @@ load_directory(const char *uri)
 {
 	load_directory_without_switching(uri);
 
-	// XXX: When something outside the filtered entries is open, the index is
-	// kept at -1, and browsing doesn't work. How to behave here?
-	// Should we add it to the pointer array as an exception?
 	if (uri) {
 		switch_to_browser_noselect();
 
 		// TODO(p): Rather place it in history.
 		g_clear_pointer(&g.uri, g_free);
+	}
+}
+
+static void
+go_back(void)
+{
+	if (gtk_stack_get_visible_child(GTK_STACK(g.stack)) == g.view_box) {
+		switch_to_browser_noselect();
+	} else if (g.directory_back) {
+		load_directory(g.directory_back->data);
+	}
+}
+
+static void
+go_forward(void)
+{
+	if (g.directory_forward) {
+		load_directory(g.directory_forward->data);
+	} else if (g.uri) {
+		switch_to_view();
 	}
 }
 
@@ -876,6 +893,10 @@ open_image(const char *uri)
 	else
 		update_files_index();
 	g_free(parent);
+
+	// XXX: When something outside currently filtered entries is open,
+	// g.files_index is kept at -1, and browsing doesn't work.
+	// How to behave here?
 
 	switch_to_view();
 }
@@ -1399,16 +1420,10 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 	case GDK_MOD1_MASK:
 		switch (event->keyval) {
 		case GDK_KEY_Left:
-			if (gtk_stack_get_visible_child(GTK_STACK(g.stack)) == g.view_box)
-				switch_to_browser_noselect();
-			else if (g.directory_back)
-				load_directory(g.directory_back->data);
+			go_back();
 			return TRUE;
 		case GDK_KEY_Right:
-			if (g.directory_forward)
-				load_directory(g.directory_forward->data);
-			else if (g.uri)
-				switch_to_view();
+			go_forward();
 			return TRUE;
 		}
 		break;
@@ -1570,7 +1585,7 @@ on_button_press_view(G_GNUC_UNUSED GtkWidget *widget, GdkEventButton *event)
 	switch (event->button) {
 	case 4:  // back (GdkWin32, GdkQuartz)
 	case 8:  // back
-		switch_to_browser_noselect();
+		go_back();
 		return TRUE;
 	case GDK_BUTTON_PRIMARY:
 		if (event->type == GDK_2BUTTON_PRESS) {
@@ -1592,15 +1607,11 @@ on_button_press_browser_paned(
 	switch (event->button) {
 	case 4:  // back (GdkWin32, GdkQuartz)
 	case 8:  // back
-		if (g.directory_back)
-			load_directory(g.directory_back->data);
+		go_back();
 		return TRUE;
 	case 5:  // forward (GdkWin32, GdkQuartz)
 	case 9:  // forward
-		if (g.directory_forward)
-			load_directory(g.directory_forward->data);
-		else if (g.uri)
-			switch_to_view();
+		go_forward();
 		return TRUE;
 	default:
 		return FALSE;
