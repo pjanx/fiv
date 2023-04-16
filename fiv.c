@@ -702,40 +702,19 @@ update_files_index(void)
 static void
 change_directory_without_reload(const char *uri)
 {
-	gchar *uri_duplicated = g_strdup(uri);
-	if (g.directory_back && !strcmp(uri, g.directory_back->data)) {
-		// We're going back in history.
-		if (g.directory) {
-			g.directory_forward =
-				g_list_prepend(g.directory_forward, g.directory);
-			g.directory = NULL;
-		}
+	if (g.directory) {
+		// Note that this function can be passed g.directory directly.
+		if (!strcmp(uri, g.directory))
+			return;
 
-		GList *link = g.directory_back;
-		g.directory_back = g_list_remove_link(g.directory_back, link);
-		g_list_free_full(link, g_free);
-	} else if (g.directory_forward && !strcmp(uri, g.directory_forward->data)) {
-		// We're going forward in history.
-		if (g.directory) {
-			g.directory_back =
-				g_list_prepend(g.directory_back, g.directory);
-			g.directory = NULL;
-		}
-
-		GList *link = g.directory_forward;
-		g.directory_forward = g_list_remove_link(g.directory_forward, link);
-		g_list_free_full(link, g_free);
-	} else if (g.directory && strcmp(uri, g.directory)) {
 		// We're on a new subpath.
 		g_list_free_full(g.directory_forward, g_free);
 		g.directory_forward = NULL;
 
 		g.directory_back = g_list_prepend(g.directory_back, g.directory);
-		g.directory = NULL;
 	}
 
-	g_free(g.directory);
-	g.directory = uri_duplicated;
+	g.directory = g_strdup(uri);
 }
 
 static void
@@ -782,7 +761,17 @@ go_back(void)
 	if (gtk_stack_get_visible_child(GTK_STACK(g.stack)) == g.view_box) {
 		switch_to_browser_noselect();
 	} else if (g.directory_back) {
-		load_directory(g.directory_back->data);
+		if (g.directory)
+			g.directory_forward =
+				g_list_prepend(g.directory_forward, g.directory);
+
+		const gchar *uri = g.directory = g.directory_back->data;
+
+		GList *link = g.directory_back;
+		g.directory_back = g_list_remove_link(g.directory_back, link);
+		g_list_free(link);
+
+		load_directory(uri);
 	}
 }
 
@@ -790,7 +779,17 @@ static void
 go_forward(void)
 {
 	if (g.directory_forward) {
-		load_directory(g.directory_forward->data);
+		if (g.directory)
+			g.directory_back =
+				g_list_prepend(g.directory_back, g.directory);
+
+		const gchar *uri = g.directory = g.directory_forward->data;
+
+		GList *link = g.directory_forward;
+		g.directory_forward = g_list_remove_link(g.directory_forward, link);
+		g_list_free(link);
+
+		load_directory(uri);
 	} else if (g.uri) {
 		switch_to_view();
 	}
