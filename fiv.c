@@ -2172,32 +2172,46 @@ main(int argc, char *argv[])
 	const GOptionEntry options[] = {
 		{G_OPTION_REMAINING, 0, 0, G_OPTION_ARG_FILENAME_ARRAY, &args,
 			NULL, "[PATH | URI]..."},
-		{"list-supported-media-types", 0, G_OPTION_FLAG_IN_MAIN,
-			G_OPTION_ARG_NONE, &show_supported_media_types,
-			"Output supported media types and exit", NULL},
 		{"browse", 0, G_OPTION_FLAG_IN_MAIN,
 			G_OPTION_ARG_NONE, &browse,
 			"Start in filesystem browsing mode", NULL},
-		{"thumbnail-for-search", 0, G_OPTION_FLAG_IN_MAIN,
-			G_OPTION_ARG_STRING, &thumbnail_size_search,
-			"Output an image file suitable for searching by content", "SIZE"},
-		{"extract-thumbnail", 0, G_OPTION_FLAG_IN_MAIN,
-			G_OPTION_ARG_NONE, &extract_thumbnail,
-			"Output any embedded thumbnail (superseding --thumbnail)", NULL},
-		{"thumbnail", 0, G_OPTION_FLAG_IN_MAIN,
-			G_OPTION_ARG_STRING, &thumbnail_size,
-			"Generate thumbnails, up to SIZE, and output that size", "SIZE"},
 		{"invalidate-cache", 0, G_OPTION_FLAG_IN_MAIN,
 			G_OPTION_ARG_NONE, &invalidate_cache,
 			"Invalidate the wide thumbnail cache", NULL},
+		{"list-supported-media-types", 0, G_OPTION_FLAG_IN_MAIN,
+			G_OPTION_ARG_NONE, &show_supported_media_types,
+			"Output supported media types and exit", NULL},
 		{"version", 'V', G_OPTION_FLAG_IN_MAIN, G_OPTION_ARG_NONE,
 			&show_version, "Output version information and exit", NULL},
 		{},
 	};
+	const GOptionEntry options_internal[] = {
+		{"extract-thumbnail", 0, 0,
+			G_OPTION_ARG_NONE, &extract_thumbnail,
+			"Output any embedded thumbnail (superseding --thumbnail)", NULL},
+		{"thumbnail", 0, 0,
+			G_OPTION_ARG_STRING, &thumbnail_size,
+			"Generate thumbnails, up to SIZE, and output that size", "SIZE"},
+		{"thumbnail-for-search", 0, 0,
+			G_OPTION_ARG_STRING, &thumbnail_size_search,
+			"Output an image file suitable for searching by content", "SIZE"},
+		{},
+	};
+
+	GOptionContext *context =
+		g_option_context_new(" - Image browser and viewer");
+	g_option_context_add_group(context, gtk_get_option_group(TRUE));
+	g_option_context_add_main_entries(context, options, NULL);
+
+	GOptionGroup *internals = g_option_group_new(
+		"internal", "Internal Options:", "Show internal options", NULL, NULL);
+	g_option_group_add_entries(internals, options_internal);
+	g_option_context_add_group(context, internals);
 
 	GError *error = NULL;
-	gboolean initialized = gtk_init_with_args(
-		&argc, &argv, " - Image browser and viewer", options, NULL, &error);
+	gboolean initialized =
+		g_option_context_parse(context, &argc, &argv, &error);
+	g_option_context_free(context);
 	if (show_version) {
 		const char *version = PROJECT_VERSION;
 		printf("%s %s\n", PROJECT_NAME, &version[*version == 'v']);

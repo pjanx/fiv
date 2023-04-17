@@ -26,6 +26,15 @@ the _User Guide_.
 
 Options
 -------
+*--browse*::
+	When an image is passed, start in browsing mode, and preselect that
+	image in its containing directory.  This is used by *fiv*'s inode/directory
+	handler to implement the "Open Containing Folder" feature of certain
+	applications.
+
+*--help-all*::
+	Show the full list of options, including those provided by GTK+.
+
 *--invalidate-cache*::
 	Invalidate the wide thumbnail cache, removing thumbnails for files that can
 	no longer be found.
@@ -35,18 +44,11 @@ Options
 	the list of MIME types within *fiv*'s desktop file when the list
 	of GdkPixbuf loaders changes.
 
-*--browse*::
-	When an image is passed, start in browsing mode, and preselect that
-	image in its containing directory.  This is used by *fiv*'s inode/directory
-	handler to implement the "Open Containing Folder" feature of certain
-	applications.
+*-V*, *--version*::
+	Output version information and exit.
 
-*--thumbnail*=_SIZE_::
-	Generate thumbnails for the first argument, in all sizes not exceeding
-	_SIZE_, and present the largest of them on the standard output
-	in an application-specific bitmap format.  Available sizes follow directory
-	names in the _Thumbnail Managing Standard_.
-
+Internal options
+~~~~~~~~~~~~~~~~
 *--extract-thumbnail*::
 	Present any embedded thumbnail of the first argument on the standard output
 	in an application-specific bitmap format.  When both *--thumbnail*
@@ -54,11 +56,16 @@ Options
 	exiting early if successful.  This is used to enhance responsivity
 	of thumbnail procurement.
 
-*-V*, *--version*::
-	Output version information and exit.
+*--thumbnail*=_SIZE_::
+	Generate wide thumbnails for the first argument, in all sizes not exceeding
+	_SIZE_, and present the largest of them on the standard output
+	in an application-specific bitmap format.  Available sizes follow directory
+	names in the _Thumbnail Managing Standard_.
 
-*--help-all*::
-	Show the full list of options, including those provided by GTK+.
+*--thumbnail-for-search*=_SIZE_::
+	Transform the first argument to a widely supported image file format,
+	and present it on the standard output.  The image will be downscaled as
+	necessary so as to not exceed _SIZE_ (see *--thumbnail*).
 
 Reporting bugs
 --------------

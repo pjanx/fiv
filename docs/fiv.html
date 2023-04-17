@@ -17,9 +17,9 @@ q:lang(en):after { content: "’"; }
 <span id="author">Přemysl Eric Janouch</span><br>
 <span id="email"><a href="mailto:p@janouch.name">p@janouch.name</a></span><br>
 <span id="revnumber">version 0.0.0,</span>
-<span id="revdate">2022-07-31</span>
+<span id="revdate">2023-04-17</span>
 
-<p class="figure"><img src="fiv.webp" alt="fiv's browser and viewer">
+<p class="figure"><img src="fiv.webp" alt="fiv in browser and viewer modes">
 
 <h2>Introduction</h2>
 
@@ -33,30 +33,31 @@ and page up/down buttons in mind, such as SteelSeries Sensei series. Ozone Neon
 series may also be mapped this way. Your experience may be degraded with other
 kinds of devices.
 
-<p>Controls should generally be accessible through the keyboard. Pressing Ctrl+?
-will give you a convenient overview of all shortcuts. In addition to these,
-remember that you may often use Ctrl+Tab and F6 to navigate to different groups
-of widgets.
+<p>Controls should generally be accessible through the keyboard. Pressing
+<kbd>Ctrl</kbd>&#8239;+&#8239;<kbd>?</kbd> will give you a convenient overview
+of all shortcuts. In addition to these, remember that you may often use
+<kbd>Ctrl</kbd>&#8239;+&#8239;<kbd>Tab</kbd> and <kbd>F6</kbd> to navigate to
+different groups of widgets.
 
 <h2>Browser</h2>
 
 <p><i>fiv</i> normally starts in a file browser view. On the left side of the
 window, you'll find your GTK+ bookmarks, mounted locations as recognized by
-GVfs, an item for entering arbitrary filesystem paths or URIs, view controls,
-and finally breadcrumbs leading to the currently opened directory, as well as
-its descendants.
+GVfs, an item for entering arbitrary filesystem paths or URIs, and finally
+breadcrumbs leading to the currently opened directory, as well as descendants
+of it.  At the top, there is a toolbar with view controls.
 
-<p>You can open items in a new window either by middle clicking on them either
-directly, or with the Ctrl key pressed down. Right clicking the directory view
-offers a context menu for opening files, or even the directory itself,
-in a different application.
+<p>You can open items in a new window either by middle clicking on them, or with
+the left mouse button while holding the <kbd>Ctrl</kbd> key.
+Right clicking the directory view offers a context menu for opening files,
+or even the directory itself, in a different application.
 
 <h2>Viewer</h2>
 
 <p>The image viewer may be both entered (so long as you have a file selected)
-and exited using the Enter key. This way you may easily switch between the two
-modes. When using the mouse, the forwards and backwards buttons will fulfill
-the same function.
+and exited using the <kbd>Enter</kbd> key. This way you may easily switch
+between the two modes. When using the mouse, the forwards and backwards buttons
+will fulfill the same function.
 
 <p>Double clicking the image switches full-screen view, and the mouse wheel
 adjusts the zoom level.
@@ -96,8 +97,8 @@ rm -rf ~/.cache/thumbnails/wide-*
 
 <p>The few configuration options <i>fiv</i> has can be adjusted using
 <i>dconf-editor</i>, which can be launched in the appropriate location from
-within the application by pressing Ctrl+,. For command line usage, there is
-the <i>gsettings</i> utility:
+within the application by pressing <kbd>Ctrl</kbd>&#8239;+&#8239;<kbd>,</kbd>.
+For command line usage, there is the <i>gsettings</i> utility:
 
 <pre>
 gsettings list-recursively name.janouch.fiv

@@ -5,4 +5,5 @@ h2 { padding-top: .67em; border-top: 1px solid silver; }
 p { line-height: 1.5; } .figure { text-align: center; } img { max-width: 100%; }
 q { font-style: normal; } .details { border-bottom: 1px solid silver; }
 .details br { display: none; } .details br + span:before { content: " — "; }
-pre { padding: 0 1em; }
+pre { padding: 0 1em; } kbd { border: solid #ccc; border-radius: .25em;
+	border-width: 1px 2px 2px 1px; padding: 0 .25em; font-family: inherit; }
