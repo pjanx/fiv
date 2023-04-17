@@ -121,23 +121,28 @@ const char *fiv_io_supported_media_types[] = {
 gchar **
 fiv_io_all_supported_media_types(void)
 {
+	GHashTable *unique =
+		g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
 	GPtrArray *types = g_ptr_array_new();
 	for (const char **p = fiv_io_supported_media_types; *p; p++)
-		g_ptr_array_add(types, g_strdup(*p));
+		if (g_hash_table_insert(unique, g_strdup(*p), NULL))
+			g_ptr_array_add(types, g_strdup(*p));
 
 #ifdef HAVE_GDKPIXBUF
 	GSList *formats = gdk_pixbuf_get_formats();
 	for (GSList *iter = formats; iter; iter = iter->next) {
 		gchar **subtypes = gdk_pixbuf_format_get_mime_types(iter->data);
 		for (gchar **p = subtypes; *p; p++)
-			g_ptr_array_add(types, *p);
+			if (g_hash_table_insert(unique, *p, NULL))
+				g_ptr_array_add(types, g_strdup(*p));
 		g_free(subtypes);
 	}
 	g_slist_free(formats);
 #endif  // HAVE_GDKPIXBUF
 
+	g_hash_table_unref(unique);
 	g_ptr_array_add(types, NULL);
-	return (char **) g_ptr_array_free(types, FALSE);
+	return (gchar **) g_ptr_array_free(types, FALSE);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -

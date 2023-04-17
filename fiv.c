@@ -2204,8 +2204,10 @@ main(int argc, char *argv[])
 		return 0;
 	}
 	if (show_supported_media_types) {
-		for (char **types = fiv_io_all_supported_media_types(); *types; )
-			g_print("%s\n", *types++);
+		char **types = fiv_io_all_supported_media_types();
+		for (char **p = types; *p; p++)
+			g_print("%s\n", *p);
+		g_strfreev(types);
 		return 0;
 	}
 	if (invalidate_cache) {
