@@ -281,6 +281,12 @@ fiv_thumbnail_extract(GFile *target, FivThumbnailSize max_size, GError **error)
 	// TODO(p): Implement our own thumbnail extractors.
 	set_error(error, "unsupported file");
 #else  // HAVE_LIBRAW
+	// In this case, g_mapped_file_get_contents() returns NULL, causing issues.
+	if (!g_mapped_file_get_length(mf)) {
+		set_error(error, "empty file");
+		goto fail;
+	}
+
 	libraw_data_t *iprc = libraw_init(
 		LIBRAW_OPIONS_NO_MEMERR_CALLBACK | LIBRAW_OPIONS_NO_DATAERR_CALLBACK);
 	if (!iprc) {
@@ -535,7 +541,13 @@ fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size, GError **error)
 		return produce_fallback(target, max_size, error);
 	}
 
+	// In this case, g_mapped_file_get_bytes() has NULL data, causing issues.
 	gsize filesize = g_mapped_file_get_length(mf);
+	if (!filesize) {
+		set_error(error, "empty file");
+		return NULL;
+	}
+
 	gboolean color_managed = FALSE;
 	cairo_surface_t *surface =
 		render(target, g_mapped_file_get_bytes(mf), &color_managed, error);
