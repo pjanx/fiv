@@ -290,11 +290,41 @@ fiv_thumbnail_extract(GFile *target, FivThumbnailSize max_size, GError **error)
 
 	int err = 0;
 	if ((err = libraw_open_buffer(iprc, (void *) g_mapped_file_get_contents(mf),
-			 g_mapped_file_get_length(mf))) ||
-		(err = libraw_unpack_thumb(iprc))) {
+			 g_mapped_file_get_length(mf)))) {
 		set_error(error, libraw_strerror(err));
 		goto fail_libraw;
 	}
+
+#if LIBRAW_VERSION >= LIBRAW_MAKE_VERSION(0, 21, 0)
+	if (!iprc->thumbs_list.thumbcount) {
+		set_error(error, "no thumbnails found");
+		goto fail_libraw;
+	}
+
+	// The old libraw_unpack_thumb() goes for the largest thumbnail,
+	// but we currently want the smallest thumbnail.
+	// TODO(p): To handle the ugly IFD0 thumbnail of NEF,
+	// try to go for the second smallest size. Remember to reflect tflip.
+	int best_index = 0;
+	float best_pixels = INFINITY;
+	for (int i = 0; i < iprc->thumbs_list.thumbcount; i++) {
+		float pixels = (float) iprc->thumbs_list.thumblist[i].twidth *
+			(float) iprc->thumbs_list.thumblist[i].theight;
+		if (pixels && pixels < best_pixels) {
+			best_index = i;
+			best_pixels = pixels;
+		}
+	}
+	if ((err = libraw_unpack_thumb_ex(iprc, best_index))) {
+		set_error(error, libraw_strerror(err));
+		goto fail_libraw;
+	}
+#else
+	if ((err = libraw_unpack_thumb(iprc))) {
+		set_error(error, libraw_strerror(err));
+		goto fail_libraw;
+	}
+#endif
 
 	libraw_processed_image_t *image = libraw_dcraw_make_mem_thumb(iprc, &err);
 	if (!image) {
