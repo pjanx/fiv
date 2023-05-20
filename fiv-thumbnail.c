@@ -483,6 +483,7 @@ fiv_thumbnail_produce_for_search(
 static cairo_surface_t *
 produce_fallback(GFile *target, FivThumbnailSize size, GError **error)
 {
+	// Note that this comes with a TOCTTOU problem.
 	goffset filesize = 0;
 	GFileInfo *info = g_file_query_info(target,
 		G_FILE_ATTRIBUTE_STANDARD_NAME "," G_FILE_ATTRIBUTE_STANDARD_SIZE,
@@ -530,6 +531,13 @@ fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size, GError **error)
 	GStatBuf st = {};
 	if (g_stat(path, &st)) {
 		set_error(error, g_strerror(errno));
+		return NULL;
+	}
+
+	// TODO(p): Use open(O_RDONLY | O_NONBLOCK | _O_BINARY), fstat(),
+	// g_mapped_file_new_from_fd(), and reset the non-blocking flag on the file.
+	if (!S_ISREG(st.st_mode)) {
+		set_error(error, "not a regular file");
 		return NULL;
 	}
 
