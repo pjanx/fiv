@@ -1775,7 +1775,7 @@ open_libraw(const char *data, gsize len, GError **error)
 
 	int width = image->width, height = image->height;
 	cairo_surface_t *surface =
-		cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
+		cairo_image_surface_create(CAIRO_FORMAT_RGB24, width, height);
 	cairo_status_t surface_status = cairo_surface_status(surface);
 	if (surface_status != CAIRO_STATUS_SUCCESS) {
 		set_error(error, cairo_status_to_string(surface_status));
