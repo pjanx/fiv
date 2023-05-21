@@ -1705,38 +1705,11 @@ fail:
 #ifdef HAVE_LIBRAW  // ---------------------------------------------------------
 
 static cairo_surface_t *
-open_libraw(const char *data, gsize len, GError **error)
+load_libraw(libraw_data_t *iprc, GError **error)
 {
-	// https://github.com/LibRaw/LibRaw/issues/418
-	libraw_data_t *iprc = libraw_init(
-		LIBRAW_OPIONS_NO_MEMERR_CALLBACK | LIBRAW_OPIONS_NO_DATAERR_CALLBACK);
-	if (!iprc) {
-		set_error(error, "failed to obtain a LibRaw handle");
-		return NULL;
-	}
-
-#if 0
-	// TODO(p): Consider setting this--the image is still likely to be
-	// rendered suboptimally, so why not make it faster.
-	iprc->params.half_size = 1;
-#endif
-
-	// TODO(p): Check if we need to set anything for autorotation (sizes.flip).
-	iprc->params.use_camera_wb = 1;
-	iprc->params.output_color = 1;  // sRGB, TODO(p): Is this used?
-	iprc->params.output_bps = 8;    // This should be the default value.
-
 	int err = 0;
-	if ((err = libraw_open_buffer(iprc, (void *) data, len))) {
-		set_error(error, libraw_strerror(err));
-		libraw_close(iprc);
-		return NULL;
-	}
-
-	// TODO(p): Do we need to check iprc->idata.raw_count? Maybe for TIFFs?
 	if ((err = libraw_unpack(iprc))) {
 		set_error(error, libraw_strerror(err));
-		libraw_close(iprc);
 		return NULL;
 	}
 
@@ -1744,7 +1717,6 @@ open_libraw(const char *data, gsize len, GError **error)
 	// TODO(p): I'm not sure when this is necessary or useful yet.
 	if ((err = libraw_adjust_sizes_info_only(iprc))) {
 		set_error(error, libraw_strerror(err));
-		libraw_close(iprc);
 		return NULL;
 	}
 #endif
@@ -1752,7 +1724,6 @@ open_libraw(const char *data, gsize len, GError **error)
 	// TODO(p): Documentation says I should look at the code and do it myself.
 	if ((err = libraw_dcraw_process(iprc))) {
 		set_error(error, libraw_strerror(err));
-		libraw_close(iprc);
 		return NULL;
 	}
 
@@ -1761,7 +1732,6 @@ open_libraw(const char *data, gsize len, GError **error)
 	libraw_processed_image_t *image = libraw_dcraw_make_mem_image(iprc, &err);
 	if (!image) {
 		set_error(error, libraw_strerror(err));
-		libraw_close(iprc);
 		return NULL;
 	}
 
@@ -1769,7 +1739,6 @@ open_libraw(const char *data, gsize len, GError **error)
 	if (image->colors != 3 || image->bits != 8) {
 		set_error(error, "unexpected number of colours, or bit depth");
 		libraw_dcraw_clear_mem(image);
-		libraw_close(iprc);
 		return NULL;
 	}
 
@@ -1781,7 +1750,6 @@ open_libraw(const char *data, gsize len, GError **error)
 		set_error(error, cairo_status_to_string(surface_status));
 		cairo_surface_destroy(surface);
 		libraw_dcraw_clear_mem(image);
-		libraw_close(iprc);
 		return NULL;
 	}
 
@@ -1802,8 +1770,54 @@ open_libraw(const char *data, gsize len, GError **error)
 	cairo_surface_mark_dirty(surface);
 
 	libraw_dcraw_clear_mem(image);
-	libraw_close(iprc);
 	return surface;
+}
+
+static cairo_surface_t *
+open_libraw(
+	const char *data, gsize len, const FivIoOpenContext *ctx, GError **error)
+{
+	// https://github.com/LibRaw/LibRaw/issues/418
+	libraw_data_t *iprc = libraw_init(
+		LIBRAW_OPIONS_NO_MEMERR_CALLBACK | LIBRAW_OPIONS_NO_DATAERR_CALLBACK);
+	if (!iprc) {
+		set_error(error, "failed to obtain a LibRaw handle");
+		return NULL;
+	}
+
+	// TODO(p): Check if we need to set anything for autorotation (sizes.flip).
+	iprc->params.use_camera_wb = 1;
+	iprc->params.output_color = 1;  // sRGB, TODO(p): Is this used?
+	iprc->params.output_bps = 8;    // This should be the default value.
+
+	int err = 0;
+	cairo_surface_t *result = NULL, *result_tail = NULL;
+	if ((err = libraw_open_buffer(iprc, (const void *) data, len))) {
+		set_error(error, libraw_strerror(err));
+		goto out;
+	}
+	if (!try_append_page(load_libraw(iprc, error), &result, &result_tail) ||
+		ctx->first_frame_only)
+		goto out;
+
+	for (unsigned i = 1; i < iprc->idata.raw_count; i++) {
+		iprc->rawparams.shot_select = i;
+
+		// This library is terrible, we need to start again.
+		if ((err = libraw_open_buffer(iprc, (const void *) data, len))) {
+			set_error(error, libraw_strerror(err));
+			g_clear_pointer(&result, cairo_surface_destroy);
+			goto out;
+		}
+		if (!try_append_page(load_libraw(iprc, error), &result, &result_tail)) {
+			g_clear_pointer(&result, cairo_surface_destroy);
+			goto out;
+		}
+	}
+
+out:
+	libraw_close(iprc);
+	return fiv_io_profile_finalize(result, ctx->screen_profile);
 }
 
 #endif  // HAVE_LIBRAW ---------------------------------------------------------
@@ -2811,7 +2825,7 @@ fiv_io_open_from_data(
 		break;
 	default:
 #ifdef HAVE_LIBRAW  // ---------------------------------------------------------
-		if ((surface = open_libraw(data, len, error)))
+		if ((surface = open_libraw(data, len, ctx, error)))
 			break;
 
 		// TODO(p): We should try to pass actual processing errors through,
