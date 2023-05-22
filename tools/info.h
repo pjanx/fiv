@@ -96,8 +96,9 @@ struct tiffer {
 static bool
 tiffer_u32(struct tiffer *self, uint32_t *u)
 {
-	if (self->p + 4 > self->end)
+	if (self->p < self->begin || self->p + 4 > self->end)
 		return false;
+
 	*u = self->un->u32(self->p);
 	self->p += 4;
 	return true;
@@ -106,8 +107,9 @@ tiffer_u32(struct tiffer *self, uint32_t *u)
 static bool
 tiffer_u16(struct tiffer *self, uint16_t *u)
 {
-	if (self->p + 2 > self->end)
+	if (self->p < self->begin || self->p + 2 > self->end)
 		return false;
+
 	*u = self->un->u16(self->p);
 	self->p += 2;
 	return true;
@@ -403,22 +405,35 @@ add_error(jv o, const char *message)
 
 static jv parse_exif_ifd(struct tiffer *T, const struct tiff_entry *info);
 
-static jv
-parse_exif_subifds(struct tiffer *T, const struct tiffer_entry *entry,
-	struct tiff_entry *info)
+static bool
+parse_exif_subifds_entry(struct tiffer *T, const struct tiffer_entry *entry,
+	struct tiffer *subT)
 {
 	int64_t offset = 0;
+	return tiffer_integer(T, entry, &offset) &&
+		offset >= 0 && offset <= UINT32_MAX && tiffer_subifd(T, offset, subT);
+}
+
+static jv
+parse_exif_subifds(struct tiffer *T, struct tiffer_entry *entry,
+	struct tiff_entry *info)
+{
 	struct tiffer subT = {};
-	if (!tiffer_integer(T, entry, &offset) ||
-		offset < 0 || offset > UINT32_MAX || !tiffer_subifd(T, offset, &subT))
+	if (!parse_exif_subifds_entry(T, entry, &subT))
 		return jv_null();
 
-	// The chain should correspond to the values in the entry
-	// (TIFF Technical Note 1), we are not going to verify it.
-	// Note that Nikon NEFs do not follow this rule.
 	jv a = jv_array();
 	do a = jv_array_append(a, parse_exif_ifd(&subT, info));
 	while (tiffer_next_ifd(&subT));
+
+	// The chain should correspond to the values in the entry (see TIFF
+	// Technical Note 1: "the NextIFD value of Child #1 must point to Child #2,
+	// and so on"), but at least some Nikon NEFs do not follow this rule.
+	if (jv_array_length(jv_copy(a)) == 1) {
+		while (tiffer_next_value(entry) &&
+			parse_exif_subifds_entry(T, entry, &subT))
+			a = jv_array_append(a, parse_exif_ifd(&subT, info));
+	}
 	return a;
 }
 
@@ -475,8 +490,9 @@ static jv
 parse_exif_entry(jv o, struct tiffer *T, struct tiffer_entry *entry,
 	const struct tiff_entry *info)
 {
+	static struct tiff_entry empty[] = {{}};
 	if (!info)
-		info = (struct tiff_entry[]) {{}};
+		info = empty;
 
 	for (; info->name; info++)
 		if (info->tag == entry->tag)
