@@ -30,6 +30,9 @@
 # Exif Version 2.32 (2019)
 # https://www.cipa.jp/e/std/std-sec.html
 #
+# ISO/DIS 12234-2 (TIFF/EP) (2000-06-21)
+# http://www.barrypearson.co.uk/top2009/downloads/TAG2000-22_DIS12234-2.pdf
+#
 # Digital Negative (DNG) Specification 1.5.0.0 (2019)
 # https://www.adobe.com/content/dam/acom/en/products/photoshop/pdfs/dng_spec_1.5.0.0.pdf
 
@@ -64,6 +67,8 @@
 	6, YCbCr
 	8, CIELab
 	9, ICCLab  # Adobe PageMaker 6.0 TIFF Technical Notes
+	32803, Color filter array  # DIS/ISO 12234-2 + DNG 1.5.0.0
+	34892, LinearRaw  # DNG 1.5.0.0
 263, Threshholding
 	1, No dithering or halftoning
 	2, Ordered dither or halftoning
@@ -185,6 +190,9 @@
 532, ReferenceBlackWhite
 700, XMP  # Adobe XMP Specification Part 3 Table 12/13/39
 32781, ImageID  # Adobe PageMaker 6.0 TIFF Technical Notes
+33421, CFARepeatPatternDim  # DIS/ISO 12234-2
+33422, CFAPattern  # DIS/ISO 12234-2
+33423, BatteryLevel  # DIS/ISO 12234-2
 33432, Copyright
 # TODO(p): Extract IPTC DataSets, like we do directly with PSIRs.
 33723, IPTC  # Adobe XMP Specification Part 3 Table 12/39
@@ -192,7 +200,18 @@
 34377, Photoshop  # Adobe XMP Specification Part 3 Table 12/39
 34665, Exif IFD Pointer  # Exif 2.3
 34853, GPS Info IFD Pointer  # Exif 2.3
-37398, TIFF/EP StandardID  # ISO 12234 TIFF/EP image data format
+37398, TIFF/EP StandardID  # DIS/ISO 12234-2
+37399, SensingMethod  # DIS/ISO 12234-2, similar to Exif 41495
+	0, Undefined
+	1, Monochrome area sensor
+	2, One-chip color area sensor
+	3, Two-chip color area sensor
+	4, Three-chip color area sensor
+	5, Color sequential area sensor
+	6, Monochrome linear sensor
+	7, Trilinear sensor
+	8, Color sequential linear sensor
+# TODO(p): Add more TIFF/EP tags that can be only in IFD0.
 37724, ImageSourceData  # Adobe Photoshop TIFF Technical Notes
 50706, DNGVersion  # DNG 1.5.0.0
 50707, DNGBackwardVersion  # DNG 1.5.0.0
