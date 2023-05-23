@@ -41,6 +41,10 @@
 #include <lcms2.h>
 #endif  // HAVE_LCMS2
 
+#define TIFF_TABLES_CONSTANTS_ONLY
+#include "tiff-tables.h"
+#include "tiffer.h"
+
 #ifdef HAVE_LIBRAW
 #include <libraw.h>
 #if LIBRAW_VERSION >= LIBRAW_MAKE_VERSION(0, 21, 0)
@@ -1141,32 +1145,28 @@ fail:
 
 // --- JPEG --------------------------------------------------------------------
 
-static GBytes *
-parse_jpeg_metadata(cairo_surface_t *surface, const char *data, gsize len)
+struct jpeg_metadata {
+	GByteArray *exif;                   ///< Exif buffer or NULL
+	GByteArray *icc;                    ///< ICC profile buffer or NULL
+	int width;                          ///< Image width
+	int height;                         ///< Image height
+};
+
+static void
+parse_jpeg_metadata(const char *data, size_t len, struct jpeg_metadata *meta)
 {
 	// Because the JPEG file format is simple, just do it manually.
 	// See: https://www.w3.org/Graphics/JPEG/itu-t81.pdf
 	enum {
-		APP0 = 0xE0,
-		APP1,
-		APP2,
-		RST0 = 0xD0,
-		RST1,
-		RST2,
-		RST3,
-		RST4,
-		RST5,
-		RST6,
-		RST7,
-		SOI = 0xD8,
-		EOI = 0xD9,
-		SOS = 0xDA,
 		TEM = 0x01,
+		SOF0 = 0xC0, SOF1, SOF2, SOF3, DHT, SOF5, SOF6, SOF7,
+		JPG, SOF9, SOF10, SOF11, DAC, SOF13, SOF14, SOF15,
+		RST0, RST1, RST2, RST3, RST4, RST5, RST6, RST7,
+		SOI, EOI, SOS, DQT, DNL, DRI, DHP, EXP,
+		APP0, APP1, APP2, APP3, APP4, APP5, APP6, APP7,
 	};
 
-	GByteArray *exif = g_byte_array_new(), *icc = g_byte_array_new();
 	int icc_sequence = 0, icc_done = FALSE;
-
 	const guint8 *p = (const guint8 *) data, *end = p + len;
 	while (p + 3 < end && *p++ == 0xFF && *p != SOS && *p != EOI) {
 		// The previous byte is a fill byte, restart.
@@ -1195,49 +1195,76 @@ parse_jpeg_metadata(cairo_surface_t *surface, const char *data, gsize len)
 		if (G_UNLIKELY((p += length) > end))
 			break;
 
+		switch (marker) {
+		case SOF0:
+		case SOF1:
+		case SOF2:
+		case SOF3:
+		case SOF5:
+		case SOF6:
+		case SOF7:
+		case SOF9:
+		case SOF10:
+		case SOF11:
+		case SOF13:
+		case SOF14:
+		case SOF15:
+			if (length >= 5) {
+				meta->width = (payload[3] << 8) + payload[4];
+				meta->height = (payload[1] << 8) + payload[2];
+			}
+		}
+
 		// https://www.cipa.jp/std/documents/e/DC-008-2012_E.pdf 4.7.2
 		// Adobe XMP Specification Part 3: Storage in Files, 2020/1, 1.1.3
 		// Not checking the padding byte is intentional.
-		if (marker == APP1 && p - payload >= 6 &&
-			!memcmp(payload, "Exif\0", 5) && !exif->len) {
+		// XXX: Thumbnails may in practice overflow into follow-up segments.
+		if (meta->exif && marker == APP1 && p - payload >= 6 &&
+			!memcmp(payload, "Exif\0", 5) && !meta->exif->len) {
 			payload += 6;
-			g_byte_array_append(exif, payload, p - payload);
+			g_byte_array_append(meta->exif, payload, p - payload);
 		}
 
 		// https://www.color.org/specification/ICC1v43_2010-12.pdf B.4
-		if (marker == APP2 && p - payload >= 14 &&
+		if (meta->icc && marker == APP2 && p - payload >= 14 &&
 			!memcmp(payload, "ICC_PROFILE\0", 12) && !icc_done &&
 			payload[12] == ++icc_sequence && payload[13] >= payload[12]) {
 			payload += 14;
-			g_byte_array_append(icc, payload, p - payload);
+			g_byte_array_append(meta->icc, payload, p - payload);
 			icc_done = payload[-1] == icc_sequence;
 		}
 
 		// TODO(p): Extract the main XMP segment.
 	}
 
-	if (exif->len)
-		cairo_surface_set_user_data(surface, &fiv_io_key_exif,
-			g_byte_array_free_to_bytes(exif),
-			(cairo_destroy_func_t) g_bytes_unref);
-	else
-		g_byte_array_free(exif, TRUE);
-
-	GBytes *icc_profile = NULL;
-	if (icc_done)
-		cairo_surface_set_user_data(surface, &fiv_io_key_icc,
-			(icc_profile = g_byte_array_free_to_bytes(icc)),
-			(cairo_destroy_func_t) g_bytes_unref);
-	else
-		g_byte_array_free(icc, TRUE);
-	return icc_profile;
+	if (meta->icc && !icc_done)
+		g_byte_array_set_size(meta->icc, 0);
 }
 
 static void
 load_jpeg_finalize(cairo_surface_t *surface, bool cmyk,
 	FivIoProfile destination, const char *data, size_t len)
 {
-	GBytes *icc_profile = parse_jpeg_metadata(surface, data, len);
+	struct jpeg_metadata meta = {
+		.exif = g_byte_array_new(), .icc = g_byte_array_new()};
+
+	parse_jpeg_metadata(data, len, &meta);
+
+	if (meta.exif->len)
+		cairo_surface_set_user_data(surface, &fiv_io_key_exif,
+			g_byte_array_free_to_bytes(meta.exif),
+			(cairo_destroy_func_t) g_bytes_unref);
+	else
+		g_byte_array_free(meta.exif, TRUE);
+
+	GBytes *icc_profile = NULL;
+	if (meta.icc->len)
+		cairo_surface_set_user_data(surface, &fiv_io_key_icc,
+			(icc_profile = g_byte_array_free_to_bytes(meta.icc)),
+			(cairo_destroy_func_t) g_bytes_unref);
+	else
+		g_byte_array_free(meta.icc, TRUE);
+
 	FivIoProfile source = NULL;
 	if (icc_profile)
 		source = fiv_io_profile_new(
@@ -1697,6 +1724,269 @@ open_libwebp(
 
 fail:
 	WebPFreeDecBuffer(&config.output);
+	return result;
+}
+
+// --- TIFF/EP + DNG -----------------------------------------------------------
+// In Nikon NEF files, which claim to be TIFF/EP-compatible, IFD0 is a tiny
+// uncompressed thumbnail with SubIFDs that, aside from raw sensor data,
+// typically contain a nearly full-size JPEG preview.
+//
+// LibRaw takes too long a time to render something that will never be as good
+// as the large preview, and libtiff can only read the horrible IFD0 thumbnail.
+// (TIFFSetSubDirectory() requires an ImageLength tag that's missing from JPEG
+// SubIFDs, and TIFFReadCustomDirectory() takes a privately defined struct that
+// may not be omitted.)
+//
+// While LibRaw since 0.21.0 provides an API that would allow us to extract
+// the JPEG, a little bit of custom processing won't hurt either.
+
+static bool
+tiffer_find(const struct tiffer *self, uint16_t tag, struct tiffer_entry *entry)
+{
+	// Note that we could employ binary search, because tags must be ordered:
+	//  - TIFF 6.0: Sort Order
+	//  - ISO/DIS 12234-2: 4.1.2, 5.1
+	//  - CIPA DC-007-2009 (Multi-Picture Format): 5.2.3., 5.2.4.
+	//  - CIPA DC-008-2019 (Exif 2.32): 4.6.2.
+	// However, it doesn't seem to warrant the ugly code.
+	struct tiffer T = *self;
+	while (tiffer_next_entry(&T, entry)) {
+		if (entry->tag == tag)
+			return true;
+	}
+	*entry = (struct tiffer_entry) {};
+	return false;
+}
+
+static bool
+tiffer_find_integer(const struct tiffer *self, uint16_t tag, int64_t *i)
+{
+	struct tiffer_entry entry = {};
+	return tiffer_find(self, tag, &entry) && tiffer_integer(self, &entry, i);
+}
+
+// In case of failure, an entry with a zero "remaining_count" is returned.
+static struct tiffer_entry
+tiff_ep_subifds_init(const struct tiffer *T)
+{
+	struct tiffer_entry entry = {};
+	(void) tiffer_find(T, TIFF_SubIFDs, &entry);
+	return entry;
+}
+
+static bool
+tiff_ep_subifds_next(
+	const struct tiffer *T, struct tiffer_entry *subifds, struct tiffer *subT)
+{
+	// XXX: Except for a zero "remaining_count", all conditions are errors,
+	// and should perhaps be reported.
+	int64_t offset = 0;
+	if (!tiffer_integer(T, subifds, &offset) ||
+		offset < 0 || offset > UINT32_MAX || !tiffer_subifd(T, offset, subT))
+		return false;
+
+	(void) tiffer_next_value(subifds);
+	return true;
+}
+
+static bool
+tiff_ep_find_main(const struct tiffer *T, struct tiffer *outputT)
+{
+	// This is a mandatory field.
+	int64_t type = 0;
+	if (!tiffer_find_integer(T, TIFF_NewSubfileType, &type))
+		return false;
+
+	// This is the main image.
+	// (See DNG rather than ISO/DIS 12234-2 for values.)
+	if (type == 0) {
+		*outputT = *T;
+		return true;
+	}
+
+	struct tiffer_entry subifds = tiff_ep_subifds_init(T);
+	struct tiffer subT = {};
+	while (tiff_ep_subifds_next(T, &subifds, &subT))
+		if (tiff_ep_find_main(&subT, outputT))
+			return true;
+	return false;
+}
+
+struct tiff_ep_jpeg {
+	const uint8_t *jpeg;                ///< JPEG data stream
+	size_t jpeg_length;                 ///< JPEG data stream length
+	int64_t pixels;                     ///< Number of pixels in the JPEG
+};
+
+static void
+tiff_ep_find_jpeg_evaluate(const struct tiffer *T, struct tiff_ep_jpeg *out)
+{
+	// This is a mandatory field.
+	int64_t compression = 0;
+	if (!tiffer_find_integer(T, TIFF_Compression, &compression))
+		return;
+
+	uint16_t tag_pointer = 0, tag_length = 0;
+	switch (compression) {
+		// This is how Exif specifies it, which doesn't follow TIFF 6.0.
+	case TIFF_Compression_JPEG:
+		tag_pointer = TIFF_JPEGInterchangeFormat;
+		tag_length = TIFF_JPEGInterchangeFormatLength;
+		break;
+		// Theoretically, there may be more strips, but this is not expected.
+	case TIFF_Compression_JPEGDatastream:
+		tag_pointer = TIFF_StripOffsets;
+		tag_length = TIFF_StripByteCounts;
+		break;
+	default:
+		return;
+	}
+
+	int64_t ipointer = 0, ilength = 0;
+	if (!tiffer_find_integer(T, tag_pointer, &ipointer) ||
+		!tiffer_find_integer(T, tag_length, &ilength) ||
+		ipointer <= 0 || ilength <= 0 ||
+		(uint64_t) ilength > SIZE_MAX ||
+		ipointer + ilength > (T->end - T->begin))
+		return;
+
+	// Note that to get the largest JPEG,
+	// we don't need to descend into Exif thumbnails.
+	// TODO(p): Consider DNG 1.2.0.0 PreviewColorSpace.
+	// But first, try to find some real-world files with it.
+	const uint8_t *jpeg = T->begin + ipointer;
+	size_t jpeg_length = ilength;
+
+	struct jpeg_metadata meta = {};
+	parse_jpeg_metadata((const char *) jpeg, jpeg_length, &meta);
+	int64_t pixels = meta.width * meta.height;
+	if (pixels > out->pixels) {
+		out->jpeg = jpeg;
+		out->jpeg_length = jpeg_length;
+		out->pixels = pixels;
+	}
+}
+
+static bool
+tiff_ep_find_jpeg(const struct tiffer *T, struct tiff_ep_jpeg *out)
+{
+	// This is a mandatory field.
+	int64_t type = 0;
+	if (!tiffer_find_integer(T, TIFF_NewSubfileType, &type))
+		return false;
+
+	// This is a thumbnail of the main image.
+	// (See DNG rather than ISO/DIS 12234-2 for values.)
+	if (type == 1)
+		tiff_ep_find_jpeg_evaluate(T, out);
+
+	struct tiffer_entry subifds = tiff_ep_subifds_init(T);
+	struct tiffer subT = {};
+	while (tiff_ep_subifds_next(T, &subifds, &subT))
+		if (!tiff_ep_find_jpeg(&subT, out))
+			return false;
+	return true;
+}
+
+static cairo_surface_t *
+load_tiff_ep(
+	const struct tiffer *T, const FivIoOpenContext *ctx, GError **error)
+{
+	// ISO/DIS 12234-2 is a fuck-up that says this should be in "IFD0",
+	// but it might have intended to say "all top-level IFDs".
+	// The DNG specification shares the same problem.
+	//
+	// In any case, chained TIFFs are relatively rare.
+	struct tiffer_entry entry = {};
+	bool is_tiffep = tiffer_find(T, TIFF_TIFF_EPStandardID, &entry) &&
+		entry.type == BYTE && entry.remaining_count == 4 &&
+		entry.p[0] == 1 && !entry.p[1] && !entry.p[2] && !entry.p[3];
+
+	// Apple ProRAW, e.g., does not claim TIFF/EP compatibility,
+	// but we should still be able to make sense of it.
+	bool is_supported_dng = tiffer_find(T, TIFF_DNGBackwardVersion, &entry) &&
+		entry.type == BYTE && entry.remaining_count == 4 &&
+		entry.p[0] == 1 && entry.p[1] <= 6 && !entry.p[2] && !entry.p[3];
+	if (!is_tiffep && !is_supported_dng) {
+		set_error(error, "not a supported TIFF/EP or DNG image");
+		return NULL;
+	}
+
+	struct tiffer fullT = {};
+	if (!tiff_ep_find_main(T, &fullT)) {
+		set_error(error, "could not find a main image");
+		return NULL;
+	}
+
+	int64_t width = 0, height = 0;
+	if (!tiffer_find_integer(&fullT, TIFF_ImageWidth, &width) ||
+		!tiffer_find_integer(&fullT, TIFF_ImageLength, &height) ||
+		width <= 0 || height <= 0) {
+		set_error(error, "missing or invalid main image dimensions");
+		return NULL;
+	}
+
+	struct tiff_ep_jpeg out = {};
+	if (!tiff_ep_find_jpeg(T, &out)) {
+		set_error(error, "error looking for a full-size JPEG preview");
+		return NULL;
+	}
+
+	// Nikon NEFs seem to generally have a preview above 99 percent,
+	// (though some of them may not even reach 50 percent).
+	// Be a bit more generous than that with our crop tolerance.
+	// TODO(p): Also take into account DNG DefaultCropSize, if present.
+	if (out.pixels / ((double) width * height) < 0.95) {
+		set_error(error, "could not find a large enough JPEG preview");
+		return NULL;
+	}
+
+	cairo_surface_t *surface = open_libjpeg_turbo(
+		(const char *) out.jpeg, out.jpeg_length, ctx, error);
+	if (!surface)
+		return NULL;
+
+	// Note that Exif may override this later in fiv_io_open_from_data().
+	// TODO(p): Try to use the Orientation field nearest to the target IFD.
+	// IFD0 just happens to be fine for Nikon NEF.
+	int64_t orientation = 0;
+	if (tiffer_find_integer(T, TIFF_Orientation, &orientation) &&
+		orientation >= 1 && orientation <= 8) {
+		cairo_surface_set_user_data(surface, &fiv_io_key_orientation,
+			(void *) (uintptr_t) orientation, NULL);
+	}
+	return surface;
+}
+
+static cairo_surface_t *
+open_tiff_ep(
+	const char *data, gsize len, const FivIoOpenContext *ctx, GError **error)
+{
+	// -Wunused-function, we might want to give this its own compile unit.
+	(void) tiffer_real;
+
+	struct tiffer T = {};
+	if (!tiffer_init(&T, (const uint8_t *) data, len)) {
+		set_error(error, "not a TIFF file");
+		return NULL;
+	}
+
+	cairo_surface_t *result = NULL, *result_tail = NULL;
+	while (tiffer_next_ifd(&T)) {
+		if (!try_append_page(
+				load_tiff_ep(&T, ctx, error), &result, &result_tail)) {
+			g_clear_pointer(&result, cairo_surface_destroy);
+			return NULL;
+		}
+		if (ctx->first_frame_only)
+			break;
+
+		// TODO(p): Try to adjust tiffer so that this isn't necessary.
+		struct tiffer_entry dummy = {};
+		while (tiffer_next_entry(&T, &dummy))
+			;
+	}
 	return result;
 }
 
@@ -2590,30 +2880,6 @@ open_libtiff(
 	if (!tiff)
 		goto fail;
 
-	// In Nikon NEF files, IFD0 is a tiny uncompressed thumbnail with SubIFDs--
-	// two of them JPEGs, the remaining one is raw. libtiff cannot read either
-	// of those better versions.
-	//
-	// TODO(p): If NewSubfileType is ReducedImage, and it has SubIFDs compressed
-	// as old JPEG (6), decode JPEGInterchangeFormat/JPEGInterchangeFormatLength
-	// with libjpeg-turbo and insert them as the starting pages.
-	//
-	// This is not possible with libtiff directly, because TIFFSetSubDirectory()
-	// requires an ImageLength tag that's missing, and TIFFReadCustomDirectory()
-	// takes a privately defined struct that cannot be omitted.
-	//
-	// TODO(p): Samsung Android DNGs also claim to be TIFF/EP, but use a smaller
-	// uncompressed YCbCr image. Apple ProRAW uses the new JPEG Compression (7),
-	// with a weird Orientation. It also uses that value for its raw data.
-	uint32_t subtype = 0;
-	uint16_t subifd_count = 0;
-	const uint64_t *subifd_offsets = NULL;
-	if (TIFFGetField(tiff, TIFFTAG_SUBFILETYPE, &subtype) &&
-		(subtype & FILETYPE_REDUCEDIMAGE) &&
-		TIFFGetField(tiff, TIFFTAG_SUBIFD, &subifd_count, &subifd_offsets) &&
-		subifd_count > 0 && subifd_offsets) {
-	}
-
 	do {
 		// We inform about unsupported directories, but do not fail on them.
 		GError *err = NULL;
@@ -2824,6 +3090,14 @@ fiv_io_open_from_data(
 		surface = open_libwebp(data, len, ctx, error);
 		break;
 	default:
+		// Try to extract full-size previews from TIFF/EP-compatible raws.
+		if ((surface = open_tiff_ep(data, len, ctx, error)))
+			break;
+		if (error) {
+			g_debug("%s", (*error)->message);
+			g_clear_error(error);
+		}
+
 #ifdef HAVE_LIBRAW  // ---------------------------------------------------------
 		if ((surface = open_libraw(data, len, ctx, error)))
 			break;

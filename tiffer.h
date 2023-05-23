@@ -1,0 +1,340 @@
+//
+// tiffer.h: TIFF reading utilities
+//
+// Copyright (c) 2021 - 2023, Přemysl Eric Janouch <p@janouch.name>
+//
+// Permission to use, copy, modify, and/or distribute this software for any
+// purpose with or without fee is hereby granted.
+//
+// THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+// WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+// MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+// SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+// WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
+// OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
+// CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+//
+
+#include <stdint.h>
+#include <string.h>
+#include <stdbool.h>
+
+// --- Utilities ---------------------------------------------------------------
+
+static uint64_t
+tiffer_u64be(const uint8_t *p)
+{
+	return (uint64_t) p[0] << 56 | (uint64_t) p[1] << 48 |
+		(uint64_t) p[2] << 40 | (uint64_t) p[3] << 32 |
+		(uint64_t) p[4] << 24 | p[5] << 16 | p[6] << 8 | p[7];
+}
+
+static uint32_t
+tiffer_u32be(const uint8_t *p)
+{
+	return (uint32_t) p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3];
+}
+
+static uint16_t
+tiffer_u16be(const uint8_t *p)
+{
+	return (uint16_t) p[0] << 8 | p[1];
+}
+
+static uint64_t
+tiffer_u64le(const uint8_t *p)
+{
+	return (uint64_t) p[7] << 56 | (uint64_t) p[6] << 48 |
+		(uint64_t) p[5] << 40 | (uint64_t) p[4] << 32 |
+		(uint64_t) p[3] << 24 | p[2] << 16 | p[1] << 8 | p[0];
+}
+
+static uint32_t
+tiffer_u32le(const uint8_t *p)
+{
+	return (uint32_t) p[3] << 24 | p[2] << 16 | p[1] << 8 | p[0];
+}
+
+static uint16_t
+tiffer_u16le(const uint8_t *p)
+{
+	return (uint16_t) p[1] << 8 | p[0];
+}
+
+// --- TIFF --------------------------------------------------------------------
+// libtiff is a mess, and the format is not particularly complicated.
+// Exiv2 is senselessly copylefted, and cannot do much.
+// libexif is only marginally better.
+// ExifTool is too user-oriented.
+
+struct un {
+	uint64_t (*u64) (const uint8_t *);
+	uint32_t (*u32) (const uint8_t *);
+	uint16_t (*u16) (const uint8_t *);
+};
+
+static struct un tiffer_unbe = {tiffer_u64be, tiffer_u32be, tiffer_u16be};
+static struct un tiffer_unle = {tiffer_u64le, tiffer_u32le, tiffer_u16le};
+
+struct tiffer {
+	struct un *un;
+	const uint8_t *begin, *p, *end;
+	uint16_t remaining_fields;
+};
+
+static bool
+tiffer_u32(struct tiffer *self, uint32_t *u)
+{
+	if (self->p < self->begin || self->p + 4 > self->end)
+		return false;
+
+	*u = self->un->u32(self->p);
+	self->p += 4;
+	return true;
+}
+
+static bool
+tiffer_u16(struct tiffer *self, uint16_t *u)
+{
+	if (self->p < self->begin || self->p + 2 > self->end)
+		return false;
+
+	*u = self->un->u16(self->p);
+	self->p += 2;
+	return true;
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+static bool
+tiffer_init(struct tiffer *self, const uint8_t *tiff, size_t len)
+{
+	self->un = NULL;
+	self->begin = self->p = tiff;
+	self->end = tiff + len;
+	self->remaining_fields = 0;
+
+	const uint8_t
+		le[4] = {'I', 'I', 42, 0},
+		be[4] = {'M', 'M', 0, 42};
+
+	if (tiff + 8 > self->end)
+		return false;
+	else if (!memcmp(tiff, le, sizeof le))
+		self->un = &tiffer_unle;
+	else if (!memcmp(tiff, be, sizeof be))
+		self->un = &tiffer_unbe;
+	else
+		return false;
+
+	self->p = tiff + 4;
+	// The first IFD needs to be read by caller explicitly,
+	// even though it's required to be present by TIFF 6.0.
+	return true;
+}
+
+/// Read the next IFD in a sequence.
+static bool
+tiffer_next_ifd(struct tiffer *self)
+{
+	// All fields from any previous IFD need to be read first.
+	if (self->remaining_fields)
+		return false;
+
+	uint32_t ifd_offset = 0;
+	if (!tiffer_u32(self, &ifd_offset))
+		return false;
+
+	// There is nothing more to read, this chain has terminated.
+	if (!ifd_offset)
+		return false;
+
+	// Note that TIFF 6.0 requires there to be at least one entry,
+	// but there is no need for us to check it.
+	self->p = self->begin + ifd_offset;
+	return tiffer_u16(self, &self->remaining_fields);
+}
+
+/// Initialize a derived TIFF reader for a subIFD at the given location.
+static bool
+tiffer_subifd(
+	const struct tiffer *self, uint32_t offset, struct tiffer *subreader)
+{
+	*subreader = *self;
+	subreader->p = subreader->begin + offset;
+	return tiffer_u16(subreader, &subreader->remaining_fields);
+}
+
+enum tiffer_type {
+	BYTE = 1, ASCII, SHORT, LONG, RATIONAL,
+	SBYTE, UNDEFINED, SSHORT, SLONG, SRATIONAL, FLOAT, DOUBLE,
+	IFD  // This last type from TIFF Technical Note 1 isn't really used much.
+};
+
+static size_t
+tiffer_value_size(enum tiffer_type type)
+{
+	switch (type) {
+	case BYTE:
+	case SBYTE:
+	case ASCII:
+	case UNDEFINED:
+		return 1;
+	case SHORT:
+	case SSHORT:
+		return 2;
+	case LONG:
+	case SLONG:
+	case FLOAT:
+	case IFD:
+		return 4;
+	case RATIONAL:
+	case SRATIONAL:
+	case DOUBLE:
+		return 8;
+	default:
+		return 0;
+	}
+}
+
+/// A lean iterator for values within entries.
+struct tiffer_entry {
+	uint16_t tag;
+	enum tiffer_type type;
+	// For {S,}BYTE, ASCII, UNDEFINED, use these fields directly.
+	const uint8_t *p;
+	uint32_t remaining_count;
+};
+
+static bool
+tiffer_next_value(struct tiffer_entry *entry)
+{
+	if (!entry->remaining_count)
+		return false;
+
+	entry->p += tiffer_value_size(entry->type);
+	entry->remaining_count--;
+	return true;
+}
+
+static bool
+tiffer_integer(
+	const struct tiffer *self, const struct tiffer_entry *entry, int64_t *out)
+{
+	if (!entry->remaining_count)
+		return false;
+
+	// Somewhat excessively lenient, intended for display.
+	// TIFF 6.0 only directly suggests that a reader is should accept
+	// any of BYTE/SHORT/LONG for unsigned integers.
+	switch (entry->type) {
+	case BYTE:
+	case ASCII:
+	case UNDEFINED:
+		*out = *entry->p;
+		return true;
+	case SBYTE:
+		*out = (int8_t) *entry->p;
+		return true;
+	case SHORT:
+		*out = self->un->u16(entry->p);
+		return true;
+	case SSHORT:
+		*out = (int16_t) self->un->u16(entry->p);
+		return true;
+	case LONG:
+	case IFD:
+		*out = self->un->u32(entry->p);
+		return true;
+	case SLONG:
+		*out = (int32_t) self->un->u32(entry->p);
+		return true;
+	default:
+		return false;
+	}
+}
+
+static bool
+tiffer_rational(const struct tiffer *self, const struct tiffer_entry *entry,
+	int64_t *numerator, int64_t *denominator)
+{
+	if (!entry->remaining_count)
+		return false;
+
+	// Somewhat excessively lenient, intended for display.
+	switch (entry->type) {
+	case RATIONAL:
+		*numerator = self->un->u32(entry->p);
+		*denominator = self->un->u32(entry->p + 4);
+		return true;
+	case SRATIONAL:
+		*numerator = (int32_t) self->un->u32(entry->p);
+		*denominator = (int32_t) self->un->u32(entry->p + 4);
+		return true;
+	default:
+		if (tiffer_integer(self, entry, numerator)) {
+			*denominator = 1;
+			return true;
+		}
+		return false;
+	}
+}
+
+static bool
+tiffer_real(
+	const struct tiffer *self, const struct tiffer_entry *entry, double *out)
+{
+	if (!entry->remaining_count)
+		return false;
+
+	// Somewhat excessively lenient, intended for display.
+	// Assuming the host architecture uses IEEE 754.
+	switch (entry->type) {
+		int64_t numerator, denominator;
+	case FLOAT:
+		*out = *(float *) entry->p;
+		return true;
+	case DOUBLE:
+		*out = *(double *) entry->p;
+		return true;
+	default:
+		if (tiffer_rational(self, entry, &numerator, &denominator)) {
+			*out = (double) numerator / denominator;
+			return true;
+		}
+		return false;
+	}
+}
+
+static bool
+tiffer_next_entry(struct tiffer *self, struct tiffer_entry *entry)
+{
+	if (!self->remaining_fields)
+		return false;
+
+	uint16_t type = entry->type = 0xFFFF;
+	if (!tiffer_u16(self, &entry->tag) || !tiffer_u16(self, &type) ||
+		!tiffer_u32(self, &entry->remaining_count))
+		return false;
+
+	// Short values may and will be inlined, rather than pointed to.
+	size_t values_size = tiffer_value_size(type) * entry->remaining_count;
+	uint32_t offset = 0;
+	if (values_size <= sizeof offset) {
+		entry->p = self->p;
+		self->p += sizeof offset;
+	} else if (tiffer_u32(self, &offset)) {
+		entry->p = self->begin + offset;
+	} else {
+		return false;
+	}
+
+	// All entries are pre-checked not to overflow.
+	if (entry->p + values_size > self->end)
+		return false;
+
+	// Setting it at the end may provide an indication while debugging.
+	entry->type = type;
+	self->remaining_fields--;
+	return true;
+}
