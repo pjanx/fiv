@@ -20,9 +20,9 @@
 #include <jv.h>
 
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdbool.h>
 
 // This is essentially the same as jpeginfo.c, but we only have an Exif segment.
 // TODO(p): Photoshop data and ICC profiles also have their tag,
