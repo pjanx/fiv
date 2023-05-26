@@ -140,13 +140,14 @@ tiff_tables = custom_target('tiff-tables.h',
 desktops = ['fiv.desktop', 'fiv-browse.desktop']
 exe = executable('fiv', 'fiv.c', 'fiv-view.c', 'fiv-io.c', 'fiv-context-menu.c',
 	'fiv-browser.c', 'fiv-sidebar.c', 'fiv-thumbnail.c', 'fiv-collection.c',
-	'xdg.c', gresources, rc, config,
+	'xdg.c', tiff_tables, gresources, rc, config,
 	install : true,
 	dependencies : dependencies,
 	win_subsystem : 'windows',
 )
 if gdkpixbuf.found()
-	executable('io-benchmark', 'fiv-io-benchmark.c', 'fiv-io.c', 'xdg.c',
+	executable('io-benchmark', 'fiv-io-benchmark.c', 'fiv-io.c',
+		'xdg.c', tiff_tables,
 		build_by_default : false,
 		dependencies : [dependencies, gdkpixbuf])
 endif
