@@ -193,11 +193,11 @@ parse_exif_entry(jv o, const struct tiffer *T, struct tiffer_entry *entry,
 	double real = 0;
 	if (!entry->remaining_count) {
 		v = jv_null();
-	} else if (entry->type == IFD || subentries) {
+	} else if (entry->type == TIFFER_IFD || subentries) {
 		v = parse_exif_subifds(T, entry, subentries);
-	} else if (entry->type == ASCII) {
+	} else if (entry->type == TIFFER_ASCII) {
 		v = parse_exif_extract_sole_array_element(parse_exif_ascii(entry));
-	} else if (entry->type == UNDEFINED && !info->values) {
+	} else if (entry->type == TIFFER_UNDEFINED && !info->values) {
 		// Several Exif entries of UNDEFINED type contain single-byte numbers.
 		v = parse_exif_undefined(entry);
 	} else if (tiffer_real(T, entry, &real)) {
@@ -682,7 +682,7 @@ parse_mpf_index_entry(jv o, uint32_t **offsets, const struct tiffer *T,
 	struct tiffer_entry *entry)
 {
 	// 5.2.3.3. MP Entry
-	if (entry->tag != MPF_MPEntry || entry->type != UNDEFINED ||
+	if (entry->tag != MPF_MPEntry || entry->type != TIFFER_UNDEFINED ||
 		entry->remaining_count % 16) {
 		return parse_exif_entry(o, T, entry, mpf_entries);
 	}

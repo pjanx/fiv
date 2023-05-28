@@ -1197,7 +1197,7 @@ parse_mpf_index_ifd(struct tiffer *T)
 	struct tiffer_entry entry = {};
 	while (tiffer_next_entry(T, &entry)) {
 		// 5.2.3.3. MP Entry
-		if (entry.tag == MPF_MPEntry && entry.type == UNDEFINED &&
+		if (entry.tag == MPF_MPEntry && entry.type == TIFFER_UNDEFINED &&
 			!(entry.remaining_count % 16)) {
 			return parse_mpf_index_entries(T, &entry);
 		}
@@ -2013,13 +2013,13 @@ load_tiff_ep(
 	// In any case, chained TIFFs are relatively rare.
 	struct tiffer_entry entry = {};
 	bool is_tiffep = tiffer_find(T, TIFF_TIFF_EPStandardID, &entry) &&
-		entry.type == BYTE && entry.remaining_count == 4 &&
+		entry.type == TIFFER_BYTE && entry.remaining_count == 4 &&
 		entry.p[0] == 1 && !entry.p[1] && !entry.p[2] && !entry.p[3];
 
 	// Apple ProRAW, e.g., does not claim TIFF/EP compatibility,
 	// but we should still be able to make sense of it.
 	bool is_supported_dng = tiffer_find(T, TIFF_DNGBackwardVersion, &entry) &&
-		entry.type == BYTE && entry.remaining_count == 4 &&
+		entry.type == TIFFER_BYTE && entry.remaining_count == 4 &&
 		entry.p[0] == 1 && entry.p[1] <= 6 && !entry.p[2] && !entry.p[3];
 	if (!is_tiffep && !is_supported_dng) {
 		set_error(error, "not a supported TIFF/EP or DNG image");
@@ -3714,7 +3714,7 @@ fiv_io_exif_orientation(const guint8 *tiff, gsize len)
 	while (tiffer_next_entry(&T, &entry)) {
 		int64_t orientation = 0;
 		if (G_UNLIKELY(entry.tag == TIFF_Orientation) &&
-			entry.type == SHORT && entry.remaining_count == 1 &&
+			entry.type == TIFFER_SHORT && entry.remaining_count == 1 &&
 			tiffer_integer(&T, &entry, &orientation) &&
 			orientation >= 1 && orientation <= 8)
 			return orientation;

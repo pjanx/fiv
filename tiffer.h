@@ -170,31 +170,36 @@ tiffer_subifd(
 }
 
 enum tiffer_type {
-	BYTE = 1, ASCII, SHORT, LONG, RATIONAL,
-	SBYTE, UNDEFINED, SSHORT, SLONG, SRATIONAL, FLOAT, DOUBLE,
-	IFD  // This last type from TIFF Technical Note 1 isn't really used much.
+	TIFFER_BYTE = 1, TIFFER_ASCII, TIFFER_SHORT, TIFFER_LONG,
+	TIFFER_RATIONAL,
+	TIFFER_SBYTE, TIFFER_UNDEFINED, TIFFER_SSHORT, TIFFER_SLONG,
+	TIFFER_SRATIONAL,
+	TIFFER_FLOAT,
+	TIFFER_DOUBLE,
+	// This last type from TIFF Technical Note 1 isn't really used much.
+	TIFFER_IFD,
 };
 
 static size_t
 tiffer_value_size(enum tiffer_type type)
 {
 	switch (type) {
-	case BYTE:
-	case SBYTE:
-	case ASCII:
-	case UNDEFINED:
+	case TIFFER_BYTE:
+	case TIFFER_SBYTE:
+	case TIFFER_ASCII:
+	case TIFFER_UNDEFINED:
 		return 1;
-	case SHORT:
-	case SSHORT:
+	case TIFFER_SHORT:
+	case TIFFER_SSHORT:
 		return 2;
-	case LONG:
-	case SLONG:
-	case FLOAT:
-	case IFD:
+	case TIFFER_LONG:
+	case TIFFER_SLONG:
+	case TIFFER_FLOAT:
+	case TIFFER_IFD:
 		return 4;
-	case RATIONAL:
-	case SRATIONAL:
-	case DOUBLE:
+	case TIFFER_RATIONAL:
+	case TIFFER_SRATIONAL:
+	case TIFFER_DOUBLE:
 		return 8;
 	default:
 		return 0;
@@ -232,25 +237,25 @@ tiffer_integer(
 	// TIFF 6.0 only directly suggests that a reader is should accept
 	// any of BYTE/SHORT/LONG for unsigned integers.
 	switch (entry->type) {
-	case BYTE:
-	case ASCII:
-	case UNDEFINED:
+	case TIFFER_BYTE:
+	case TIFFER_ASCII:
+	case TIFFER_UNDEFINED:
 		*out = *entry->p;
 		return true;
-	case SBYTE:
+	case TIFFER_SBYTE:
 		*out = (int8_t) *entry->p;
 		return true;
-	case SHORT:
+	case TIFFER_SHORT:
 		*out = self->un->u16(entry->p);
 		return true;
-	case SSHORT:
+	case TIFFER_SSHORT:
 		*out = (int16_t) self->un->u16(entry->p);
 		return true;
-	case LONG:
-	case IFD:
+	case TIFFER_LONG:
+	case TIFFER_IFD:
 		*out = self->un->u32(entry->p);
 		return true;
-	case SLONG:
+	case TIFFER_SLONG:
 		*out = (int32_t) self->un->u32(entry->p);
 		return true;
 	default:
@@ -267,11 +272,11 @@ tiffer_rational(const struct tiffer *self, const struct tiffer_entry *entry,
 
 	// Somewhat excessively lenient, intended for display.
 	switch (entry->type) {
-	case RATIONAL:
+	case TIFFER_RATIONAL:
 		*numerator = self->un->u32(entry->p);
 		*denominator = self->un->u32(entry->p + 4);
 		return true;
-	case SRATIONAL:
+	case TIFFER_SRATIONAL:
 		*numerator = (int32_t) self->un->u32(entry->p);
 		*denominator = (int32_t) self->un->u32(entry->p + 4);
 		return true;
@@ -295,10 +300,10 @@ tiffer_real(
 	// Assuming the host architecture uses IEEE 754.
 	switch (entry->type) {
 		int64_t numerator, denominator;
-	case FLOAT:
+	case TIFFER_FLOAT:
 		*out = *(float *) entry->p;
 		return true;
-	case DOUBLE:
+	case TIFFER_DOUBLE:
 		*out = *(double *) entry->p;
 		return true;
 	default:
