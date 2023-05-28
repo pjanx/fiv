@@ -1143,11 +1143,94 @@ fail:
 	return surface;
 }
 
+// --- Multi-Picture Format ----------------------------------------------------
+
+static uint32_t
+parse_mpf_mpentry(const uint8_t *p, const struct tiffer *T)
+{
+	uint32_t attrs = T->un->u32(p);
+	uint32_t offset = T->un->u32(p + 8);
+
+	enum {
+		TypeBaselineMPPrimaryImage = 0x030000,
+		TypeLargeThumbnailVGA = 0x010001,
+		TypeLargeThumbnailFullHD = 0x010002,
+		TypeMultiFrameImagePanorama = 0x020001,
+		TypeMultiFrameImageDisparity = 0x020002,
+		TypeMultiFrameImageMultiAngle = 0x020003,
+		TypeUndefined = 0x000000,
+	};
+	switch (attrs & 0xFFFFFF) {
+	case TypeLargeThumbnailVGA:
+	case TypeLargeThumbnailFullHD:
+		// Wasted cycles.
+	case TypeUndefined:
+		// Apple uses this for HDR and depth maps (same and lower resolution).
+		// TODO(p): It would be nice to be able to view them.
+		return 0;
+	}
+
+	// Don't report non-JPEGs, even though they're unlikely.
+	if (((attrs >> 24) & 0x7) != 0)
+		return 0;
+
+	return offset;
+}
+
+static uint32_t *
+parse_mpf_index_entries(const struct tiffer *T, struct tiffer_entry *entry)
+{
+	uint32_t count = entry->remaining_count / 16;
+	uint32_t *offsets = g_malloc0_n(sizeof *offsets, count + 1), *out = offsets;
+	for (uint32_t i = 0; i < count; i++) {
+		// 5.2.3.3.3. Individual Image Data Offset
+		uint32_t offset = parse_mpf_mpentry(entry->p + i * 16, T);
+		if (offset)
+			*out++ = offset;
+	}
+	return offsets;
+}
+
+static uint32_t *
+parse_mpf_index_ifd(struct tiffer *T)
+{
+	struct tiffer_entry entry = {};
+	while (tiffer_next_entry(T, &entry)) {
+		// 5.2.3.3. MP Entry
+		if (entry.tag == MPF_MPEntry && entry.type == UNDEFINED &&
+			!(entry.remaining_count % 16)) {
+			return parse_mpf_index_entries(T, &entry);
+		}
+	}
+	return NULL;
+}
+
+static bool
+parse_mpf(
+	GPtrArray *individuals, const uint8_t *mpf, size_t len, const uint8_t *end)
+{
+	struct tiffer T;
+	if (!tiffer_init(&T, mpf, len) || !tiffer_next_ifd(&T))
+		return false;
+
+	// First image: IFD0 is Index IFD, any IFD1 is Attribute IFD.
+	// Other images: IFD0 is Attribute IFD, there is no Index IFD.
+	uint32_t *offsets = parse_mpf_index_ifd(&T);
+	if (offsets) {
+		for (const uint32_t *o = offsets; *o; o++)
+			if (*o <= end - mpf)
+				g_ptr_array_add(individuals, (gpointer) mpf + *o);
+		free(offsets);
+	}
+	return true;
+}
+
 // --- JPEG --------------------------------------------------------------------
 
 struct jpeg_metadata {
 	GByteArray *exif;                   ///< Exif buffer or NULL
 	GByteArray *icc;                    ///< ICC profile buffer or NULL
+	GPtrArray *mpf;                     ///< Multi-Picture Format or NULL
 	int width;                          ///< Image width
 	int height;                         ///< Image height
 };
@@ -1234,6 +1317,14 @@ parse_jpeg_metadata(const char *data, size_t len, struct jpeg_metadata *meta)
 			icc_done = payload[-1] == icc_sequence;
 		}
 
+		// CIPA DC-007-2021 (Multi-Picture Format) 5.2
+		// https://www.cipa.jp/e/std/std-sec.html
+		if (meta->mpf && marker == APP2 && p - payload >= 8 &&
+			!memcmp(payload, "MPF\0", 4) && !meta->mpf->len) {
+			payload += 4;
+			parse_mpf(meta->mpf, payload, p - payload, end);
+		}
+
 		// TODO(p): Extract the main XMP segment.
 	}
 
@@ -1241,14 +1332,37 @@ parse_jpeg_metadata(const char *data, size_t len, struct jpeg_metadata *meta)
 		g_byte_array_set_size(meta->icc, 0);
 }
 
+static cairo_surface_t *open_libjpeg_turbo(
+	const char *data, gsize len, const FivIoOpenContext *ctx, GError **error);
+
 static void
 load_jpeg_finalize(cairo_surface_t *surface, bool cmyk,
-	FivIoProfile destination, const char *data, size_t len)
+	const FivIoOpenContext *ctx, const char *data, size_t len)
 {
 	struct jpeg_metadata meta = {
-		.exif = g_byte_array_new(), .icc = g_byte_array_new()};
+		.exif = g_byte_array_new(),
+		.icc = g_byte_array_new(),
+		.mpf = g_ptr_array_new(),
+	};
 
 	parse_jpeg_metadata(data, len, &meta);
+
+	if (!ctx->first_frame_only) {
+		// XXX: This is ugly, as it relies on just the first individual image
+		// having any follow-up entries (as it should be).
+		cairo_surface_t *surface_tail = surface;
+		for (guint i = 0; i < meta.mpf->len; i++) {
+			const char *jpeg = meta.mpf->pdata[i];
+			GError *error = NULL;
+			if (!try_append_page(
+				open_libjpeg_turbo(jpeg, len - (jpeg - data), ctx, &error),
+				&surface, &surface_tail)) {
+				add_warning(ctx, "MPF image %d: %s", i + 2, error->message);
+				g_error_free(error);
+			}
+		}
+	}
+	g_ptr_array_free(meta.mpf, TRUE);
 
 	if (meta.exif->len)
 		cairo_surface_set_user_data(surface, &fiv_io_key_exif,
@@ -1271,9 +1385,9 @@ load_jpeg_finalize(cairo_surface_t *surface, bool cmyk,
 			g_bytes_get_data(icc_profile, NULL), g_bytes_get_size(icc_profile));
 
 	if (cmyk)
-		fiv_io_profile_cmyk(surface, source, destination);
+		fiv_io_profile_cmyk(surface, source, ctx->screen_profile);
 	else
-		fiv_io_profile_xrgb32(surface, source, destination);
+		fiv_io_profile_xrgb32(surface, source, ctx->screen_profile);
 
 	if (source)
 		fiv_io_profile_free(source);
@@ -1358,7 +1472,7 @@ open_libjpeg_turbo(
 		}
 	}
 
-	load_jpeg_finalize(surface, use_cmyk, ctx->screen_profile, data, len);
+	load_jpeg_finalize(surface, use_cmyk, ctx, data, len);
 	tjDestroy(dec);
 	return surface;
 }
@@ -1445,7 +1559,7 @@ open_libjpeg_enhanced(
 			surface_data, cinfo.output_width * cinfo.output_height);
 	(void) jpegqs_finish_decompress(&cinfo);
 
-	load_jpeg_finalize(surface, use_cmyk, ctx->screen_profile, data, len);
+	load_jpeg_finalize(surface, use_cmyk, ctx, data, len);
 	jpeg_destroy_decompress(&cinfo);
 	return surface;
 }

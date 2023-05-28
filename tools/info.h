@@ -1002,8 +1002,8 @@ parse_marker(uint8_t marker, const uint8_t *p, const uint8_t *end,
 			unprintable ? jv_null() : jv_string((const char *) payload));
 	}
 
-	// CIPA DC-007 (Multi-Picture Format) 5.2
-	// http://fileformats.archiveteam.org/wiki/Multi-Picture_Format
+	// CIPA DC-007-2021 (Multi-Picture Format) 5.2
+	// https://www.cipa.jp/e/std/std-sec.html
 	if (marker == APP2 && p - payload >= 8 && !memcmp(payload, "MPF\0", 4)) {
 		payload += 4;
 		*o = parse_mpf(*o, &data->mpf_individuals, payload, p - payload, end);
