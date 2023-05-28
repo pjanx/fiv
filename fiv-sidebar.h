@@ -17,7 +17,7 @@
 
 #pragma once
 
-#include "fiv-io.h"
+#include "fiv-io-model.h"
 
 #include <gtk/gtk.h>
 

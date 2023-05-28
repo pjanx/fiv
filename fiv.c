@@ -38,6 +38,7 @@
 #include "fiv-browser.h"
 #include "fiv-collection.h"
 #include "fiv-io.h"
+#include "fiv-io-model.h"
 #include "fiv-sidebar.h"
 #include "fiv-thumbnail.h"
 #include "fiv-view.h"
