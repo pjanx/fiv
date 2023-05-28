@@ -725,7 +725,7 @@ parse_mpf_mpentry(jv *a, const uint8_t *p, const struct tiffer *T)
 }
 
 static jv
-parse_mpf_index_entry(jv o, const uint8_t ***offsets, const struct tiffer *T,
+parse_mpf_index_entry(jv o, uint32_t **offsets, const struct tiffer *T,
 	struct tiffer_entry *entry)
 {
 	// 5.2.3.3. MP Entry
@@ -736,20 +736,18 @@ parse_mpf_index_entry(jv o, const uint8_t ***offsets, const struct tiffer *T,
 
 	uint32_t count = entry->remaining_count / 16;
 	jv a = jv_array_sized(count);
-	const uint8_t **out = *offsets = calloc(sizeof *out, count + 1);
+	uint32_t *out = *offsets = calloc(sizeof *out, count + 1);
 	for (uint32_t i = 0; i < count; i++) {
 		// 5.2.3.3.3. Individual Image Data Offset
-		// XXX: We might want to warn about out-of-bounds pointers,
-		// however T->end is for the MPF segment and ends too early.
 		uint32_t offset = parse_mpf_mpentry(&a, entry->p + i * 16, T);
 		if (offset)
-			*out++ = T->begin + offset;
+			*out++ = offset;
 	}
 	return jv_set(o, jv_string("MP Entry"), a);
 }
 
 static jv
-parse_mpf_index_ifd(const uint8_t ***offsets, struct tiffer *T)
+parse_mpf_index_ifd(uint32_t **offsets, struct tiffer *T)
 {
 	jv ifd = jv_object();
 	struct tiffer_entry entry = {};
@@ -759,7 +757,8 @@ parse_mpf_index_ifd(const uint8_t ***offsets, struct tiffer *T)
 }
 
 static jv
-parse_mpf(jv o, const uint8_t ***offsets, const uint8_t *p, size_t len)
+parse_mpf(jv o, const uint8_t ***individuals, const uint8_t *p, size_t len,
+	const uint8_t *end)
 {
 	struct tiffer T;
 	if (!tiffer_init(&T, p, len) || !tiffer_next_ifd(&T))
@@ -767,14 +766,34 @@ parse_mpf(jv o, const uint8_t ***offsets, const uint8_t *p, size_t len)
 
 	// First image: IFD0 is Index IFD, any IFD1 is Attribute IFD.
 	// Other images: IFD0 is Attribute IFD, there is no Index IFD.
-	if (!*offsets) {
-		o = add_to_subarray(o, "MPF", parse_mpf_index_ifd(offsets, &T));
+	uint32_t *offsets = NULL;
+	if (!*individuals) {
+		o = add_to_subarray(o, "MPF", parse_mpf_index_ifd(&offsets, &T));
 		if (!tiffer_next_ifd(&T))
-			return o;
+			goto out;
 	}
 
 	// This isn't optimal, but it will do.
-	return add_to_subarray(o, "MPF", parse_exif_ifd(&T, mpf_entries));
+	o = add_to_subarray(o, "MPF", parse_exif_ifd(&T, mpf_entries));
+
+out:
+	if (offsets) {
+		size_t count = 0;
+		for (const uint32_t *i = offsets; *i; i++)
+			count++;
+
+		free(*individuals);
+		const uint8_t **out = *individuals = calloc(sizeof *out, count + 1);
+		for (const uint32_t *i = offsets; *i; i++) {
+			if (*i > end - p)
+				o = add_warning(o, "MPF offset points past available data");
+			else
+				*out++ = p + *i;
+		}
+
+		free(offsets);
+	}
+	return o;
 }
 
 // --- JPEG --------------------------------------------------------------------
@@ -907,7 +926,7 @@ struct data {
 	uint8_t *exif, *icc, *psir;
 	size_t exif_len, icc_len, psir_len;
 	int icc_sequence, icc_done;
-	const uint8_t **mpf_offsets, **mpf_next;
+	const uint8_t **mpf_individuals, **mpf_next;
 };
 
 static void
@@ -927,7 +946,7 @@ parse_marker(uint8_t marker, const uint8_t *p, const uint8_t *end,
 	// Found: Random metadata! Multi-Picture Format!
 	if ((data->ended = marker == EOI)) {
 		// TODO(p): Handle Exifs independently--flush the last one.
-		if ((data->mpf_next || (data->mpf_next = data->mpf_offsets)) &&
+		if ((data->mpf_next || (data->mpf_next = data->mpf_individuals)) &&
 			*data->mpf_next)
 			return *data->mpf_next++;
 		if (p != end)
@@ -1034,7 +1053,7 @@ parse_marker(uint8_t marker, const uint8_t *p, const uint8_t *end,
 	// http://fileformats.archiveteam.org/wiki/Multi-Picture_Format
 	if (marker == APP2 && p - payload >= 8 && !memcmp(payload, "MPF\0", 4)) {
 		payload += 4;
-		*o = parse_mpf(*o, &data->mpf_offsets, payload, p - payload);
+		*o = parse_mpf(*o, &data->mpf_individuals, payload, p - payload, end);
 	}
 
 	// CIPA DC-006 (Stereo Still Image Format for Digital Cameras)
@@ -1157,6 +1176,6 @@ parse_jpeg(jv o, const uint8_t *p, size_t len)
 		free(data.psir);
 	}
 
-	free(data.mpf_offsets);
+	free(data.mpf_individuals);
 	return jv_set(o, jv_string("markers"), markers);
 }
