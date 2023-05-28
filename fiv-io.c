@@ -4225,43 +4225,22 @@ fiv_io_orientation_apply(cairo_surface_t *surface,
 FivIoOrientation
 fiv_io_exif_orientation(const guint8 *tiff, gsize len)
 {
-	// libtiff also knows how to do this, but it's not a lot of code.
 	// The "Orientation" tag/field is part of Baseline TIFF 6.0 (1992),
 	// it just so happens that Exif is derived from this format.
 	// There is no other meaningful placement for this than right in IFD0,
 	// describing the main image.
-	const uint8_t *end = tiff + len,
-		le[4] = {'I', 'I', 42, 0},
-		be[4] = {'M', 'M', 0, 42};
-
-	uint16_t (*u16)(const uint8_t *) = NULL;
-	uint32_t (*u32)(const uint8_t *) = NULL;
-	if (tiff + 8 > end) {
-		return FivIoOrientationUnknown;
-	} else if (!memcmp(tiff, le, sizeof le)) {
-		u16 = wuffs_base__peek_u16le__no_bounds_check;
-		u32 = wuffs_base__peek_u32le__no_bounds_check;
-	} else if (!memcmp(tiff, be, sizeof be)) {
-		u16 = wuffs_base__peek_u16be__no_bounds_check;
-		u32 = wuffs_base__peek_u32be__no_bounds_check;
-	} else {
-		return FivIoOrientationUnknown;
-	}
-
-	const uint8_t *ifd0 = tiff + u32(tiff + 4);
-	if (ifd0 + 2 > end)
+	struct tiffer T = {};
+	if (!tiffer_init(&T, tiff, len) || !tiffer_next_ifd(&T))
 		return FivIoOrientationUnknown;
 
-	uint16_t fields = u16(ifd0);
-	enum { BYTE = 1, ASCII, SHORT, LONG, RATIONAL,
-		SBYTE, UNDEFINED, SSHORT, SLONG, SRATIONAL, FLOAT, DOUBLE };
-	enum { Orientation = 274 };
-	for (const guint8 *p = ifd0 + 2; fields-- && p + 12 <= end; p += 12) {
-		uint16_t tag = u16(p), type = u16(p + 2), value16 = u16(p + 8);
-		uint32_t count = u32(p + 4);
-		if (G_UNLIKELY(tag == Orientation && type == SHORT && count == 1 &&
-			value16 >= 1 && value16 <= 8))
-			return value16;
+	struct tiffer_entry entry = {};
+	while (tiffer_next_entry(&T, &entry)) {
+		int64_t orientation = 0;
+		if (G_UNLIKELY(entry.tag == TIFF_Orientation) &&
+			entry.type == SHORT && entry.remaining_count == 1 &&
+			tiffer_integer(&T, &entry, &orientation) &&
+			orientation >= 1 && orientation <= 8)
+			return orientation;
 	}
 	return FivIoOrientationUnknown;
 }
