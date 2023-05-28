@@ -176,6 +176,7 @@ static jv
 parse_exif_entry(jv o, const struct tiffer *T, struct tiffer_entry *entry,
 	const struct tiff_entry *info)
 {
+	const struct tiff_entry *info_begin = info;
 	static struct tiff_entry empty[] = {{}};
 	if (!info)
 		info = empty;
@@ -200,6 +201,9 @@ parse_exif_entry(jv o, const struct tiffer *T, struct tiffer_entry *entry,
 	} else if (entry->type == TIFFER_UNDEFINED && !info->values) {
 		// Several Exif entries of UNDEFINED type contain single-byte numbers.
 		v = parse_exif_undefined(entry);
+	} else if (info_begin == tiff_entries && entry->tag == TIFF_XMP &&
+		(entry->type == TIFFER_UNDEFINED || entry->type == TIFFER_BYTE)) {
+		v = jv_string_sized((const char *) entry->p, entry->remaining_count);
 	} else if (tiffer_real(T, entry, &real)) {
 		v = jv_array();
 		do v = jv_array_append(v, parse_exif_value(info->values, real));
