@@ -1844,11 +1844,10 @@ tiff_ep_find_jpeg_evaluate(const struct tiffer *T, struct tiff_ep_jpeg *out)
 	}
 
 	int64_t ipointer = 0, ilength = 0;
-	if (!tiffer_find_integer(T, tag_pointer, &ipointer) ||
-		!tiffer_find_integer(T, tag_length, &ilength) ||
-		ipointer <= 0 || ilength <= 0 ||
-		(uint64_t) ilength > SIZE_MAX ||
-		ipointer + ilength > (T->end - T->begin))
+	if (!tiffer_find_integer(T, tag_pointer, &ipointer) || ipointer <= 0 ||
+		!tiffer_find_integer(T, tag_length, &ilength) || ilength <= 0 ||
+		ipointer > T->end - T->begin ||
+		T->end - T->begin - ipointer < ilength)
 		return;
 
 	// Note that to get the largest JPEG,

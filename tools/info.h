@@ -92,8 +92,8 @@ static jv parse_jpeg(jv o, const uint8_t *p, size_t len);
 static jv parse_exif_ifd(struct tiffer *T, const struct tiff_entry *info);
 
 static bool
-parse_exif_subifds_entry(struct tiffer *T, const struct tiffer_entry *entry,
-	struct tiffer *subT)
+parse_exif_subifds_entry(const struct tiffer *T,
+	const struct tiffer_entry *entry, struct tiffer *subT)
 {
 	int64_t offset = 0;
 	return tiffer_integer(T, entry, &offset) &&
@@ -101,7 +101,7 @@ parse_exif_subifds_entry(struct tiffer *T, const struct tiffer_entry *entry,
 }
 
 static jv
-parse_exif_subifds(struct tiffer *T, struct tiffer_entry *entry,
+parse_exif_subifds(const struct tiffer *T, struct tiffer_entry *entry,
 	struct tiff_entry *info)
 {
 	struct tiffer subT = {};
@@ -173,7 +173,7 @@ parse_exif_extract_sole_array_element(jv a)
 }
 
 static jv
-parse_exif_entry(jv o, struct tiffer *T, struct tiffer_entry *entry,
+parse_exif_entry(jv o, const struct tiffer *T, struct tiffer_entry *entry,
 	const struct tiff_entry *info)
 {
 	static struct tiff_entry empty[] = {{}};
@@ -679,7 +679,7 @@ static struct tiff_entry mpf_entries[] = {
 };
 
 static uint32_t
-parse_mpf_mpentry(jv *a, const uint8_t *p, struct tiffer *T)
+parse_mpf_mpentry(jv *a, const uint8_t *p, const struct tiffer *T)
 {
 	uint32_t attrs = T->un->u32(p);
 	uint32_t offset = T->un->u32(p + 8);
@@ -725,7 +725,7 @@ parse_mpf_mpentry(jv *a, const uint8_t *p, struct tiffer *T)
 }
 
 static jv
-parse_mpf_index_entry(jv o, const uint8_t ***offsets, struct tiffer *T,
+parse_mpf_index_entry(jv o, const uint8_t ***offsets, const struct tiffer *T,
 	struct tiffer_entry *entry)
 {
 	// 5.2.3.3. MP Entry
@@ -738,6 +738,9 @@ parse_mpf_index_entry(jv o, const uint8_t ***offsets, struct tiffer *T,
 	jv a = jv_array_sized(count);
 	const uint8_t **out = *offsets = calloc(sizeof *out, count + 1);
 	for (uint32_t i = 0; i < count; i++) {
+		// 5.2.3.3.3. Individual Image Data Offset
+		// XXX: We might want to warn about out-of-bounds pointers,
+		// however T->end is for the MPF segment and ends too early.
 		uint32_t offset = parse_mpf_mpentry(&a, entry->p + i * 16, T);
 		if (offset)
 			*out++ = T->begin + offset;

@@ -15,9 +15,10 @@
 // CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 //
 
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-#include <stdbool.h>
 
 // --- Utilities ---------------------------------------------------------------
 
@@ -85,7 +86,7 @@ struct tiffer {
 static bool
 tiffer_u32(struct tiffer *self, uint32_t *u)
 {
-	if (self->p < self->begin || self->p + 4 > self->end)
+	if (self->end - self->p < 4)
 		return false;
 
 	*u = self->un->u32(self->p);
@@ -96,7 +97,7 @@ tiffer_u32(struct tiffer *self, uint32_t *u)
 static bool
 tiffer_u16(struct tiffer *self, uint16_t *u)
 {
-	if (self->p < self->begin || self->p + 2 > self->end)
+	if (self->end - self->p < 2)
 		return false;
 
 	*u = self->un->u16(self->p);
@@ -160,6 +161,9 @@ static bool
 tiffer_subifd(
 	const struct tiffer *self, uint32_t offset, struct tiffer *subreader)
 {
+	if (self->end - self->begin < offset)
+		return false;
+
 	*subreader = *self;
 	subreader->p = subreader->begin + offset;
 	return tiffer_u16(subreader, &subreader->remaining_fields);
@@ -323,14 +327,15 @@ tiffer_next_entry(struct tiffer *self, struct tiffer_entry *entry)
 	if (values_size <= sizeof offset) {
 		entry->p = self->p;
 		self->p += sizeof offset;
-	} else if (tiffer_u32(self, &offset)) {
+	} else if (tiffer_u32(self, &offset) && self->end - self->begin >= offset) {
 		entry->p = self->begin + offset;
 	} else {
 		return false;
 	}
 
 	// All entries are pre-checked not to overflow.
-	if (entry->p + values_size > self->end)
+	if (values_size > PTRDIFF_MAX ||
+		self->end - entry->p < (ptrdiff_t) values_size)
 		return false;
 
 	// Setting it at the end may provide an indication while debugging.
