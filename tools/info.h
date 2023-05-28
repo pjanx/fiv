@@ -631,53 +631,6 @@ parse_icc(jv o, const uint8_t *profile, size_t profile_len)
 
 // --- Multi-Picture Format ----------------------------------------------------
 
-enum {
-	MPF_MPFVersion = 45056,
-	MPF_NumberOfImages = 45057,
-	MPF_MPEntry = 45058,
-	MPF_ImageUIDList = 45059,
-	MPF_TotalFrames = 45060,
-
-	MPF_MPIndividualNum = 45313,
-	MPF_PanOrientation = 45569,
-	MPF_PanOverlap_H = 45570,
-	MPF_PanOverlap_V = 45571,
-	MPF_BaseViewpointNum = 45572,
-	MPF_ConvergenceAngle = 45573,
-	MPF_BaselineLength = 45574,
-	MPF_VerticalDivergence = 45575,
-	MPF_AxisDistance_X = 45576,
-	MPF_AxisDistance_Y = 45577,
-	MPF_AxisDistance_Z = 45578,
-	MPF_YawAngle = 45579,
-	MPF_PitchAngle = 45580,
-	MPF_RollAngle = 45581
-};
-
-static struct tiff_entry mpf_entries[] = {
-	{"MP Format Version Number", MPF_MPFVersion, NULL},
-	{"Number of Images", MPF_NumberOfImages, NULL},
-	{"MP Entry", MPF_MPEntry, NULL},
-	{"Individual Image Unique ID List", MPF_ImageUIDList, NULL},
-	{"Total Number of Captured Frames", MPF_TotalFrames, NULL},
-
-	{"MP Individual Image Number", MPF_MPIndividualNum, NULL},
-	{"Panorama Scanning Orientation", MPF_PanOrientation, NULL},
-	{"Panorama Horizontal Overlap", MPF_PanOverlap_H, NULL},
-	{"Panorama Vertical Overlap", MPF_PanOverlap_V, NULL},
-	{"Base Viewpoint Number", MPF_BaseViewpointNum, NULL},
-	{"Convergence Angle", MPF_ConvergenceAngle, NULL},
-	{"Baseline Length", MPF_BaselineLength, NULL},
-	{"Divergence Angle", MPF_VerticalDivergence, NULL},
-	{"Horizontal Axis Distance", MPF_AxisDistance_X, NULL},
-	{"Vertical Axis Distance", MPF_AxisDistance_Y, NULL},
-	{"Collimation Axis Distance", MPF_AxisDistance_Z, NULL},
-	{"Yaw Angle", MPF_YawAngle, NULL},
-	{"Pitch Angle", MPF_PitchAngle, NULL},
-	{"Roll Angle", MPF_RollAngle, NULL},
-	{}
-};
-
 static uint32_t
 parse_mpf_mpentry(jv *a, const uint8_t *p, const struct tiffer *T)
 {

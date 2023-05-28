@@ -35,6 +35,9 @@
 #
 # Digital Negative (DNG) Specification 1.5.0.0 (2019)
 # https://www.adobe.com/content/dam/acom/en/products/photoshop/pdfs/dng_spec_1.5.0.0.pdf
+#
+# CIPA DC-007-2021 (Multi-Picture Format)
+# https://www.cipa.jp/e/std/std-sec.html
 
 # TIFF 6.0
 = TIFF
@@ -444,3 +447,25 @@
 # Exif 2.3 4.6.7 (Notice it starts at 1, and collides with GPS.)
 = Exif Interoperability
 1, InteroperabilityIndex
+
+# CIPA DC-007-2021 5.2.3., 5.2.4. (But derive "field names" from "tag names".)
+= MPF
+45056, MP Format Version Number  # MPFVersion
+45057, Number of Images  # NumberOfImages
+45058, MP Entry  # MPEntry
+45059, Individual Image Unique ID List  # ImageUIDList
+45060, Total Number of Captured Frames  # TotalFrames
+45313, MP Individual Image Number  # MPIndividualNum
+45569, Panorama Scanning Orientation  # PanOrientation
+45570, Panorama Horizontal Overlap  # PanOverlap_H
+45571, Panorama Vertical Overlap  # PanOverlap_V
+45572, Base Viewpoint Number  # BaseViewpointNum
+45573, Convergence Angle  # ConvergenceAngle
+45574, Baseline Length  # BaselineLength
+45575, Divergence Angle  # VerticalDivergence
+45576, Horizontal Axis Distance  # AxisDistance_X
+45577, Vertical Axis Distance  # AxisDistance_Y
+45578, Collimation Axis Distance  # AxisDistance_Z
+45579, Yaw Angle  # YawAngle
+45580, Pitch Angle  # PitchAngle
+45581, Roll Angle  # RollAngle
