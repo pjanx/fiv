@@ -328,6 +328,21 @@ open_context_unref(gpointer data, G_GNUC_UNUSED GClosure *closure)
 }
 
 static void
+open_context_show_error_dialog(OpenContext *self, GError *error)
+{
+	GtkWindow *window = g_weak_ref_get(&self->window);
+
+	GtkWidget *dialog =
+		gtk_message_dialog_new(GTK_WINDOW(window), GTK_DIALOG_MODAL,
+			GTK_MESSAGE_ERROR, GTK_BUTTONS_CLOSE, "%s", error->message);
+	gtk_dialog_run(GTK_DIALOG(dialog));
+	gtk_widget_destroy(dialog);
+
+	g_clear_object(&window);
+	g_error_free(error);
+}
+
+static void
 open_context_launch(GtkWidget *widget, OpenContext *self)
 {
 	GdkAppLaunchContext *context =
@@ -342,8 +357,7 @@ open_context_launch(GtkWidget *widget, OpenContext *self)
 		(void) g_app_info_set_as_last_used_for_type(
 			self->app_info, self->content_type, NULL);
 	} else {
-		g_warning("%s", error->message);
-		g_error_free(error);
+		open_context_show_error_dialog(self, error);
 	}
 	g_list_free(files);
 	g_object_unref(context);
@@ -421,6 +435,16 @@ on_info_activate(G_GNUC_UNUSED GtkMenuItem *item, gpointer user_data)
 	fiv_context_menu_information(window, uri);
 	g_clear_object(&window);
 	g_free(uri);
+}
+
+static void
+on_trash_activate(G_GNUC_UNUSED GtkMenuItem *item, gpointer user_data)
+{
+	// TODO(p): Use g_file_trash_async(), for which we need a task manager.
+	OpenContext *ctx = user_data;
+	GError *error = NULL;
+	if (!g_file_trash(ctx->file, NULL, &error))
+		open_context_show_error_dialog(ctx, error);
 }
 
 static gboolean
@@ -503,6 +527,16 @@ fiv_context_menu_new(GtkWidget *widget, GFile *file)
 		ctx, open_context_unref, 0);
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
 
+	// TODO(p): Can we avoid using the "trash" string constant for this check?
+	if (!g_file_has_uri_scheme(file, "trash")) {
+		gtk_menu_shell_append(
+			GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
+
+		item = gtk_menu_item_new_with_mnemonic("Move to _Trash");
+		g_signal_connect_data(item, "activate", G_CALLBACK(on_trash_activate),
+			g_rc_box_acquire(ctx), open_context_unref, 0);
+		gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
+	}
 	if (type == G_FILE_TYPE_REGULAR) {
 		gtk_menu_shell_append(
 			GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
