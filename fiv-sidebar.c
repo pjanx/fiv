@@ -623,9 +623,9 @@ fiv_sidebar_new(FivIoModel *model)
 	gtk_container_set_focus_vadjustment(GTK_CONTAINER(sidebar_port),
 		gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(self)));
 
-	// TODO(p): There should be an extra signal to watch location changes only.
+	// TODO(p): Also connect to and process the subdirectories-changed signal.
 	self->model = g_object_ref(model);
-	g_signal_connect_swapped(self->model, "subdirectories-changed",
+	g_signal_connect_swapped(self->model, "reloaded",
 		G_CALLBACK(update_location), self);
 
 	return GTK_WIDGET(self);

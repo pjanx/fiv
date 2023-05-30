@@ -32,6 +32,7 @@
 #include "fiv-collection.h"
 #include "fiv-context-menu.h"
 #include "fiv-io.h"
+#include "fiv-io-model.h"
 #include "fiv-thumbnail.h"
 
 // --- Widget ------------------------------------------------------------------
@@ -78,7 +79,7 @@ struct _FivBrowser {
 	gboolean show_labels;               ///< Show labels underneath items
 
 	FivIoModel *model;                  ///< Filesystem model
-	GArray *entries;                    ///< []Entry
+	GPtrArray *entries;                 ///< []*Entry
 	GArray *layouted_rows;              ///< []Row
 	const Entry *selected;              ///< Selected entry or NULL
 
@@ -112,14 +113,25 @@ struct entry {
 	FivIoModelEntry *e;                 ///< Reference to model entry
 	cairo_surface_t *thumbnail;         ///< Prescaled thumbnail
 	GIcon *icon;                        ///< If no thumbnail, use this icon
+
+	gboolean removed;                   ///< Model announced removal
 };
 
+static Entry *
+entry_new(FivIoModelEntry *e)
+{
+	Entry *self = g_slice_alloc0(sizeof *self);
+	self->e = e;
+	return self;
+}
+
 static void
-entry_free(Entry *self)
+entry_destroy(Entry *self)
 {
 	fiv_io_model_entry_unref(self->e);
 	g_clear_pointer(&self->thumbnail, cairo_surface_destroy);
 	g_clear_object(&self->icon);
+	g_slice_free1(sizeof *self, self);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -202,7 +214,7 @@ relayout(FivBrowser *self, int width)
 	GArray *items = g_array_new(TRUE, TRUE, sizeof(Item));
 	int x = 0, y = padding.top;
 	for (guint i = 0; i < self->entries->len; i++) {
-		const Entry *entry = &g_array_index(self->entries, Entry, i);
+		const Entry *entry = self->entries->pdata[i];
 		if (!entry->thumbnail)
 			continue;
 
@@ -414,6 +426,15 @@ draw_row(FivBrowser *self, cairo_t *cr, const Row *row)
 			// the whole rectangle with the selection color.
 		}
 
+		// TODO(p): Come up with a better rendition.
+		if (item->entry->removed) {
+			cairo_move_to(cr, 0, border.top + extents.height + border.bottom);
+			cairo_line_to(cr, border.left + extents.width + border.right, 0);
+			cairo_set_source_rgb(cr, 0.5, 0.5, 0.5);
+			cairo_set_line_width(cr, 5);
+			cairo_stroke(cr);
+		}
+
 		if (self->show_labels) {
 			gtk_style_context_save(style);
 			gtk_style_context_add_class(style, "label");
@@ -522,14 +543,9 @@ entry_set_surface_user_data(const Entry *self)
 		NULL);
 }
 
-static void
-entry_add_thumbnail(gpointer data, gpointer user_data)
+static cairo_surface_t *
+entry_lookup_thumbnail(Entry *self, FivBrowser *browser)
 {
-	Entry *self = data;
-	g_clear_object(&self->icon);
-	g_clear_pointer(&self->thumbnail, cairo_surface_destroy);
-
-	FivBrowser *browser = FIV_BROWSER(user_data);
 	cairo_surface_t *cached =
 		g_hash_table_lookup(browser->thumbnail_cache, self->e->uri);
 	if (cached &&
@@ -537,18 +553,39 @@ entry_add_thumbnail(gpointer data, gpointer user_data)
 			&fiv_browser_key_mtime_msec) == (intptr_t) self->e->mtime_msec &&
 		(uintptr_t) cairo_surface_get_user_data(cached,
 			&fiv_browser_key_filesize) == (uintptr_t) self->e->filesize) {
-		self->thumbnail = cairo_surface_reference(cached);
 		// TODO(p): If this hit is low-quality, see if a high-quality thumbnail
 		// hasn't been produced without our knowledge (avoid launching a minion
 		// unnecessarily; we might also shift the concern there).
-	} else {
-		cairo_surface_t *found = fiv_thumbnail_lookup(
-			entry_system_wide_uri(self), self->e->mtime_msec, self->e->filesize,
-			browser->item_size);
-		self->thumbnail = rescale_thumbnail(found, browser->item_height);
+		return cairo_surface_reference(cached);
 	}
 
-	if (self->thumbnail) {
+	cairo_surface_t *found = fiv_thumbnail_lookup(
+		entry_system_wide_uri(self), self->e->mtime_msec, self->e->filesize,
+		browser->item_size);
+	return rescale_thumbnail(found, browser->item_height);
+}
+
+static void
+entry_add_thumbnail(gpointer data, gpointer user_data)
+{
+	Entry *self = data;
+	FivBrowser *browser = FIV_BROWSER(user_data);
+	if (self->removed) {
+		// Keep whatever size of thumbnail we had at the time up until reload.
+		// g_file_query_info() fails for removed files, so keep the icon, too.
+		if (self->icon) {
+			g_clear_pointer(&self->thumbnail, cairo_surface_destroy);
+		} else {
+			self->thumbnail =
+				rescale_thumbnail(self->thumbnail, browser->item_height);
+		}
+		return;
+	}
+
+	g_clear_object(&self->icon);
+	g_clear_pointer(&self->thumbnail, cairo_surface_destroy);
+
+	if ((self->thumbnail = entry_lookup_thumbnail(self, browser))) {
 		// Yes, this is a pointless action in case it's been found in the cache.
 		entry_set_surface_user_data(self);
 		return;
@@ -624,15 +661,15 @@ reload_thumbnails(FivBrowser *self)
 	GThreadPool *pool = g_thread_pool_new(
 		entry_add_thumbnail, self, g_get_num_processors(), FALSE, NULL);
 	for (guint i = 0; i < self->entries->len; i++)
-		g_thread_pool_push(pool, &g_array_index(self->entries, Entry, i), NULL);
+		g_thread_pool_push(pool, self->entries->pdata[i], NULL);
 	g_thread_pool_free(pool, FALSE, TRUE);
 
 	// Once a URI disappears from the model, its thumbnail is forgotten.
 	g_hash_table_remove_all(self->thumbnail_cache);
 
 	for (guint i = 0; i < self->entries->len; i++) {
-		Entry *entry = &g_array_index(self->entries, Entry, i);
-		if (entry->thumbnail) {
+		Entry *entry = self->entries->pdata[i];
+		if (!entry->removed && entry->thumbnail) {
 			g_hash_table_insert(self->thumbnail_cache, g_strdup(entry->e->uri),
 				cairo_surface_reference(entry->thumbnail));
 		}
@@ -790,7 +827,10 @@ thumbnailers_start(FivBrowser *self)
 
 	GQueue lq = G_QUEUE_INIT;
 	for (guint i = 0; i < self->entries->len; i++) {
-		Entry *entry = &g_array_index(self->entries, Entry, i);
+		Entry *entry = self->entries->pdata[i];
+		if (entry->removed)
+			continue;
+
 		if (entry->icon)
 			g_queue_push_tail(&self->thumbnailers_queue, entry);
 		else if (cairo_surface_get_user_data(
@@ -868,7 +908,7 @@ fiv_browser_finalize(GObject *gobject)
 {
 	FivBrowser *self = FIV_BROWSER(gobject);
 	thumbnailers_abort(self);
-	g_array_free(self->entries, TRUE);
+	g_ptr_array_free(self->entries, TRUE);
 	g_array_free(self->layouted_rows, TRUE);
 	if (self->model) {
 		g_signal_handlers_disconnect_by_data(self->model, self);
@@ -1774,8 +1814,8 @@ fiv_browser_init(FivBrowser *self)
 	gtk_widget_set_can_focus(GTK_WIDGET(self), TRUE);
 	gtk_widget_set_has_tooltip(GTK_WIDGET(self), TRUE);
 
-	self->entries = g_array_new(FALSE, TRUE, sizeof(Entry));
-	g_array_set_clear_func(self->entries, (GDestroyNotify) entry_free);
+	self->entries =
+		g_ptr_array_new_with_free_func((GDestroyNotify) entry_destroy);
 	self->layouted_rows = g_array_new(FALSE, TRUE, sizeof(Row));
 	g_array_set_clear_func(self->layouted_rows, (GDestroyNotify) row_free);
 	abort_button_tracking(self);
@@ -1810,9 +1850,8 @@ fiv_browser_init(FivBrowser *self)
 
 // --- Public interface --------------------------------------------------------
 
-// TODO(p): Later implement any arguments of this FivIoModel signal.
 static void
-on_model_files_changed(FivIoModel *model, FivBrowser *self)
+on_model_reloaded(FivIoModel *model, FivBrowser *self)
 {
 	g_return_if_fail(model == self->model);
 
@@ -1821,14 +1860,14 @@ on_model_files_changed(FivIoModel *model, FivBrowser *self)
 		selected_uri = g_strdup(self->selected->e->uri);
 
 	thumbnailers_abort(self);
-	g_array_set_size(self->entries, 0);
 	g_array_set_size(self->layouted_rows, 0);
+	g_ptr_array_set_size(self->entries, 0);
 
 	gsize len = 0;
 	FivIoModelEntry *const *files = fiv_io_model_get_files(self->model, &len);
 	for (gsize i = 0; i < len; i++) {
-		Entry e = {.e = fiv_io_model_entry_ref(files[i])};
-		g_array_append_val(self->entries, e);
+		g_ptr_array_add(
+			self->entries, entry_new(fiv_io_model_entry_ref(files[i])));
 	}
 
 	fiv_browser_select(self, selected_uri);
@@ -1836,6 +1875,55 @@ on_model_files_changed(FivIoModel *model, FivBrowser *self)
 
 	reload_thumbnails(self);
 	thumbnailers_start(self);
+}
+
+static void
+on_model_changed(FivIoModel *model, FivIoModelEntry *old, FivIoModelEntry *new,
+	FivBrowser *self)
+{
+	g_return_if_fail(model == self->model);
+
+	// Add new entries to the end, so as to not disturb the layout.
+	if (!old) {
+		g_ptr_array_add(
+			self->entries, entry_new(fiv_io_model_entry_ref(new)));
+
+		// TODO(p): Only process this one item, not everything at once.
+		// (This mainly has an effect on thumbnail-less entries.)
+		reload_thumbnails(self);
+		thumbnailers_start(self);
+		return;
+	}
+
+	Entry *found = NULL;
+	for (guint i = 0; i < self->entries->len; i++) {
+		Entry *entry = self->entries->pdata[i];
+		if (entry->e == old) {
+			found = entry;
+			break;
+		}
+	}
+	if (!found)
+		return;
+
+	// Rename entries in place, so as to not disturb the layout.
+	// XXX: This behaves differently from FivIoModel, and by extension fiv.c.
+	if (new) {
+		fiv_io_model_entry_unref(found->e);
+		found->e = fiv_io_model_entry_ref(new);
+		found->removed = FALSE;
+
+		// TODO(p): If there is a URI mismatch, don't reload thumbnails,
+		// so that there's no jumping around. Or, a bit more properly,
+		// move the thumbnail cache entry to the new URI.
+		// TODO(p): Only process this one item, not everything at once.
+		// (This mainly has an effect on thumbnail-less entries.)
+		reload_thumbnails(self);
+		thumbnailers_start(self);
+	} else {
+		found->removed = TRUE;
+		gtk_widget_queue_draw(GTK_WIDGET(self));
+	}
 }
 
 GtkWidget *
@@ -1846,9 +1934,11 @@ fiv_browser_new(FivIoModel *model)
 	FivBrowser *self = g_object_new(FIV_TYPE_BROWSER, NULL);
 	self->model = g_object_ref(model);
 
-	g_signal_connect(
-		self->model, "files-changed", G_CALLBACK(on_model_files_changed), self);
-	on_model_files_changed(self->model, self);
+	g_signal_connect(self->model, "reloaded",
+		G_CALLBACK(on_model_reloaded), self);
+	g_signal_connect(self->model, "files-changed",
+		G_CALLBACK(on_model_changed), self);
+	on_model_reloaded(self->model, self);
 	return GTK_WIDGET(self);
 }
 
@@ -1877,7 +1967,7 @@ fiv_browser_select(FivBrowser *self, const char *uri)
 		return;
 
 	for (guint i = 0; i < self->entries->len; i++) {
-		const Entry *entry = &g_array_index(self->entries, Entry, i);
+		const Entry *entry = self->entries->pdata[i];
 		if (!g_strcmp0(entry->e->uri, uri)) {
 			self->selected = entry;
 			scroll_to_selection(self);

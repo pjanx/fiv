@@ -19,11 +19,108 @@
 #include "fiv-io-model.h"
 #include "xdg.h"
 
-static GPtrArray *
-model_entry_array_new(void)
+GType
+fiv_io_model_sort_get_type(void)
 {
-	return g_ptr_array_new_with_free_func(g_rc_box_release);
+	static gsize guard;
+	if (g_once_init_enter(&guard)) {
+#define XX(name) {FIV_IO_MODEL_SORT_ ## name, \
+	"FIV_IO_MODEL_SORT_" #name, #name},
+		static const GEnumValue values[] = {FIV_IO_MODEL_SORTS(XX) {}};
+#undef XX
+		GType type = g_enum_register_static(
+			g_intern_static_string("FivIoModelSort"), values);
+		g_once_init_leave(&guard, type);
+	}
+	return guard;
 }
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+G_DEFINE_BOXED_TYPE(FivIoModelEntry, fiv_io_model_entry,
+	fiv_io_model_entry_ref, fiv_io_model_entry_unref)
+
+FivIoModelEntry *
+fiv_io_model_entry_ref(FivIoModelEntry *self)
+{
+	return g_rc_box_acquire(self);
+}
+
+void
+fiv_io_model_entry_unref(FivIoModelEntry *self)
+{
+	g_rc_box_release(self);
+}
+
+static size_t
+entry_strsize(const char *string)
+{
+	if (!string)
+		return 0;
+
+	return strlen(string) + 1;
+}
+
+static char *
+entry_strappend(char **p, const char *string, size_t size)
+{
+	if (!string)
+		return NULL;
+
+	char *destination = memcpy(*p, string, size);
+	*p += size;
+	return destination;
+}
+
+// See model_load_attributes for a (superset of a) list of required attributes.
+static FivIoModelEntry *
+entry_new(GFile *file, GFileInfo *info)
+{
+	gchar *uri = g_file_get_uri(file);
+	const gchar *target_uri = g_file_info_get_attribute_string(
+		info, G_FILE_ATTRIBUTE_STANDARD_TARGET_URI);
+	const gchar *display_name = g_file_info_get_display_name(info);
+
+	// TODO(p): Make it possible to use g_utf8_collate_key() instead,
+	// which does not use natural sorting.
+	gchar *parse_name = g_file_get_parse_name(file);
+	gchar *collate_key = g_utf8_collate_key_for_filename(parse_name, -1);
+	g_free(parse_name);
+
+	// The entries are immutable. Packing them into the structure
+	// should help memory usage as well as performance.
+	size_t size_uri          = entry_strsize(uri);
+	size_t size_target_uri   = entry_strsize(target_uri);
+	size_t size_display_name = entry_strsize(display_name);
+	size_t size_collate_key  = entry_strsize(collate_key);
+
+	FivIoModelEntry *entry = g_rc_box_alloc0(sizeof *entry +
+		size_uri +
+		size_target_uri +
+		size_display_name +
+		size_collate_key);
+
+	gchar *p = (gchar *) entry + sizeof *entry;
+	entry->uri          = entry_strappend(&p, uri, size_uri);
+	entry->target_uri   = entry_strappend(&p, target_uri, size_target_uri);
+	entry->display_name = entry_strappend(&p, display_name, size_display_name);
+	entry->collate_key  = entry_strappend(&p, collate_key, size_collate_key);
+
+	entry->filesize = (guint64) g_file_info_get_size(info);
+
+	GDateTime *mtime = g_file_info_get_modification_date_time(info);
+	if (mtime) {
+		entry->mtime_msec = g_date_time_to_unix(mtime) * 1000 +
+			g_date_time_get_microsecond(mtime) / 1000;
+		g_date_time_unref(mtime);
+	}
+
+	g_free(uri);
+	g_free(collate_key);
+	return entry;
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 struct _FivIoModel {
 	GObject parent_instance;
@@ -51,6 +148,7 @@ enum {
 static GParamSpec *model_properties[N_PROPERTIES];
 
 enum {
+	RELOADED,
 	FILES_CHANGED,
 	SUBDIRECTORIES_CHANGED,
 	LAST_SIGNAL,
@@ -60,6 +158,13 @@ enum {
 static guint model_signals[LAST_SIGNAL];
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+static GPtrArray *
+model_entry_array_new(void)
+{
+	return g_ptr_array_new_with_free_func(
+		(GDestroyNotify) fiv_io_model_entry_unref);
+}
 
 static gboolean
 model_supports(FivIoModel *self, const char *filename)
@@ -124,71 +229,28 @@ model_compare(gconstpointer a, gconstpointer b, gpointer user_data)
 	return result;
 }
 
-static size_t
-model_strsize(const char *string)
-{
-	if (!string)
-		return 0;
+static const char *model_load_attributes =
+	G_FILE_ATTRIBUTE_STANDARD_TYPE ","
+	G_FILE_ATTRIBUTE_STANDARD_NAME ","
+	G_FILE_ATTRIBUTE_STANDARD_SIZE ","
+	G_FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME ","
+	G_FILE_ATTRIBUTE_STANDARD_TARGET_URI ","
+	G_FILE_ATTRIBUTE_STANDARD_IS_HIDDEN ","
+	G_FILE_ATTRIBUTE_TIME_MODIFIED ","
+	G_FILE_ATTRIBUTE_TIME_MODIFIED_USEC;
 
-	return strlen(string) + 1;
-}
-
-static char *
-model_strappend(char **p, const char *string, size_t size)
+static GPtrArray *
+model_decide_placement(
+	FivIoModel *self, GFileInfo *info, GPtrArray *subdirs, GPtrArray *files)
 {
-	if (!string)
+	if (self->filtering && g_file_info_get_is_hidden(info))
 		return NULL;
-
-	char *destination = memcpy(*p, string, size);
-	*p += size;
-	return destination;
-}
-
-static FivIoModelEntry *
-model_entry_new(GFile *file, GFileInfo *info)
-{
-	gchar *uri = g_file_get_uri(file);
-	const gchar *target_uri = g_file_info_get_attribute_string(
-		info, G_FILE_ATTRIBUTE_STANDARD_TARGET_URI);
-	const gchar *display_name = g_file_info_get_display_name(info);
-
-	// TODO(p): Make it possible to use g_utf8_collate_key() instead,
-	// which does not use natural sorting.
-	gchar *parse_name = g_file_get_parse_name(file);
-	gchar *collate_key = g_utf8_collate_key_for_filename(parse_name, -1);
-	g_free(parse_name);
-
-	// The entries are immutable. Packing them into the structure
-	// should help memory usage as well as performance.
-	size_t size_uri          = model_strsize(uri);
-	size_t size_target_uri   = model_strsize(target_uri);
-	size_t size_display_name = model_strsize(display_name);
-	size_t size_collate_key  = model_strsize(collate_key);
-
-	FivIoModelEntry *entry = g_rc_box_alloc0(sizeof *entry +
-		size_uri +
-		size_target_uri +
-		size_display_name +
-		size_collate_key);
-
-	gchar *p = (gchar *) entry + sizeof *entry;
-	entry->uri          = model_strappend(&p, uri, size_uri);
-	entry->target_uri   = model_strappend(&p, target_uri, size_target_uri);
-	entry->display_name = model_strappend(&p, display_name, size_display_name);
-	entry->collate_key  = model_strappend(&p, collate_key, size_collate_key);
-
-	entry->filesize = (guint64) g_file_info_get_size(info);
-
-	GDateTime *mtime = g_file_info_get_modification_date_time(info);
-	if (mtime) {
-		entry->mtime_msec = g_date_time_to_unix(mtime) * 1000 +
-			g_date_time_get_microsecond(mtime) / 1000;
-		g_date_time_unref(mtime);
-	}
-
-	g_free(uri);
-	g_free(collate_key);
-	return entry;
+	if (g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY)
+		return subdirs;
+	if (!self->filtering ||
+		model_supports(self, g_file_info_get_name(info)))
+		return files;
+	return NULL;
 }
 
 static gboolean
@@ -200,16 +262,8 @@ model_reload_to(FivIoModel *self, GFile *directory,
 	if (files)
 		g_ptr_array_set_size(files, 0);
 
-	GFileEnumerator *enumerator = g_file_enumerate_children(directory,
-		G_FILE_ATTRIBUTE_STANDARD_TYPE ","
-		G_FILE_ATTRIBUTE_STANDARD_NAME ","
-		G_FILE_ATTRIBUTE_STANDARD_SIZE ","
-		G_FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME ","
-		G_FILE_ATTRIBUTE_STANDARD_TARGET_URI ","
-		G_FILE_ATTRIBUTE_STANDARD_IS_HIDDEN ","
-		G_FILE_ATTRIBUTE_TIME_MODIFIED ","
-		G_FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
-		G_FILE_QUERY_INFO_NONE, NULL, error);
+	GFileEnumerator *enumerator = g_file_enumerate_children(
+		directory, model_load_attributes, G_FILE_QUERY_INFO_NONE, NULL, error);
 	if (!enumerator)
 		return FALSE;
 
@@ -225,18 +279,11 @@ model_reload_to(FivIoModel *self, GFile *directory,
 		}
 		if (!info)
 			break;
-		if (self->filtering && g_file_info_get_is_hidden(info))
-			continue;
 
-		GPtrArray *target = NULL;
-		if (g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY)
-			target = subdirs;
-		else if (!self->filtering ||
-			model_supports(self, g_file_info_get_name(info)))
-			target = files;
-
+		GPtrArray *target =
+			model_decide_placement(self, info, subdirs, files);
 		if (target)
-			g_ptr_array_add(target, model_entry_new(child, info));
+			g_ptr_array_add(target, entry_new(child, info));
 	}
 	g_object_unref(enumerator);
 
@@ -253,9 +300,7 @@ model_reload(FivIoModel *self, GError **error)
 	// Note that this will clear all entries on failure.
 	gboolean result = model_reload_to(
 		self, self->directory, self->subdirs, self->files, error);
-
-	g_signal_emit(self, model_signals[FILES_CHANGED], 0);
-	g_signal_emit(self, model_signals[SUBDIRECTORIES_CHANGED], 0);
+	g_signal_emit(self, model_signals[RELOADED], 0);
 	return result;
 }
 
@@ -264,9 +309,144 @@ model_resort(FivIoModel *self)
 {
 	g_ptr_array_sort_with_data(self->subdirs, model_compare, self);
 	g_ptr_array_sort_with_data(self->files, model_compare, self);
+	g_signal_emit(self, model_signals[RELOADED], 0);
+}
 
-	g_signal_emit(self, model_signals[FILES_CHANGED], 0);
-	g_signal_emit(self, model_signals[SUBDIRECTORIES_CHANGED], 0);
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+static gint
+model_find(const GPtrArray *target, GFile *file, FivIoModelEntry **entry)
+{
+	for (guint i = 0; i < target->len; i++) {
+		FivIoModelEntry *e = target->pdata[i];
+		GFile *f = g_file_new_for_uri(e->uri);
+		gboolean match = g_file_equal(f, file);
+		g_object_unref(f);
+		if (match) {
+			*entry = e;
+			return i;
+		}
+	}
+	return -1;
+}
+
+static void
+on_monitor_changed(G_GNUC_UNUSED GFileMonitor *monitor, GFile *file,
+	GFile *other_file, GFileMonitorEvent event_type, gpointer user_data)
+{
+	FivIoModel *self = user_data;
+
+	FivIoModelEntry *old_entry = NULL;
+	gint files_index = model_find(self->files, file, &old_entry);
+	gint subdirs_index = model_find(self->subdirs, file, &old_entry);
+
+	enum { NONE, CHANGING, RENAMING, REMOVING, ADDING } action = NONE;
+	GFile *new_entry_file = NULL;
+	switch (event_type) {
+	case G_FILE_MONITOR_EVENT_CHANGED:
+	case G_FILE_MONITOR_EVENT_ATTRIBUTE_CHANGED:
+		action = CHANGING;
+		new_entry_file = file;
+		break;
+	case G_FILE_MONITOR_EVENT_RENAMED:
+		action = RENAMING;
+		new_entry_file = other_file;
+		break;
+	case G_FILE_MONITOR_EVENT_DELETED:
+	case G_FILE_MONITOR_EVENT_MOVED_OUT:
+		action = REMOVING;
+		break;
+	case G_FILE_MONITOR_EVENT_CREATED:
+	case G_FILE_MONITOR_EVENT_MOVED_IN:
+		action = ADDING;
+		old_entry = NULL;
+		new_entry_file = file;
+		break;
+
+	case G_FILE_MONITOR_EVENT_CHANGES_DONE_HINT:
+		// TODO(p): Figure out if we can't make use of _CHANGES_DONE_HINT.
+	case G_FILE_MONITOR_EVENT_PRE_UNMOUNT:
+	case G_FILE_MONITOR_EVENT_UNMOUNTED:
+		// TODO(p): Figure out how to handle _UNMOUNTED sensibly.
+	case G_FILE_MONITOR_EVENT_MOVED:
+		return;
+	}
+
+	FivIoModelEntry *new_entry = NULL;
+	GPtrArray *new_target = NULL;
+	if (new_entry_file) {
+		GError *error = NULL;
+		GFileInfo *info = g_file_query_info(new_entry_file,
+			model_load_attributes, G_FILE_QUERY_INFO_NONE, NULL, &error);
+		if (error) {
+			g_debug("monitor: %s", error->message);
+			g_error_free(error);
+			goto run;
+		}
+
+		if ((new_target =
+			model_decide_placement(self, info, self->subdirs, self->files)))
+			new_entry = entry_new(new_entry_file, info);
+		g_object_unref(info);
+
+		if ((files_index != -1 && new_target == self->subdirs) ||
+			(subdirs_index != -1 && new_target == self->files)) {
+			g_debug("monitor: ignoring transfer between files and subdirs");
+			goto out;
+		}
+	}
+
+run:
+	// Keep a reference alive so that signal handlers see the new arrays.
+	if (old_entry)
+		fiv_io_model_entry_ref(old_entry);
+
+	if (files_index != -1 || new_target == self->files) {
+		if (action == CHANGING) {
+			g_assert(new_entry != NULL);
+			fiv_io_model_entry_unref(self->files->pdata[files_index]);
+			self->files->pdata[files_index] =
+				fiv_io_model_entry_ref(new_entry);
+		}
+		if (action == REMOVING || action == RENAMING)
+			g_ptr_array_remove_index(self->files, files_index);
+		if (action == RENAMING || action == ADDING) {
+			g_assert(new_entry != NULL);
+			g_ptr_array_add(self->files, fiv_io_model_entry_ref(new_entry));
+		}
+
+		g_signal_emit(self, model_signals[FILES_CHANGED],
+			0, old_entry, new_entry);
+	}
+	if (subdirs_index != -1 || new_target == self->subdirs) {
+		if (action == CHANGING) {
+			g_assert(new_entry != NULL);
+			fiv_io_model_entry_unref(self->subdirs->pdata[subdirs_index]);
+			self->subdirs->pdata[subdirs_index] =
+				fiv_io_model_entry_ref(new_entry);
+		}
+		if (action == REMOVING || action == RENAMING)
+			g_ptr_array_remove_index(self->subdirs, subdirs_index);
+		if (action == RENAMING || action == ADDING) {
+			g_assert(new_entry != NULL);
+			g_ptr_array_add(self->subdirs, fiv_io_model_entry_ref(new_entry));
+		}
+
+		g_signal_emit(self, model_signals[SUBDIRECTORIES_CHANGED],
+			0, old_entry, new_entry);
+	}
+
+	// NOTE: It would make sense to do
+	//   g_ptr_array_sort_with_data(self->{files,subdirs}, model_compare, self);
+	// but then the iteration behaviour of fiv.c would differ from what's shown
+	// in the browser. Perhaps we need to use an index-based, fully-synchronized
+	// interface similar to GListModel::items-changed.
+
+	if (old_entry)
+		fiv_io_model_entry_unref(old_entry);
+out:
+	if (new_entry)
+		fiv_io_model_entry_unref(new_entry);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -406,7 +586,7 @@ fiv_io_model_get_property(
 		g_value_set_boolean(value, self->filtering);
 		break;
 	case PROP_SORT_FIELD:
-		g_value_set_int(value, self->sort_field);
+		g_value_set_enum(value, self->sort_field);
 		break;
 	case PROP_SORT_DESCENDING:
 		g_value_set_boolean(value, self->sort_descending);
@@ -430,8 +610,8 @@ fiv_io_model_set_property(
 		}
 		break;
 	case PROP_SORT_FIELD:
-		if ((int) self->sort_field != g_value_get_int(value)) {
-			self->sort_field = g_value_get_int(value);
+		if ((int) self->sort_field != g_value_get_enum(value)) {
+			self->sort_field = g_value_get_enum(value);
 			g_object_notify_by_pspec(object, model_properties[property_id]);
 			model_resort(self);
 		}
@@ -459,24 +639,28 @@ fiv_io_model_class_init(FivIoModelClass *klass)
 	model_properties[PROP_FILTERING] = g_param_spec_boolean(
 		"filtering", "Filtering", "Only show non-hidden, supported entries",
 		TRUE, G_PARAM_READWRITE);
-	// TODO(p): GObject enumerations are annoying, but this should be one.
-	model_properties[PROP_SORT_FIELD] = g_param_spec_int(
+	model_properties[PROP_SORT_FIELD] = g_param_spec_enum(
 		"sort-field", "Sort field", "Sort order",
-		FIV_IO_MODEL_SORT_MIN, FIV_IO_MODEL_SORT_MAX,
-		FIV_IO_MODEL_SORT_NAME, G_PARAM_READWRITE);
+		FIV_TYPE_IO_MODEL_SORT, FIV_IO_MODEL_SORT_NAME, G_PARAM_READWRITE);
 	model_properties[PROP_SORT_DESCENDING] = g_param_spec_boolean(
 		"sort-descending", "Sort descending", "Use reverse sort order",
 		FALSE, G_PARAM_READWRITE);
 	g_object_class_install_properties(
 		object_class, N_PROPERTIES, model_properties);
 
-	// TODO(p): Arguments something like: index, added, removed.
+	// All entries might have changed.
+	model_signals[RELOADED] =
+		g_signal_new("reloaded", G_TYPE_FROM_CLASS(klass), 0, 0,
+			NULL, NULL, NULL, G_TYPE_NONE, 0);
+
 	model_signals[FILES_CHANGED] =
 		g_signal_new("files-changed", G_TYPE_FROM_CLASS(klass), 0, 0,
-			NULL, NULL, NULL, G_TYPE_NONE, 0);
+			NULL, NULL, NULL,
+			G_TYPE_NONE, 2, FIV_TYPE_IO_MODEL_ENTRY, FIV_TYPE_IO_MODEL_ENTRY);
 	model_signals[SUBDIRECTORIES_CHANGED] =
 		g_signal_new("subdirectories-changed", G_TYPE_FROM_CLASS(klass), 0, 0,
-			NULL, NULL, NULL, G_TYPE_NONE, 0);
+			NULL, NULL, NULL,
+			G_TYPE_NONE, 2, FIV_TYPE_IO_MODEL_ENTRY, FIV_TYPE_IO_MODEL_ENTRY);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -511,9 +695,15 @@ fiv_io_model_open(FivIoModel *self, GFile *directory, GError **error)
 	g_clear_object(&self->monitor);
 	self->directory = g_object_ref(directory);
 
-	// TODO(p): Process the ::changed signal.
-	self->monitor = g_file_monitor_directory(
-		directory, G_FILE_MONITOR_WATCH_MOVES, NULL, NULL /* error */);
+	GError *e = NULL;
+	if ((self->monitor = g_file_monitor_directory(
+			 directory, G_FILE_MONITOR_WATCH_MOVES, NULL, &e))) {
+		g_signal_connect(self->monitor, "changed",
+			G_CALLBACK(on_monitor_changed), self);
+	} else {
+		g_debug("directory monitoring failed: %s", e->message);
+		g_error_free(e);
+	}
 	return model_reload(self, error);
 }
 

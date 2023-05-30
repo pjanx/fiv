@@ -21,7 +21,7 @@
 #include <gio/gio.h>
 #include <glib.h>
 
-// And this is how you avoid glib-mkenums.
+// Avoid glib-mkenums.
 typedef enum _FivThumbnailSize {
 #define FIV_THUMBNAIL_SIZES(XX) \
 	XX(SMALL,  128, "normal") \

@@ -733,7 +733,7 @@ load_directory_without_switching(const char *uri)
 	GError *error = NULL;
 	GFile *file = g_file_new_for_uri(g.directory);
 	if (fiv_io_model_open(g.model, file, &error)) {
-		// This is handled by our ::files-changed callback.
+		// This is handled by our ::reloaded callback.
 	} else if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED)) {
 		g_error_free(error);
 	} else {
@@ -797,7 +797,7 @@ go_forward(void)
 }
 
 static void
-on_model_files_changed(FivIoModel *model, G_GNUC_UNUSED gpointer user_data)
+on_model_reloaded(FivIoModel *model, G_GNUC_UNUSED gpointer user_data)
 {
 	g_return_if_fail(model == g.model);
 
@@ -808,6 +808,13 @@ on_model_files_changed(FivIoModel *model, G_GNUC_UNUSED gpointer user_data)
 
 	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_FILE_PREVIOUS], files_len > 1);
 	gtk_widget_set_sensitive(g.toolbar[TOOLBAR_FILE_NEXT], files_len > 1);
+}
+
+static void
+on_model_files_changed(FivIoModel *model, G_GNUC_UNUSED FivIoModelEntry *old,
+	G_GNUC_UNUSED FivIoModelEntry *new, G_GNUC_UNUSED gpointer user_data)
+{
+	on_model_reloaded(model, NULL);
 }
 
 static void
@@ -838,7 +845,8 @@ on_sort_field(G_GNUC_UNUSED GtkToggleButton *button, gpointer data)
 	if (!active)
 		return;
 
-	int old = -1, new = (int) (intptr_t) data;
+	FivIoModelSort old = FIV_IO_MODEL_SORT_COUNT;
+	FivIoModelSort new = (FivIoModelSort) (intptr_t) data;
 	g_object_get(g.model, "sort-field", &old, NULL);
 	if (old != new)
 		g_object_set(g.model, "sort-field", new, NULL);
@@ -1206,7 +1214,7 @@ static void
 on_notify_thumbnail_size(
 	GObject *object, GParamSpec *param_spec, G_GNUC_UNUSED gpointer user_data)
 {
-	FivThumbnailSize size = 0;
+	FivThumbnailSize size = FIV_THUMBNAIL_SIZE_COUNT;
 	g_object_get(object, g_param_spec_get_name(param_spec), &size, NULL);
 	gtk_widget_set_sensitive(
 		g.browsebar[BROWSEBAR_PLUS], size < FIV_THUMBNAIL_SIZE_MAX);
@@ -2253,6 +2261,8 @@ main(int argc, char *argv[])
 	fiv_collection_register();
 
 	g.model = g_object_new(FIV_TYPE_IO_MODEL, NULL);
+	g_signal_connect(g.model, "reloaded",
+		G_CALLBACK(on_model_reloaded), NULL);
 	g_signal_connect(g.model, "files-changed",
 		G_CALLBACK(on_model_files_changed), NULL);
 
