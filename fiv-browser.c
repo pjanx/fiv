@@ -1131,7 +1131,9 @@ open_entry(GtkWidget *self, const Entry *entry, gboolean new_window)
 static void
 show_context_menu(GtkWidget *widget, GFile *file)
 {
-	gtk_menu_popup_at_pointer(fiv_context_menu_new(widget, file), NULL);
+	GtkMenu *menu = fiv_context_menu_new(widget, file);
+	if (menu)
+		gtk_menu_popup_at_pointer(menu, NULL);
 }
 
 static void
