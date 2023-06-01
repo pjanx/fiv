@@ -402,7 +402,7 @@ draw_row(FivBrowser *self, cairo_t *cr, const Row *row)
 
 		// Performance optimization--specifically targeting the checkerboard.
 		if (cairo_image_surface_get_format(item->entry->thumbnail) !=
-				CAIRO_FORMAT_RGB24) {
+				CAIRO_FORMAT_RGB24 || item->entry->removed) {
 			gtk_render_background(style, cr, border.left, border.top,
 				extents.width, extents.height);
 		}
@@ -418,21 +418,39 @@ draw_row(FivBrowser *self, cairo_t *cr, const Row *row)
 			cairo_mask_surface(
 				cr, item->entry->thumbnail, border.left, border.top);
 		} else {
+			// Distinguish removed items by rendering them only faintly.
+			if (item->entry->removed)
+				cairo_push_group(cr);
+
 			cairo_set_source_surface(
 				cr, item->entry->thumbnail, border.left, border.top);
 			cairo_paint(cr);
 
-			// Here, we could consider multiplying
+			// Here, we could also consider multiplying
 			// the whole rectangle with the selection color.
+			if (item->entry->removed) {
+				cairo_pop_group_to_source(cr);
+				cairo_paint_with_alpha(cr, 0.25);
+			}
 		}
 
-		// TODO(p): Come up with a better rendition.
+		// This rendition is about the best I could come up with.
+		// It might be possible to use more such emblems with entries,
+		// though they would deserve some kind of a blur-glow.
 		if (item->entry->removed) {
-			cairo_move_to(cr, 0, border.top + extents.height + border.bottom);
-			cairo_line_to(cr, border.left + extents.width + border.right, 0);
-			cairo_set_source_rgb(cr, 0.5, 0.5, 0.5);
-			cairo_set_line_width(cr, 5);
-			cairo_stroke(cr);
+			int size = 32;
+			cairo_surface_t *cross = gtk_icon_theme_load_surface(
+				gtk_icon_theme_get_default(), "cross-large-symbolic",
+				size, gtk_widget_get_scale_factor(GTK_WIDGET(self)),
+				gtk_widget_get_window(GTK_WIDGET(self)),
+				GTK_ICON_LOOKUP_FORCE_SYMBOLIC, NULL);
+			if (cross) {
+				cairo_set_source_rgb(cr, 1, 0, 0);
+				cairo_mask_surface(cr, cross,
+					border.left + extents.width - size - size / 4,
+					border.top + extents.height - size - size / 4);
+				cairo_surface_destroy(cross);
+			}
 		}
 
 		if (self->show_labels) {
