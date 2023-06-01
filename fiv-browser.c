@@ -674,6 +674,26 @@ materialize_icon(FivBrowser *self, Entry *entry)
 }
 
 static void
+reload_one_thumbnail_finish(FivBrowser *self, Entry *entry)
+{
+	if (!entry->removed && entry->thumbnail) {
+		g_hash_table_insert(self->thumbnail_cache, g_strdup(entry->e->uri),
+			cairo_surface_reference(entry->thumbnail));
+	}
+
+	materialize_icon(self, entry);
+}
+
+static void
+reload_one_thumbnail(FivBrowser *self, Entry *entry)
+{
+	entry_add_thumbnail(entry, self);
+	reload_one_thumbnail_finish(self, entry);
+
+	gtk_widget_queue_resize(GTK_WIDGET(self));
+}
+
+static void
 reload_thumbnails(FivBrowser *self)
 {
 	GThreadPool *pool = g_thread_pool_new(
@@ -684,16 +704,8 @@ reload_thumbnails(FivBrowser *self)
 
 	// Once a URI disappears from the model, its thumbnail is forgotten.
 	g_hash_table_remove_all(self->thumbnail_cache);
-
-	for (guint i = 0; i < self->entries->len; i++) {
-		Entry *entry = self->entries->pdata[i];
-		if (!entry->removed && entry->thumbnail) {
-			g_hash_table_insert(self->thumbnail_cache, g_strdup(entry->e->uri),
-				cairo_surface_reference(entry->thumbnail));
-		}
-
-		materialize_icon(self, entry);
-	}
+	for (guint i = 0; i < self->entries->len; i++)
+		reload_one_thumbnail_finish(self, self->entries->pdata[i]);
 
 	gtk_widget_queue_resize(GTK_WIDGET(self));
 }
@@ -1903,12 +1915,11 @@ on_model_changed(FivIoModel *model, FivIoModelEntry *old, FivIoModelEntry *new,
 
 	// Add new entries to the end, so as to not disturb the layout.
 	if (!old) {
-		g_ptr_array_add(
-			self->entries, entry_new(fiv_io_model_entry_ref(new)));
+		Entry *entry = entry_new(fiv_io_model_entry_ref(new));
+		g_ptr_array_add(self->entries, entry);
 
-		// TODO(p): Only process this one item, not everything at once.
-		// (This mainly has an effect on thumbnail-less entries.)
-		reload_thumbnails(self);
+		reload_one_thumbnail(self, entry);
+		// TODO(p): Try to add to thumbnailer queue if already started.
 		thumbnailers_start(self);
 		return;
 	}
@@ -1934,9 +1945,8 @@ on_model_changed(FivIoModel *model, FivIoModelEntry *old, FivIoModelEntry *new,
 		// TODO(p): If there is a URI mismatch, don't reload thumbnails,
 		// so that there's no jumping around. Or, a bit more properly,
 		// move the thumbnail cache entry to the new URI.
-		// TODO(p): Only process this one item, not everything at once.
-		// (This mainly has an effect on thumbnail-less entries.)
-		reload_thumbnails(self);
+		reload_one_thumbnail(self, found);
+		// TODO(p): Try to add to thumbnailer queue if already started.
 		thumbnailers_start(self);
 	} else {
 		found->removed = TRUE;
