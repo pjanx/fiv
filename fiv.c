@@ -2087,80 +2087,6 @@ static const char stylesheet[] = "@define-color fiv-tile @content_view_bg; \
 	} \
 	.fiv-information label { padding: 0 4px; }";
 
-static FivThumbnailSize
-output_thumbnail_prologue(gchar **uris, const char *size_arg)
-{
-	if (!uris)
-		exit_fatal("No path given");
-	if (uris[1])
-		exit_fatal("Only one thumbnail at a time may be produced");
-
-	FivThumbnailSize size = FIV_THUMBNAIL_SIZE_COUNT;
-	if (size_arg) {
-		for (size = 0; size < FIV_THUMBNAIL_SIZE_COUNT; size++) {
-			if (!strcmp(
-					fiv_thumbnail_sizes[size].thumbnail_spec_name, size_arg))
-				break;
-		}
-		if (size >= FIV_THUMBNAIL_SIZE_COUNT)
-			exit_fatal("unknown thumbnail size: %s", size_arg);
-	}
-
-#ifdef G_OS_WIN32
-	_setmode(fileno(stdout), _O_BINARY);
-#endif
-	return size;
-}
-
-static void
-output_thumbnail_for_search(gchar **uris, const char *size_arg)
-{
-	FivThumbnailSize size = output_thumbnail_prologue(uris, size_arg);
-
-	GError *error = NULL;
-	GFile *file = g_file_new_for_uri(uris[0]);
-	cairo_surface_t *surface = NULL;
-	GBytes *bytes = NULL;
-	if ((surface = fiv_thumbnail_produce(file, size, &error)) &&
-		(bytes = fiv_io_serialize_for_search(surface, &error))) {
-		fwrite(
-			g_bytes_get_data(bytes, NULL), 1, g_bytes_get_size(bytes), stdout);
-		g_bytes_unref(bytes);
-	} else {
-		g_assert(error != NULL);
-	}
-
-	g_object_unref(file);
-	if (error)
-		exit_fatal("%s", error->message);
-
-	cairo_surface_destroy(surface);
-}
-
-static void
-output_thumbnail(gchar **uris, gboolean extract, const char *size_arg)
-{
-	FivThumbnailSize size = output_thumbnail_prologue(uris, size_arg);
-
-	GError *error = NULL;
-	GFile *file = g_file_new_for_uri(uris[0]);
-	cairo_surface_t *surface = NULL;
-	if (extract && (surface = fiv_thumbnail_extract(file, size, &error)))
-		fiv_io_serialize_to_stdout(surface, FIV_IO_SERIALIZE_LOW_QUALITY);
-	else if (size_arg &&
-		(g_clear_error(&error),
-			(surface = fiv_thumbnail_produce(file, size, &error))))
-		fiv_io_serialize_to_stdout(surface, 0);
-	else
-		g_assert(error != NULL);
-
-	g_object_unref(file);
-	if (error)
-		exit_fatal("%s", error->message);
-
-	cairo_surface_destroy(surface);
-}
-
 static void
 on_app_startup(GApplication *app, G_GNUC_UNUSED gpointer user_data)
 {
@@ -2357,6 +2283,82 @@ on_app_activate(
 	}
 
 	gtk_widget_show(g.window);
+}
+
+// --- Plumbing ----------------------------------------------------------------
+
+static FivThumbnailSize
+output_thumbnail_prologue(gchar **uris, const char *size_arg)
+{
+	if (!uris)
+		exit_fatal("No path given");
+	if (uris[1])
+		exit_fatal("Only one thumbnail at a time may be produced");
+
+	FivThumbnailSize size = FIV_THUMBNAIL_SIZE_COUNT;
+	if (size_arg) {
+		for (size = 0; size < FIV_THUMBNAIL_SIZE_COUNT; size++) {
+			if (!strcmp(
+					fiv_thumbnail_sizes[size].thumbnail_spec_name, size_arg))
+				break;
+		}
+		if (size >= FIV_THUMBNAIL_SIZE_COUNT)
+			exit_fatal("unknown thumbnail size: %s", size_arg);
+	}
+
+#ifdef G_OS_WIN32
+	_setmode(fileno(stdout), _O_BINARY);
+#endif
+	return size;
+}
+
+static void
+output_thumbnail_for_search(gchar **uris, const char *size_arg)
+{
+	FivThumbnailSize size = output_thumbnail_prologue(uris, size_arg);
+
+	GError *error = NULL;
+	GFile *file = g_file_new_for_uri(uris[0]);
+	cairo_surface_t *surface = NULL;
+	GBytes *bytes = NULL;
+	if ((surface = fiv_thumbnail_produce(file, size, &error)) &&
+		(bytes = fiv_io_serialize_for_search(surface, &error))) {
+		fwrite(
+			g_bytes_get_data(bytes, NULL), 1, g_bytes_get_size(bytes), stdout);
+		g_bytes_unref(bytes);
+	} else {
+		g_assert(error != NULL);
+	}
+
+	g_object_unref(file);
+	if (error)
+		exit_fatal("%s", error->message);
+
+	cairo_surface_destroy(surface);
+}
+
+static void
+output_thumbnail(gchar **uris, gboolean extract, const char *size_arg)
+{
+	FivThumbnailSize size = output_thumbnail_prologue(uris, size_arg);
+
+	GError *error = NULL;
+	GFile *file = g_file_new_for_uri(uris[0]);
+	cairo_surface_t *surface = NULL;
+	if (extract && (surface = fiv_thumbnail_extract(file, size, &error)))
+		fiv_io_serialize_to_stdout(surface, FIV_IO_SERIALIZE_LOW_QUALITY);
+	else if (size_arg &&
+		(g_clear_error(&error),
+			(surface = fiv_thumbnail_produce(file, size, &error))))
+		fiv_io_serialize_to_stdout(surface, 0);
+	else
+		g_assert(error != NULL);
+
+	g_object_unref(file);
+	if (error)
+		exit_fatal("%s", error->message);
+
+	cairo_surface_destroy(surface);
 }
 
 static gint
