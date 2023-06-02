@@ -2161,89 +2161,12 @@ output_thumbnail(gchar **uris, gboolean extract, const char *size_arg)
 	cairo_surface_destroy(surface);
 }
 
-int
-main(int argc, char *argv[])
+static void
+on_app_startup(GApplication *app, G_GNUC_UNUSED gpointer user_data)
 {
-	gboolean show_version = FALSE, show_supported_media_types = FALSE,
-		invalidate_cache = FALSE, browse = FALSE, extract_thumbnail = FALSE;
-	gchar **args = NULL, *thumbnail_size = NULL, *thumbnail_size_search = NULL;
-	const GOptionEntry options[] = {
-		{G_OPTION_REMAINING, 0, 0, G_OPTION_ARG_FILENAME_ARRAY, &args,
-			NULL, "[PATH | URI]..."},
-		{"browse", 0, G_OPTION_FLAG_IN_MAIN,
-			G_OPTION_ARG_NONE, &browse,
-			"Start in filesystem browsing mode", NULL},
-		{"invalidate-cache", 0, G_OPTION_FLAG_IN_MAIN,
-			G_OPTION_ARG_NONE, &invalidate_cache,
-			"Invalidate the wide thumbnail cache", NULL},
-		{"list-supported-media-types", 0, G_OPTION_FLAG_IN_MAIN,
-			G_OPTION_ARG_NONE, &show_supported_media_types,
-			"Output supported media types and exit", NULL},
-		{"version", 'V', G_OPTION_FLAG_IN_MAIN, G_OPTION_ARG_NONE,
-			&show_version, "Output version information and exit", NULL},
-		{},
-	};
-	const GOptionEntry options_internal[] = {
-		{"extract-thumbnail", 0, 0,
-			G_OPTION_ARG_NONE, &extract_thumbnail,
-			"Output any embedded thumbnail (superseding --thumbnail)", NULL},
-		{"thumbnail", 0, 0,
-			G_OPTION_ARG_STRING, &thumbnail_size,
-			"Generate thumbnails, up to SIZE, and output that size", "SIZE"},
-		{"thumbnail-for-search", 0, 0,
-			G_OPTION_ARG_STRING, &thumbnail_size_search,
-			"Output an image file suitable for searching by content", "SIZE"},
-		{},
-	};
-
-	GOptionContext *context =
-		g_option_context_new(" - Image browser and viewer");
-	g_option_context_add_group(context, gtk_get_option_group(TRUE));
-	g_option_context_add_main_entries(context, options, NULL);
-
-	GOptionGroup *internals = g_option_group_new(
-		"internal", "Internal Options:", "Show internal options", NULL, NULL);
-	g_option_group_add_entries(internals, options_internal);
-	g_option_context_add_group(context, internals);
-
-	GError *error = NULL;
-	gboolean initialized =
-		g_option_context_parse(context, &argc, &argv, &error);
-	g_option_context_free(context);
-	if (show_version) {
-		const char *version = PROJECT_VERSION;
-		printf("%s %s\n", PROJECT_NAME, &version[*version == 'v']);
-		return 0;
-	}
-	if (show_supported_media_types) {
-		char **types = fiv_io_all_supported_media_types();
-		for (char **p = types; *p; p++)
-			g_print("%s\n", *p);
-		g_strfreev(types);
-		return 0;
-	}
-	if (invalidate_cache) {
-		fiv_thumbnail_invalidate();
-		return 0;
-	}
-	if (!initialized)
-		exit_fatal("%s", error->message);
-
-	// Normalize all arguments to URIs.
-	for (gsize i = 0; args && args[i]; i++) {
-		GFile *resolved = g_file_new_for_commandline_arg(args[i]);
-		g_free(args[i]);
-		args[i] = g_file_get_uri(resolved);
-		g_object_unref(resolved);
-	}
-	if (thumbnail_size_search) {
-		output_thumbnail_for_search(args, thumbnail_size_search);
-		return 0;
-	}
-	if (extract_thumbnail || thumbnail_size) {
-		output_thumbnail(args, extract_thumbnail, thumbnail_size);
-		return 0;
-	}
+	// We can't prevent GApplication from adding --gapplication-service.
+	if (g_application_get_flags(app) & G_APPLICATION_IS_SERVICE)
+		exit(EXIT_FAILURE);
 
 	// It doesn't make much sense to have command line arguments able to
 	// resolve to the VFS they may end up being contained within.
@@ -2346,9 +2269,9 @@ main(int argc, char *argv[])
 	gtk_container_add(GTK_CONTAINER(g.stack), g.view_box);
 	gtk_container_add(GTK_CONTAINER(g.stack), g.browser_paned);
 
-	g.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-	g_signal_connect(g.window, "destroy",
-		G_CALLBACK(gtk_main_quit), NULL);
+	g.window = gtk_application_window_new(GTK_APPLICATION(app));
+	g_signal_connect_swapped(g.window, "destroy",
+		G_CALLBACK(g_application_quit), app);
 	g_signal_connect(g.window, "key-press-event",
 		G_CALLBACK(on_key_press), NULL);
 	g_signal_connect(g.window, "window-state-event",
@@ -2399,24 +2322,34 @@ main(int argc, char *argv[])
 
 	// XXX: The widget wants to read the display's profile. The realize is ugly.
 	gtk_widget_realize(g.view);
+}
 
+static struct {
+	gboolean browse, extract_thumbnail;
+	gchar **args, *thumbnail_size, *thumbnail_size_search;
+} o;
+
+static void
+on_app_activate(
+	G_GNUC_UNUSED GApplication *app, G_GNUC_UNUSED gpointer user_data)
+{
 	// XXX: We follow the behaviour of Firefox and Eye of GNOME, which both
 	// interpret multiple command line arguments differently, as a collection.
 	// However, single-element collections are unrepresentable this way.
 	// Should we allow multiple targets only in a special new mode?
 	g.files_index = -1;
-	if (args) {
-		const gchar *target = *args;
-		if (args[1]) {
-			fiv_collection_reload(args);
+	if (o.args) {
+		const gchar *target = *o.args;
+		if (o.args[1]) {
+			fiv_collection_reload(o.args);
 			target = FIV_COLLECTION_SCHEME ":/";
 		}
 
 		GFile *file = g_file_new_for_uri(target);
-		open_any_file(file, browse);
+		open_any_file(file, o.browse);
 		g_object_unref(file);
-		g_strfreev(args);
 	}
+
 	if (!g.directory) {
 		GFile *file = g_file_new_for_path(".");
 		open_any_file(file, FALSE);
@@ -2424,6 +2357,103 @@ main(int argc, char *argv[])
 	}
 
 	gtk_widget_show(g.window);
-	gtk_main();
-	return 0;
+}
+
+static gint
+on_app_handle_local_options(G_GNUC_UNUSED GApplication *app,
+	GVariantDict *options, G_GNUC_UNUSED gpointer user_data)
+{
+	if (g_variant_dict_contains(options, "version")) {
+		const char *version = PROJECT_VERSION;
+		printf("%s %s\n", PROJECT_NAME, &version[*version == 'v']);
+		return 0;
+	}
+	if (g_variant_dict_contains(options, "list-supported-media-types")) {
+		char **types = fiv_io_all_supported_media_types();
+		for (char **p = types; *p; p++)
+			g_print("%s\n", *p);
+		g_strfreev(types);
+		return 0;
+	}
+	if (g_variant_dict_contains(options, "invalidate-cache")) {
+		fiv_thumbnail_invalidate();
+		return 0;
+	}
+
+	// Normalize all arguments to URIs, and run thumbnailing modes first.
+	for (gsize i = 0; o.args && o.args[i]; i++) {
+		GFile *resolved = g_file_new_for_commandline_arg(o.args[i]);
+		g_free(o.args[i]);
+		o.args[i] = g_file_get_uri(resolved);
+		g_object_unref(resolved);
+	}
+
+	// These come from an option group that doesn't get copied to "options".
+	if (o.thumbnail_size_search) {
+		output_thumbnail_for_search(o.args, o.thumbnail_size_search);
+		return 0;
+	}
+	if (o.extract_thumbnail || o.thumbnail_size) {
+		output_thumbnail(o.args, o.extract_thumbnail, o.thumbnail_size);
+		return 0;
+	}
+	return -1;
+}
+
+int
+main(int argc, char *argv[])
+{
+	const GOptionEntry options[] = {
+		{G_OPTION_REMAINING, 0, 0,
+			G_OPTION_ARG_FILENAME_ARRAY, &o.args,
+			NULL, "[PATH | URI]..."},
+		{"browse", 0, G_OPTION_FLAG_IN_MAIN,
+			G_OPTION_ARG_NONE, &o.browse,
+			"Start in filesystem browsing mode", NULL},
+		{"invalidate-cache", 0, G_OPTION_FLAG_IN_MAIN,
+			G_OPTION_ARG_NONE, NULL,
+			"Invalidate the wide thumbnail cache", NULL},
+		{"list-supported-media-types", 0, G_OPTION_FLAG_IN_MAIN,
+			G_OPTION_ARG_NONE, NULL,
+			"Output supported media types and exit", NULL},
+		{"version", 'V', G_OPTION_FLAG_IN_MAIN,
+			G_OPTION_ARG_NONE, NULL,
+			"Output version information and exit", NULL},
+		{},
+	};
+	const GOptionEntry options_internal[] = {
+		{"extract-thumbnail", 0, 0,
+			G_OPTION_ARG_NONE, &o.extract_thumbnail,
+			"Output any embedded thumbnail (superseding --thumbnail)", NULL},
+		{"thumbnail", 0, 0,
+			G_OPTION_ARG_STRING, &o.thumbnail_size,
+			"Generate thumbnails, up to SIZE, and output that size", "SIZE"},
+		{"thumbnail-for-search", 0, 0,
+			G_OPTION_ARG_STRING, &o.thumbnail_size_search,
+			"Output an image file suitable for searching by content", "SIZE"},
+		{},
+	};
+
+	// We never get the ::open signal, thanks to G_OPTION_ARG_FILENAME_ARRAY.
+	GtkApplication *app = gtk_application_new(NULL, G_APPLICATION_NON_UNIQUE);
+	g_application_set_option_context_parameter_string(
+		G_APPLICATION(app), " - Image browser and viewer");
+	g_application_add_main_option_entries(G_APPLICATION(app), options);
+
+	GOptionGroup *internals = g_option_group_new(
+		"internal", "Internal Options:", "Show internal options", NULL, NULL);
+	g_option_group_add_entries(internals, options_internal);
+	g_application_add_option_group(G_APPLICATION(app), internals);
+
+	g_signal_connect(app, "handle-local-options",
+		G_CALLBACK(on_app_handle_local_options), NULL);
+	g_signal_connect(app, "startup",
+		G_CALLBACK(on_app_startup), NULL);
+	g_signal_connect(app, "activate",
+		G_CALLBACK(on_app_activate), NULL);
+
+	int status = g_application_run(G_APPLICATION(app), argc, argv);
+	g_object_unref(app);
+	g_strfreev(o.args);
+	return status;
 }
