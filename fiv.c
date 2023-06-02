@@ -101,16 +101,16 @@ struct key_section {
 static struct key help_keys_general[] = {
 	{"F1", "Show help"},
 	{"F10", "Open menu"},
-	{"<Control>comma", "Preferences"},
-	{"<Control>question", "Keyboard shortcuts"},
-	{"q <Control>q", "Quit"},
-	{"<Control>w", "Quit"},
+	{"<Primary>comma", "Preferences"},
+	{"<Primary>question", "Keyboard shortcuts"},
+	{"q <Primary>q", "Quit"},
+	{"<Primary>w", "Quit"},
 	{}
 };
 
 static struct key help_keys_navigation[] = {
-	{"<Control>l", "Open location..."},
-	{"<Control>n", "Open a new window"},
+	{"<Primary>l", "Open location..."},
+	{"<Primary>n", "Open a new window"},
 	{"<Alt>Left", "Go back in history"},
 	{"<Alt>Right", "Go forward in history"},
 	{}
@@ -1462,91 +1462,16 @@ toggle_sunlight(void)
 	g_object_set(settings, property, !set, NULL);
 }
 
-// Cursor keys, e.g., simply cannot be bound through accelerators
-// (and GtkWidget::keynav-failed would arguably be an awful solution).
-//
-// GtkBindingSets can be added directly through GtkStyleContext,
-// but that would still require setting up action signals on the widget class,
-// which is extremely cumbersome.  GtkWidget::move-focus has no return value,
-// so we can't override that and abort further handling.
-//
-// Therefore, bind directly to keypresses.  Order can be fine-tuned with
-// g_signal_connect{,after}(), or overriding the handler and either tactically
-// chaining up or using gtk_window_propagate_key_event().
 static gboolean
 on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 	G_GNUC_UNUSED gpointer data)
 {
 	switch (event->state & gtk_accelerator_get_default_mod_mask()) {
-	case GDK_MOD1_MASK | GDK_SHIFT_MASK:
-		if (event->keyval == GDK_KEY_D)
-			toggle_sunlight();
-		break;
 	case GDK_CONTROL_MASK:
-	case GDK_CONTROL_MASK | GDK_SHIFT_MASK:
 		switch (event->keyval) {
 		case GDK_KEY_h:
+			// XXX: Command-H is already occupied on macOS.
 			gtk_button_clicked(GTK_BUTTON(g.browsebar[BROWSEBAR_FILTER]));
-			return TRUE;
-		case GDK_KEY_l:
-			fiv_sidebar_show_enter_location(FIV_SIDEBAR(g.browser_sidebar));
-			return TRUE;
-		case GDK_KEY_n:
-			if (gtk_stack_get_visible_child(GTK_STACK(g.stack)) == g.view_box)
-				spawn_uri(g.uri);
-			else
-				spawn_uri(g.directory);
-			return TRUE;
-		case GDK_KEY_o:
-			on_open();
-			return TRUE;
-		case GDK_KEY_q:
-		case GDK_KEY_w:
-			gtk_widget_destroy(g.window);
-			return TRUE;
-
-		case GDK_KEY_question:
-			show_help_shortcuts();
-			return TRUE;
-		case GDK_KEY_comma:
-			show_preferences(g.window);
-			return TRUE;
-		}
-		break;
-	case GDK_MOD1_MASK:
-		switch (event->keyval) {
-		case GDK_KEY_Left:
-			go_back();
-			return TRUE;
-		case GDK_KEY_Right:
-			go_forward();
-			return TRUE;
-		}
-		break;
-	case GDK_SHIFT_MASK:
-		switch (event->keyval) {
-		case GDK_KEY_F1:
-			show_about_dialog(g.window);
-			return TRUE;
-		}
-		break;
-	case 0:
-		switch (event->keyval) {
-		case GDK_KEY_BackSpace:
-			go_back();
-			return TRUE;
-		case GDK_KEY_q:
-			gtk_widget_destroy(g.window);
-			return TRUE;
-		case GDK_KEY_o:
-			on_open();
-			return TRUE;
-		case GDK_KEY_F1:
-			show_help_contents();
-			return TRUE;
-		case GDK_KEY_F11:
-		case GDK_KEY_f:
-			toggle_fullscreen();
 			return TRUE;
 		}
 	}
@@ -1562,8 +1487,15 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 	gtk_accelerator_parse(accelerator, &key, &mods);
 	g_free(accelerator);
 
+	// TODO(p): See how Unity 7 behaves,
+	// we might want to keep GtkApplicationWindow:show-menubar then.
+	gboolean shell_shows_menubar = FALSE;
+	(void) g_object_get(gtk_settings_get_default(),
+		"gtk-shell-shows-menubar", &shell_shows_menubar, NULL);
+
 	guint mask = gtk_accelerator_get_default_mod_mask();
-	if (key && event->keyval == key && (event->state & mask) == mods) {
+	if (key && event->keyval == key && (event->state & mask) == mods &&
+		!shell_shows_menubar) {
 		gtk_widget_show(g.menu);
 
 		// _gtk_menu_shell_set_keyboard_mode() is private.
@@ -1573,6 +1505,17 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 	return FALSE;
 }
 
+// Cursor keys, e.g., simply cannot be bound through accelerators
+// (and GtkWidget::keynav-failed would arguably be an awful solution).
+//
+// GtkBindingSets can be added directly through GtkStyleContext,
+// but that would still require setting up action signals on the widget class,
+// which is extremely cumbersome.  GtkWidget::move-focus has no return value,
+// so we can't override that and abort further handling.
+//
+// Therefore, bind directly to keypresses.  Order can be fine-tuned with
+// g_signal_connect{,after}(), or overriding the handler and either tactically
+// chaining up or using gtk_window_propagate_key_event().
 static gboolean
 on_key_press_view(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 	G_GNUC_UNUSED gpointer data)
@@ -2079,47 +2022,186 @@ make_browser_sidebar(FivIoModel *model)
 	return sidebar;
 }
 
-static GtkWidget *
-make_menu_bar(void)
+// --- Actions -----------------------------------------------------------------
+
+#define ACTION(name) static void on_action_ ## name(void)
+
+ACTION(new_window) {
+	if (gtk_stack_get_visible_child(GTK_STACK(g.stack)) == g.view_box)
+		spawn_uri(g.uri);
+	else
+		spawn_uri(g.directory);
+}
+
+ACTION(quit) {
+	gtk_widget_destroy(g.window);
+}
+
+ACTION(location) {
+	fiv_sidebar_show_enter_location(FIV_SIDEBAR(g.browser_sidebar));
+}
+
+ACTION(preferences) {
+	show_preferences(g.window);
+}
+
+ACTION(about) {
+	show_about_dialog(g.window);
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+typedef struct {
+	const char *name;                   ///< Unprefixed action name
+	GCallback callback;                 ///< Simple callback
+	const char **accels;                ///< NULL-terminated accelerator list
+} ActionEntry;
+
+static ActionEntry g_actions[] = {
+	{"preferences", on_action_preferences,
+		(const char *[]) {"<Primary>comma", NULL}},
+	{"new-window", on_action_new_window,
+		(const char *[]) {"<Primary>n", NULL}},
+	{"open", on_open,
+		(const char *[]) {"<Primary>o", "o", NULL}},
+	{"quit", on_action_quit,
+		(const char *[]) {"<Primary>q", "<Primary>w", "q", NULL}},
+	{"toggle-fullscreen", toggle_fullscreen,
+		(const char *[]) {"F11", "f", NULL}},
+	{"toggle-sunlight", toggle_sunlight,
+		(const char *[]) {"<Alt><Shift>d", NULL}},
+	{"go-back", go_back,
+		(const char *[]) {"<Alt>Left", "BackSpace", NULL}},
+	{"go-forward", go_forward,
+		(const char *[]) {"<Alt>Right", NULL}},
+	{"go-location", on_action_location,
+		(const char *[]) {"<Primary>l", NULL}},
+	{"help", show_help_contents,
+		(const char *[]) {"F1", NULL}},
+	{"shortcuts", show_help_shortcuts,
+		// Similar to win.show-help-overlay in gtkapplication.c.
+		(const char *[]) {"<Primary>question", "<Primary>F1", NULL}},
+	{"about", on_action_about,
+		(const char *[]) {"<Shift>F1", NULL}},
+	{}
+};
+
+static void
+dispatch_action(G_GNUC_UNUSED GSimpleAction *action,
+	G_GNUC_UNUSED GVariant *parameter, gpointer user_data)
 {
-	g.menu = gtk_menu_bar_new();
+	GCallback callback = user_data;
+	callback();
+}
 
-	GtkWidget *item_quit = gtk_menu_item_new_with_mnemonic("_Quit");
-	g_signal_connect_swapped(item_quit, "activate",
-		G_CALLBACK(gtk_widget_destroy), g.window);
+static void
+set_up_action(GtkApplication *app, const ActionEntry *a)
+{
+	GSimpleAction *action = g_simple_action_new(a->name, NULL);
+	g_signal_connect(action, "activate",
+		G_CALLBACK(dispatch_action), a->callback);
+	g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(action));
+	g_object_unref(action);
 
-	GtkWidget *menu_file = gtk_menu_new();
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu_file), item_quit);
-	GtkWidget *item_file = gtk_menu_item_new_with_mnemonic("_File");
-	gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_file), menu_file);
-	gtk_menu_shell_append(GTK_MENU_SHELL(g.menu), item_file);
+	gchar *full_name = g_strdup_printf("app.%s", a->name);
+	gtk_application_set_accels_for_action(app, full_name, a->accels);
+	g_free(full_name);
+}
 
-	GtkWidget *item_contents = gtk_menu_item_new_with_mnemonic("_Contents");
-	g_signal_connect_swapped(item_contents, "activate",
-		G_CALLBACK(show_help_contents), NULL);
-	GtkWidget *item_shortcuts =
-		gtk_menu_item_new_with_mnemonic("_Keyboard Shortcuts");
-	g_signal_connect_swapped(item_shortcuts, "activate",
-		G_CALLBACK(show_help_shortcuts), NULL);
-	GtkWidget *item_about = gtk_menu_item_new_with_mnemonic("_About");
-	g_signal_connect_swapped(item_about, "activate",
-		G_CALLBACK(show_about_dialog), g.window);
+// --- Menu --------------------------------------------------------------------
 
-	GtkWidget *menu_help = gtk_menu_new();
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu_help), item_contents);
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu_help), item_shortcuts);
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu_help), item_about);
-	GtkWidget *item_help = gtk_menu_item_new_with_mnemonic("_Help");
-	gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_help), menu_help);
-	gtk_menu_shell_append(GTK_MENU_SHELL(g.menu), item_help);
+typedef struct {
+	const char *label;                  ///< Label, with a mnemonic
+	const char *action;                 ///< Prefixed action name
+	gboolean macos;                     ///< Show in the macOS global menu?
+} MenuItem;
+
+typedef struct {
+	const char *label;                  ///< Label, with a mnemonic
+	const MenuItem *items;              ///< ""-sectioned menu items
+} MenuRoot;
+
+// We're single-instance, skip the "win" namespace for simplicity.
+static MenuRoot g_menu[] = {
+	{"_File", (MenuItem[]) {
+		{"_New Window", "app.new-window", TRUE},
+		{"_Open...", "app.open", TRUE},
+		{"", NULL, TRUE},
+		{"_Quit", "app.quit", FALSE},
+		{}
+	}},
+	{"_Go", (MenuItem[]) {
+		{"_Back", "app.go-back", TRUE},
+		{"_Forward", "app.go-forward", TRUE},
+		{"", NULL, TRUE},
+		{"_Location...", "app.go-location", TRUE},
+		{}
+	}},
+	{"_Help", (MenuItem[]) {
+		{"_Contents", "app.help", TRUE},
+		{"_Keyboard Shortcuts", "app.shortcuts", TRUE},
+		{"_About", "app.about", FALSE},
+		{}
+	}},
+	{}
+};
+
+static GMenuModel *
+make_submenu(const MenuItem *items)
+{
+	GMenu *menu = g_menu_new();
+	while (items->label) {
+		GMenu *section = g_menu_new();
+		for (; items->label; items++) {
+			// Empty strings are interpreted as separators.
+			if (!*items->label) {
+				items++;
+				break;
+			}
+
+			GMenuItem *subitem = g_menu_item_new(items->label, items->action);
+			if (!items->macos) {
+				g_menu_item_set_attribute(
+					subitem, "hidden-when", "s", "macos-menubar");
+			}
+
+			g_menu_append_item(section, subitem);
+			g_object_unref(subitem);
+		}
+		g_menu_append_section(menu, NULL, G_MENU_MODEL(section));
+		g_object_unref(section);
+	}
+	return G_MENU_MODEL(menu);
+}
+
+static GMenuModel *
+make_menu_model(void)
+{
+	GMenu *menu = g_menu_new();
+	for (const MenuRoot *root = g_menu; root->label; root++) {
+		GMenuModel *submenu = make_submenu(root->items);
+		g_menu_append_submenu(menu, root->label, submenu);
+		g_object_unref(submenu);
+	}
+	return G_MENU_MODEL(menu);
+}
+
+static GtkWidget *
+make_menu_bar(GMenuModel *model)
+{
+	g.menu = gtk_menu_bar_new_from_model(model);
 
 	// Don't let it take up space by default. Firefox sets a precedent here.
+	// (gtk_application_window_set_show_menubar() doesn't seem viable for use
+	// for this purpose.)
 	gtk_widget_show_all(g.menu);
 	gtk_widget_set_no_show_all(g.menu, TRUE);
 	gtk_widget_hide(g.menu);
 	g_signal_connect(g.menu, "deactivate", G_CALLBACK(gtk_widget_hide), NULL);
 	return g.menu;
 }
+
+// --- Application -------------------------------------------------------------
 
 // This is incredibly broken https://stackoverflow.com/a/51054396/76313
 // thus resolving the problem using overlaps.
@@ -2305,10 +2387,27 @@ on_app_startup(GApplication *app, G_GNUC_UNUSED gpointer user_data)
 	g_signal_connect(g.window, "window-state-event",
 		G_CALLBACK(on_window_state_event), NULL);
 
+	for (const ActionEntry *a = g_actions; a->name; a++)
+		set_up_action(GTK_APPLICATION(app), a);
+
+	// GtkApplicationWindow overrides GtkContainer/GtkWidget virtual methods
+	// so that it has the menu bar as an extra child (if it so decides).
+	// However, we currently want this menu bar to only show on a key press,
+	// and to hide as soon as it's no longer being used.
+	// Messing with the window's internal state seems at best quirky,
+	// so we'll manage the menu entirely by ourselves.
+	gtk_application_window_set_show_menubar(
+		GTK_APPLICATION_WINDOW(g.window), FALSE);
+
+	GMenuModel *menu = make_menu_model();
+	gtk_application_set_menubar(GTK_APPLICATION(app), menu);
+	// The default "app menu" is good, in particular for macOS, so keep it.
+
 	GtkWidget *menu_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-	gtk_container_add(GTK_CONTAINER(menu_box), make_menu_bar());
+	gtk_container_add(GTK_CONTAINER(menu_box), make_menu_bar(menu));
 	gtk_container_add(GTK_CONTAINER(menu_box), g.stack);
 	gtk_container_add(GTK_CONTAINER(g.window), menu_box);
+	g_object_unref(menu);
 
 	GSettings *settings = g_settings_new(PROJECT_NS PROJECT_NAME);
 	if (g_settings_get_boolean(settings, "dark-theme"))
