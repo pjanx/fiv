@@ -312,28 +312,9 @@ on_update_task_done(GObject *source_object, G_GNUC_UNUSED GAsyncResult *res,
 }
 
 static void
-update_location(FivSidebar *self)
+reload_directories(FivSidebar *self)
 {
 	GFile *location = fiv_io_model_get_location(self->model);
-
-	GFile *collection = g_file_new_for_uri(FIV_COLLECTION_SCHEME ":/");
-	gtk_places_sidebar_remove_shortcut(self->places, collection);
-	if (location && g_file_has_uri_scheme(location, FIV_COLLECTION_SCHEME)) {
-		// add_shortcut() asynchronously requests GFileInfo, and only fills in
-		// the new row's "uri" data field once that's finished, resulting in
-		// the immediate set_location() call below failing to find it.
-		gtk_places_sidebar_add_shortcut(self->places, collection);
-
-		// Queue up a callback using the same mechanism that GFile uses.
-		GTask *task = g_task_new(self, NULL, on_update_task_done, NULL);
-		g_task_set_name(task, __func__);
-		g_task_set_priority(task, G_PRIORITY_LOW);
-		g_task_run_in_thread(task, on_update_task);
-		g_object_unref(task);
-	}
-	g_object_unref(collection);
-
-	gtk_places_sidebar_set_location(self->places, location);
 	gtk_container_foreach(GTK_CONTAINER(self->listbox),
 		(GtkCallback) gtk_widget_destroy, NULL);
 	if (!location)
@@ -365,6 +346,41 @@ update_location(FivSidebar *self)
 			gtk_container_add(GTK_CONTAINER(self->listbox), row);
 		g_object_unref(file);
 	}
+}
+
+static void
+on_model_subdirectories_changed(G_GNUC_UNUSED FivIoModel *model,
+	FivIoModelEntry *old, FivIoModelEntry *new, gpointer user_data)
+{
+	FivSidebar *self = FIV_SIDEBAR(user_data);
+	// TODO(p): Optimize: there's no need to update parent directories.
+	if (!old || !new || strcmp(old->uri, new->uri))
+		reload_directories(self);
+}
+
+static void
+update_location(FivSidebar *self)
+{
+	GFile *location = fiv_io_model_get_location(self->model);
+	GFile *collection = g_file_new_for_uri(FIV_COLLECTION_SCHEME ":/");
+	gtk_places_sidebar_remove_shortcut(self->places, collection);
+	if (location && g_file_has_uri_scheme(location, FIV_COLLECTION_SCHEME)) {
+		// add_shortcut() asynchronously requests GFileInfo, and only fills in
+		// the new row's "uri" data field once that's finished, resulting in
+		// the immediate set_location() call below failing to find it.
+		gtk_places_sidebar_add_shortcut(self->places, collection);
+
+		// Queue up a callback using the same mechanism that GFile uses.
+		GTask *task = g_task_new(self, NULL, on_update_task_done, NULL);
+		g_task_set_name(task, __func__);
+		g_task_set_priority(task, G_PRIORITY_LOW);
+		g_task_run_in_thread(task, on_update_task);
+		g_object_unref(task);
+	}
+	g_object_unref(collection);
+
+	gtk_places_sidebar_set_location(self->places, location);
+	reload_directories(self);
 }
 
 static void
@@ -623,10 +639,11 @@ fiv_sidebar_new(FivIoModel *model)
 	gtk_container_set_focus_vadjustment(GTK_CONTAINER(sidebar_port),
 		gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(self)));
 
-	// TODO(p): Also connect to and process the subdirectories-changed signal.
 	self->model = g_object_ref(model);
 	g_signal_connect_swapped(self->model, "reloaded",
 		G_CALLBACK(update_location), self);
+	g_signal_connect(self->model, "subdirectories-changed",
+		G_CALLBACK(on_model_subdirectories_changed), self);
 
 	return GTK_WIDGET(self);
 }
