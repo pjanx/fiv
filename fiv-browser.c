@@ -640,11 +640,15 @@ materialize_icon(FivBrowser *self, Entry *entry)
 	// of using GLib to look up icons for us, derive a list from a guessed
 	// MIME type, with "-symbolic" prefixes and fallbacks,
 	// and use gtk_icon_theme_choose_icon() instead.
-	// TODO(p): Make sure we have /some/ icon for every entry.
 	// TODO(p): We might want to populate these on an as-needed basis.
-	GtkIconInfo *icon_info = gtk_icon_theme_lookup_by_gicon(
-		gtk_icon_theme_get_default(), entry->icon, self->item_height / 2,
-		GTK_ICON_LOOKUP_FORCE_SYMBOLIC);
+	GtkIconTheme *theme = gtk_icon_theme_get_default();
+	GtkIconInfo *icon_info = gtk_icon_theme_lookup_by_gicon(theme, entry->icon,
+		self->item_height / 2, GTK_ICON_LOOKUP_FORCE_SYMBOLIC);
+	if (!icon_info) {
+		// This icon is included within GTK+.
+		icon_info = gtk_icon_theme_lookup_icon(theme, "text-x-generic",
+			self->item_height / 2, GTK_ICON_LOOKUP_FORCE_SYMBOLIC);
+	}
 	if (!icon_info)
 		return;
 
