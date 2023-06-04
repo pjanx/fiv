@@ -240,18 +240,100 @@ orient_thumbnail(cairo_surface_t *surface, FivIoOrientation orientation)
 	return oriented;
 }
 
-cairo_surface_t *
-fiv_thumbnail_extract(GFile *target, FivThumbnailSize max_size, GError **error)
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+#ifdef HAVE_LIBRAW
+
+static cairo_surface_t *
+extract_libraw_bitmap(
+	libraw_data_t *iprc, libraw_processed_image_t *image, GError **error)
 {
-	const char *path = g_file_peek_path(target);
-	if (!path) {
-		set_error(error, "thumbnails will only be extracted from local files");
+	// Anything else is extremely rare.
+	if (image->colors != 3 || image->bits != 8) {
+		set_error(error, "unsupported bitmap thumbnail");
 		return NULL;
 	}
 
-	GMappedFile *mf = g_mapped_file_new(path, FALSE, error);
-	if (!mf)
+	cairo_surface_t *surface = cairo_image_surface_create(
+		CAIRO_FORMAT_RGB24, image->width, image->height);
+	guint32 *out = (guint32 *) cairo_image_surface_get_data(surface);
+	const unsigned char *in = image->data;
+	for (guint64 i = 0; i < image->width * image->height; in += 3)
+		out[i++] = in[0] << 16 | in[1] << 8 | in[2];
+	cairo_surface_mark_dirty(surface);
+
+	// LibRaw actually turns an 8 to 5, so follow the documentation.
+	FivIoOrientation orient = FivIoOrientationUnknown;
+	switch (iprc->sizes.flip) {
+	break; case 3:
+		orient = FivIoOrientation180;
+	break; case 5:
+		orient = FivIoOrientation270;
+	break; case 6:
+		orient = FivIoOrientation90;
+	break; default:
+		return surface;
+	}
+
+	cairo_surface_set_user_data(
+		surface, &fiv_io_key_orientation, (void *) (intptr_t) orient, NULL);
+	return surface;
+}
+
+static cairo_surface_t *
+extract_libraw(GFile *target, GMappedFile *mf, GError **error)
+{
+	cairo_surface_t *surface = NULL;
+	libraw_data_t *iprc = libraw_init(
+		LIBRAW_OPIONS_NO_MEMERR_CALLBACK | LIBRAW_OPIONS_NO_DATAERR_CALLBACK);
+	if (!iprc) {
+		set_error(error, "failed to obtain a LibRaw handle");
 		return NULL;
+	}
+
+	int err = 0;
+	if ((err = libraw_open_buffer(iprc, (void *) g_mapped_file_get_contents(mf),
+			 g_mapped_file_get_length(mf)))) {
+		set_error(error, libraw_strerror(err));
+		goto fail;
+	}
+
+#if LIBRAW_VERSION >= LIBRAW_MAKE_VERSION(0, 21, 0)
+	if (!iprc->thumbs_list.thumbcount) {
+		set_error(error, "no thumbnails found");
+		goto fail;
+	}
+
+	// The old libraw_unpack_thumb() goes for the largest thumbnail,
+	// but we currently want the smallest thumbnail.
+	// TODO(p): To handle the ugly IFD0 thumbnail of NEF,
+	// try to go for the second smallest size. Remember to reflect tflip.
+	int best_index = 0;
+	float best_pixels = INFINITY;
+	for (int i = 0; i < iprc->thumbs_list.thumbcount; i++) {
+		float pixels = (float) iprc->thumbs_list.thumblist[i].twidth *
+			(float) iprc->thumbs_list.thumblist[i].theight;
+		if (pixels && pixels < best_pixels) {
+			best_index = i;
+			best_pixels = pixels;
+		}
+	}
+	if ((err = libraw_unpack_thumb_ex(iprc, best_index))) {
+		set_error(error, libraw_strerror(err));
+		goto fail;
+	}
+#else  // LIBRAW_VERSION < LIBRAW_MAKE_VERSION(0, 21, 0)
+	if ((err = libraw_unpack_thumb(iprc))) {
+		set_error(error, libraw_strerror(err));
+		goto fail;
+	}
+#endif  // LIBRAW_VERSION < LIBRAW_MAKE_VERSION(0, 21, 0)
+
+	libraw_processed_image_t *image = libraw_dcraw_make_mem_thumb(iprc, &err);
+	if (!image) {
+		set_error(error, libraw_strerror(err));
+		goto fail;
+	}
 
 	// Bitmap thumbnails generally need rotating, e.g.:
 	//  - Hasselblad/H4D-50/2-9-2017_street_0012.fff
@@ -275,114 +357,64 @@ fiv_thumbnail_extract(GFile *target, FivThumbnailSize max_size, GError **error)
 	//    Exif Orientation 6, and sizes.flip also contains 6.
 	//  - Nokia/Lumia 1020/RAW_NOKIA_LUMIA_1020.DNG (bitmap) has wrong color.
 	//  - Ricoh/GXR/R0017428.DNG (JPEG) seems to be plainly invalid.
-	FivIoOrientation orientation = FivIoOrientationUnknown;
-	cairo_surface_t *surface = NULL;
-#ifndef HAVE_LIBRAW
-	// TODO(p): Implement our own thumbnail extractors.
-	set_error(error, "unsupported file");
-#else  // HAVE_LIBRAW
-	// In this case, g_mapped_file_get_contents() returns NULL, causing issues.
-	if (!g_mapped_file_get_length(mf)) {
-		set_error(error, "empty file");
-		goto fail;
-	}
-
-	libraw_data_t *iprc = libraw_init(
-		LIBRAW_OPIONS_NO_MEMERR_CALLBACK | LIBRAW_OPIONS_NO_DATAERR_CALLBACK);
-	if (!iprc) {
-		set_error(error, "failed to obtain a LibRaw handle");
-		goto fail;
-	}
-
-	int err = 0;
-	if ((err = libraw_open_buffer(iprc, (void *) g_mapped_file_get_contents(mf),
-			 g_mapped_file_get_length(mf)))) {
-		set_error(error, libraw_strerror(err));
-		goto fail_libraw;
-	}
-
-#if LIBRAW_VERSION >= LIBRAW_MAKE_VERSION(0, 21, 0)
-	if (!iprc->thumbs_list.thumbcount) {
-		set_error(error, "no thumbnails found");
-		goto fail_libraw;
-	}
-
-	// The old libraw_unpack_thumb() goes for the largest thumbnail,
-	// but we currently want the smallest thumbnail.
-	// TODO(p): To handle the ugly IFD0 thumbnail of NEF,
-	// try to go for the second smallest size. Remember to reflect tflip.
-	int best_index = 0;
-	float best_pixels = INFINITY;
-	for (int i = 0; i < iprc->thumbs_list.thumbcount; i++) {
-		float pixels = (float) iprc->thumbs_list.thumblist[i].twidth *
-			(float) iprc->thumbs_list.thumblist[i].theight;
-		if (pixels && pixels < best_pixels) {
-			best_index = i;
-			best_pixels = pixels;
-		}
-	}
-	if ((err = libraw_unpack_thumb_ex(iprc, best_index))) {
-		set_error(error, libraw_strerror(err));
-		goto fail_libraw;
-	}
-#else
-	if ((err = libraw_unpack_thumb(iprc))) {
-		set_error(error, libraw_strerror(err));
-		goto fail_libraw;
-	}
-#endif
-
-	libraw_processed_image_t *image = libraw_dcraw_make_mem_thumb(iprc, &err);
-	if (!image) {
-		set_error(error, libraw_strerror(err));
-		goto fail_libraw;
-	}
-
-	gboolean dummy = FALSE;
 	switch (image->type) {
+		gboolean dummy;
 	case LIBRAW_IMAGE_JPEG:
 		surface = render(
 			target, g_bytes_new(image->data, image->data_size), &dummy, error);
-		orientation = (int) (intptr_t) cairo_surface_get_user_data(
-			surface, &fiv_io_key_orientation);
 		break;
 	case LIBRAW_IMAGE_BITMAP:
-		// Anything else is extremely rare.
-		if (image->colors != 3 || image->bits != 8) {
-			set_error(error, "unsupported bitmap thumbnail");
-			break;
-		}
-
-		surface = cairo_image_surface_create(
-			CAIRO_FORMAT_RGB24, image->width, image->height);
-		guint32 *out = (guint32 *) cairo_image_surface_get_data(surface);
-		const unsigned char *in = image->data;
-		for (guint64 i = 0; i < image->width * image->height; in += 3)
-			out[i++] = in[0] << 16 | in[1] << 8 | in[2];
-		cairo_surface_mark_dirty(surface);
-
-		// LibRaw actually turns an 8 to 5, so follow the documentation.
-		switch (iprc->sizes.flip) {
-		break; case 3: orientation = FivIoOrientation180;
-		break; case 5: orientation = FivIoOrientation270;
-		break; case 6: orientation = FivIoOrientation90;
-		}
+		surface = extract_libraw_bitmap(iprc, image, error);
 		break;
 	default:
 		set_error(error, "unsupported embedded thumbnail");
 	}
 
 	libraw_dcraw_clear_mem(image);
-fail_libraw:
+fail:
 	libraw_close(iprc);
+	return surface;
+}
+
 #endif  // HAVE_LIBRAW
 
-fail:
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+cairo_surface_t *
+fiv_thumbnail_extract(GFile *target, FivThumbnailSize max_size, GError **error)
+{
+	const char *path = g_file_peek_path(target);
+	if (!path) {
+		set_error(error, "thumbnails will only be extracted from local files");
+		return NULL;
+	}
+
+	GMappedFile *mf = g_mapped_file_new(path, FALSE, error);
+	if (!mf)
+		return NULL;
+
+	// In this case, g_mapped_file_get_contents() returns NULL, causing issues.
+	if (!g_mapped_file_get_length(mf)) {
+		set_error(error, "empty file");
+		return NULL;
+	}
+
+	cairo_surface_t *surface = NULL;
+#ifdef HAVE_LIBRAW
+	surface = extract_libraw(target, mf, error);
+#else  // ! HAVE_LIBRAW
+	// TODO(p): Implement our own thumbnail extractors.
+	set_error(error, "unsupported file");
+#endif  // ! HAVE_LIBRAW
 	g_mapped_file_unref(mf);
 
-	// This hardcodes Exif orientation before adjust_thumbnail() might do so,
+	// Hardcode Exif orientation before adjust_thumbnail() might do so,
 	// before the early return below.
-	surface = orient_thumbnail(surface, orientation);
+	if (surface) {
+		int orientation = (intptr_t) cairo_surface_get_user_data(
+			surface, &fiv_io_key_orientation);
+		surface = orient_thumbnail(surface, orientation);
+	}
 	if (!surface || max_size < FIV_THUMBNAIL_SIZE_MIN ||
 		max_size > FIV_THUMBNAIL_SIZE_MAX)
 		return surface;
