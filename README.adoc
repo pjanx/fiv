@@ -49,7 +49,7 @@ Runtime dependencies for reverse image search:
  xdg-utils, cURL, jq
 
  $ git clone --recursive https://git.janouch.name/p/fiv.git
- $ meson builddir
+ $ meson setup builddir
  $ cd builddir
  $ meson compile
 

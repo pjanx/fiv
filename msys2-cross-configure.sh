@@ -97,7 +97,7 @@ setup() {
 	endian = 'little'
 	EOF
 
-	meson --buildtype=debugoptimized --prefix="$packagedir" \
+	meson setup --buildtype=debugoptimized --prefix="$packagedir" \
 		--bindir . --libdir . --cross-file="$toolchain" "$builddir" "$sourcedir"
 }
 
