@@ -2,7 +2,7 @@ fiv
 ===
 
 'fiv' is a slightly unconventional, general-purpose image browser and viewer
-for Linux (that said, macOS and Windows ports are possible).
+for Linux (as well as macOS and Windows, though these have known issues).
 
 image::docs/fiv.webp["Screenshot of both the browser and the viewer"]
 
