@@ -236,7 +236,8 @@ if not win32
 		else
 			command = ['env', 'LC_ALL=C',
 				'asciidoc-release-version=' + meson.project_version(),
-				'awk', '-f', files('liberty/tools/asciiman.awk'), '@INPUT@']
+				'awk', '-f', files('submodules/liberty/tools/asciiman.awk'),
+				'@INPUT@']
 			man_capture = true
 		endif
 		custom_target('manpage for ' + page,

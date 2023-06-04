@@ -84,7 +84,7 @@
 #define WUFFS_CONFIG__MODULE__PNG
 #define WUFFS_CONFIG__MODULE__TGA
 #define WUFFS_CONFIG__MODULE__ZLIB
-#include "wuffs-mirror-release-c/release/c/wuffs-v0.3.c"
+#include "submodules/wuffs-mirror-release-c/release/c/wuffs-v0.3.c"
 
 #include "fiv-io.h"
 

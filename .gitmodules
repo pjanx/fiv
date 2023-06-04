@@ -1,6 +1,6 @@
 [submodule "wuffs-mirror-release-c"]
-	path = wuffs-mirror-release-c
+	path = submodules/wuffs-mirror-release-c
 	url = https://github.com/google/wuffs-mirror-release-c
 [submodule "liberty"]
-	path = liberty
+	path = submodules/liberty
 	url = https://git.janouch.name/p/liberty.git
