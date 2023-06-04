@@ -3,6 +3,8 @@ option('tools', type : 'feature', value : 'disabled',
 
 option('lcms2', type : 'feature', value : 'auto',
 	description : 'Build with Little CMS colour management')
+option('lcms2fastfloat', type : 'feature', value : 'auto',
+	description : 'Build with Little CMS fast float plugin support')
 option('libjpegqs', type : 'feature', value : 'auto',
 	description : 'Build with JPEG Quant Smooth integration')
 option('libraw', type : 'feature', value : 'auto',

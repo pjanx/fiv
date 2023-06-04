@@ -42,8 +42,9 @@ Build-only dependencies:
  Meson, pkg-config, asciidoctor or asciidoc (recommended but optional) +
 Runtime dependencies: gtk+-3.0, glib>=2.64, pixman-1, shared-mime-info,
  libturbojpeg, libwebp, librsvg-2.0 (for icons) +
-Optional dependencies: lcms2, LibRaw, librsvg-2.0, xcursor, libheif, libtiff,
- ExifTool, resvg (unstable API, needs to be requested explicitly) +
+Optional dependencies: lcms2, Little CMS fast float plugin,
+ LibRaw, librsvg-2.0, xcursor, libheif, libtiff, ExifTool,
+ resvg (unstable API, needs to be requested explicitly) +
 Runtime dependencies for reverse image search:
  xdg-utils, cURL, jq
 

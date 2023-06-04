@@ -25,11 +25,12 @@ libjpegqs = dependency('libjpegqs', required : get_option('libjpegqs'),
 lcms2 = dependency('lcms2', required : get_option('lcms2'))
 # Note that only libraw_r is thread-safe, but we'll just run it out-of process.
 libraw = dependency('libraw', required : get_option('libraw'))
+# This is a direct runtime dependency, but its usage may be disabled for images.
 librsvg = dependency('librsvg-2.0', required : get_option('librsvg'))
 xcursor = dependency('xcursor', required : get_option('xcursor'))
 libheif = dependency('libheif', required : get_option('libheif'))
 libtiff = dependency('libtiff-4', required : get_option('libtiff'))
-# This is a direct dependency of GTK+, but its usage may be disabled.
+# This is a direct dependency of GTK+, but its usage may be disabled for images.
 gdkpixbuf = dependency('gdk-pixbuf-2.0', required : get_option('gdk-pixbuf'))
 dependencies = [
 	dependency('gtk+-3.0'),
@@ -52,6 +53,24 @@ dependencies = [
 
 	cc.find_library('m', required : false),
 ]
+
+# As of writing, no pkg-config file is produced, and the plugin is not installed
+# by default. The library can be built statically, but it's a bit of a hassle.
+have_lcms2_fast_float = false
+if not get_option('lcms2fastfloat').disabled()
+	lcms2ff = dependency('lcms2_fast_float', required : false)
+	if not lcms2ff.found()
+		lcms2ff = cc.find_library(
+			'lcms2_fast_float', required : get_option('lcms2fastfloat'))
+		if lcms2ff.found() and not cc.has_header('lcms2_fast_float.h')
+			error('lcms2_fast_float.h not found')
+		endif
+	endif
+	if lcms2ff.found()
+		dependencies += lcms2ff
+		have_lcms2_fast_float = true
+	endif
+endif
 
 # As of writing, the API is unstable, and no pkg-config file is produced.
 # Trying to wrap Cargo in Meson is a recipe for pain, so no version pinning.
@@ -85,6 +104,7 @@ endif
 
 conf.set('HAVE_JPEG_QS', libjpegqs.found())
 conf.set('HAVE_LCMS2', lcms2.found())
+conf.set('HAVE_LCMS2_FAST_FLOAT', have_lcms2_fast_float)
 conf.set('HAVE_LIBRAW', libraw.found())
 conf.set('HAVE_RESVG', have_resvg)
 conf.set('HAVE_LIBRSVG', librsvg.found())
