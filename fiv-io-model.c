@@ -330,6 +330,36 @@ model_find(const GPtrArray *target, GFile *file, FivIoModelEntry **entry)
 	return -1;
 }
 
+enum monitor_event {
+	MONITOR_NONE,
+	MONITOR_CHANGING,
+	MONITOR_RENAMING,
+	MONITOR_REMOVING,
+	MONITOR_ADDING
+};
+
+static void
+monitor_apply(enum monitor_event event, GPtrArray *target, int index,
+	FivIoModelEntry *new_entry)
+{
+	// The file used to be filtered out but isn't anymore.
+	// TODO(p): Handle the inverse transition as well.
+	if (event == MONITOR_RENAMING && index < 0)
+		event = MONITOR_ADDING;
+
+	if (event == MONITOR_CHANGING) {
+		g_assert(new_entry != NULL);
+		fiv_io_model_entry_unref(target->pdata[index]);
+		target->pdata[index] = fiv_io_model_entry_ref(new_entry);
+	}
+	if (event == MONITOR_REMOVING || event == MONITOR_RENAMING)
+		g_ptr_array_remove_index(target, index);
+	if (event == MONITOR_RENAMING || event == MONITOR_ADDING) {
+		g_assert(new_entry != NULL);
+		g_ptr_array_add(target, fiv_io_model_entry_ref(new_entry));
+	}
+}
+
 static void
 on_monitor_changed(G_GNUC_UNUSED GFileMonitor *monitor, GFile *file,
 	GFile *other_file, GFileMonitorEvent event_type, gpointer user_data)
@@ -340,25 +370,25 @@ on_monitor_changed(G_GNUC_UNUSED GFileMonitor *monitor, GFile *file,
 	gint files_index = model_find(self->files, file, &old_entry);
 	gint subdirs_index = model_find(self->subdirs, file, &old_entry);
 
-	enum { NONE, CHANGING, RENAMING, REMOVING, ADDING } action = NONE;
+	enum monitor_event action = MONITOR_NONE;
 	GFile *new_entry_file = NULL;
 	switch (event_type) {
 	case G_FILE_MONITOR_EVENT_CHANGED:
 	case G_FILE_MONITOR_EVENT_ATTRIBUTE_CHANGED:
-		action = CHANGING;
+		action = MONITOR_CHANGING;
 		new_entry_file = file;
 		break;
 	case G_FILE_MONITOR_EVENT_RENAMED:
-		action = RENAMING;
+		action = MONITOR_RENAMING;
 		new_entry_file = other_file;
 		break;
 	case G_FILE_MONITOR_EVENT_DELETED:
 	case G_FILE_MONITOR_EVENT_MOVED_OUT:
-		action = REMOVING;
+		action = MONITOR_REMOVING;
 		break;
 	case G_FILE_MONITOR_EVENT_CREATED:
 	case G_FILE_MONITOR_EVENT_MOVED_IN:
-		action = ADDING;
+		action = MONITOR_ADDING;
 		old_entry = NULL;
 		new_entry_file = file;
 		break;
@@ -402,36 +432,12 @@ run:
 		fiv_io_model_entry_ref(old_entry);
 
 	if (files_index != -1 || new_target == self->files) {
-		if (action == CHANGING) {
-			g_assert(new_entry != NULL);
-			fiv_io_model_entry_unref(self->files->pdata[files_index]);
-			self->files->pdata[files_index] =
-				fiv_io_model_entry_ref(new_entry);
-		}
-		if (action == REMOVING || action == RENAMING)
-			g_ptr_array_remove_index(self->files, files_index);
-		if (action == RENAMING || action == ADDING) {
-			g_assert(new_entry != NULL);
-			g_ptr_array_add(self->files, fiv_io_model_entry_ref(new_entry));
-		}
-
+		monitor_apply(action, self->files, files_index, new_entry);
 		g_signal_emit(self, model_signals[FILES_CHANGED],
 			0, old_entry, new_entry);
 	}
 	if (subdirs_index != -1 || new_target == self->subdirs) {
-		if (action == CHANGING) {
-			g_assert(new_entry != NULL);
-			fiv_io_model_entry_unref(self->subdirs->pdata[subdirs_index]);
-			self->subdirs->pdata[subdirs_index] =
-				fiv_io_model_entry_ref(new_entry);
-		}
-		if (action == REMOVING || action == RENAMING)
-			g_ptr_array_remove_index(self->subdirs, subdirs_index);
-		if (action == RENAMING || action == ADDING) {
-			g_assert(new_entry != NULL);
-			g_ptr_array_add(self->subdirs, fiv_io_model_entry_ref(new_entry));
-		}
-
+		monitor_apply(action, self->subdirs, subdirs_index, new_entry);
 		g_signal_emit(self, model_signals[SUBDIRECTORIES_CHANGED],
 			0, old_entry, new_entry);
 	}
