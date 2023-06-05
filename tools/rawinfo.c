@@ -46,12 +46,23 @@ parse_raw(jv o, const uint8_t *p, size_t len)
 		return add_error(o, libraw_strerror(err));
 	}
 
+	// -> iprc->rawparams.shot_select
+	o = jv_set(o, jv_string("count"), jv_number(iprc->idata.raw_count));
+
 	o = jv_set(o, jv_string("width"), jv_number(iprc->sizes.width));
 	o = jv_set(o, jv_string("height"), jv_number(iprc->sizes.height));
 	o = jv_set(o, jv_string("flip"), jv_number(iprc->sizes.flip));
+	o = jv_set(o, jv_string("pixel_aspect_ratio"),
+		jv_number(iprc->sizes.pixel_aspect));
 
-	// -> iprc->rawparams.shot_select
-	o = jv_set(o, jv_string("count"), jv_number(iprc->idata.raw_count));
+	if ((err = libraw_adjust_sizes_info_only(iprc))) {
+		o = add_warning(o, libraw_strerror(err));
+	} else {
+		o = jv_set(
+			o, jv_string("output_width"), jv_number(iprc->sizes.iwidth));
+		o = jv_set(
+			o, jv_string("output_height"), jv_number(iprc->sizes.iheight));
+	}
 
 	jv thumbnails = jv_array();
 	for (int i = 0; i < iprc->thumbs_list.thumbcount; i++) {
