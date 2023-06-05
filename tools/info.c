@@ -110,6 +110,49 @@ detect_webp(const uint8_t *p, size_t len)
 }
 
 static jv
+parse_webp_vp8(jv o, const uint8_t *p, size_t len)
+{
+	if (len < 10 || (p[0] & 1) != 0 /* key frame */ ||
+		p[3] != 0x9d || p[4] != 0x01 || p[5] != 0x2a) {
+		return add_warning(o, "invalid VP8 chunk");
+	}
+
+	o = jv_set(o, jv_string("width"), jv_number(u16le(p + 6) & 0x3fff));
+	o = jv_set(o, jv_string("height"), jv_number(u16le(p + 8) & 0x3fff));
+	return o;
+}
+
+static jv
+parse_webp_vp8l(jv o, const uint8_t *p, size_t len)
+{
+	if (len < 5 || p[0] != 0x2f)
+		return add_warning(o, "invalid VP8L chunk");
+
+	// Reading LSB-first from a little endian value means reading in order.
+	uint32_t header = u32le(p + 1);
+	o = jv_set(o, jv_string("width"), jv_number((header & 0x3fff) + 1));
+	header >>= 14;
+	o = jv_set(o, jv_string("height"), jv_number((header & 0x3fff) + 1));
+	header >>= 14;
+	o = jv_set(o, jv_string("alpha_is_used"), jv_bool(header & 1));
+	return o;
+}
+
+static jv
+parse_webp_vp8x(jv o, const uint8_t *p, size_t len)
+{
+	if (len < 10)
+		return add_warning(o, "invalid VP8X chunk");
+
+	// Most of the fields in this chunk are duplicate or inferrable.
+	// Probably not worth decoding or verifying.
+	// TODO(p): For animations, we need to use the width and height from here.
+	uint8_t flags = p[0];
+	o = jv_set(o, jv_string("animation"), jv_bool((flags >> 1) & 1));
+	return o;
+}
+
+static jv
 parse_webp(jv o, const uint8_t *p, size_t len)
 {
 	if (!detect_webp(p, len))
@@ -144,7 +187,13 @@ parse_webp(jv o, const uint8_t *p, size_t len)
 		chunks = jv_array_append(chunks, jv_string(fourcc));
 		p += 8;
 
-		// TODO(p): Decode VP8 and VP8L chunk metadata.
+		// TODO(p): Decode more chunks.
+		if (!strcmp(fourcc, "VP8 "))
+			o = parse_webp_vp8(o, p, chunk_size);
+		if (!strcmp(fourcc, "VP8L"))
+			o = parse_webp_vp8l(o, p, chunk_size);
+		if (!strcmp(fourcc, "VP8X"))
+			o = parse_webp_vp8x(o, p, chunk_size);
 		if (!strcmp(fourcc, "EXIF"))
 			o = parse_exif(o, p, chunk_size);
 		if (!strcmp(fourcc, "ICCP"))
