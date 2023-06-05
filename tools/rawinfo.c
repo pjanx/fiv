@@ -91,11 +91,20 @@ parse_raw(jv o, const uint8_t *p, size_t len)
 			break;
 		}
 
-		thumbnails = jv_array_append(thumbnails,
-			JV_OBJECT(jv_string("width"), jv_number(item->twidth),
-				jv_string("height"), jv_number(item->theight),
-				jv_string("flip"), jv_number(item->tflip),
-				jv_string("format"), jv_string(format)));
+		jv to = JV_OBJECT(
+			jv_string("width"), jv_number(item->twidth),
+			jv_string("height"), jv_number(item->theight),
+			jv_string("flip"), jv_number(item->tflip),
+			jv_string("format"), jv_string(format));
+
+		if (item->tformat == LIBRAW_INTERNAL_THUMBNAIL_JPEG &&
+			item->toffset > 0 &&
+			(size_t) item->toffset + item->tlength <= len) {
+			to = jv_set(to, jv_string("JPEG"),
+				parse_jpeg(jv_object(), p + item->toffset, item->tlength));
+		}
+
+		thumbnails = jv_array_append(thumbnails, to);
 	}
 
 	libraw_close(iprc);
