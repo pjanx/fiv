@@ -1,7 +1,7 @@
 //
-// bmffinfo.c: acquire information about BMFF files in JSON format
+// info.c: acquire information about JPEG/TIFF/BMFF/WebP files in JSON format
 //
-// Copyright (c) 2021, Přemysl Eric Janouch <p@janouch.name>
+// Copyright (c) 2021 - 2023, Přemysl Eric Janouch <p@janouch.name>
 //
 // Permission to use, copy, modify, and/or distribute this software for any
 // purpose with or without fee is hereby granted.
@@ -44,12 +44,18 @@ parse_bmff_box(jv o, const char *type, const uint8_t *data, size_t len)
 	return add_to_subarray(o, "boxes", jv_string(type));
 }
 
-static jv
-parse_bmff(jv o, const uint8_t *p, size_t len)
+static bool
+detect_bmff(const uint8_t *p, size_t len)
 {
 	// 4.2 Object Structure--this box need not be present, nor at the beginning
 	// TODO(p): What does `aligned(8)` mean? It's probably in bits.
-	if (len < 8 || memcmp(p + 4, "ftyp", 4))
+	return len >= 8 && !memcmp(p + 4, "ftyp", 4);
+}
+
+static jv
+parse_bmff(jv o, const uint8_t *p, size_t len)
+{
+	if (!detect_bmff(p, len))
 		return add_error(o, "not BMFF at all or unsupported");
 
 	const uint8_t *end = p + len;
@@ -86,7 +92,94 @@ parse_bmff(jv o, const uint8_t *p, size_t len)
 	return o;
 }
 
+// --- WebP --------------------------------------------------------------------
+// libwebp won't let us simply iterate over all chunks, so handroll it.
+//
+// https://github.com/webmproject/libwebp/blob/master/doc/webp-container-spec.txt
+// https://github.com/webmproject/libwebp/blob/master/doc/webp-lossless-bitstream-spec.txt
+// https://datatracker.ietf.org/doc/html/rfc6386
+//
+// Pretty versions, hopefully not outdated:
+// https://developers.google.com/speed/webp/docs/riff_container
+// https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification
+
+static bool
+detect_webp(const uint8_t *p, size_t len)
+{
+	return len >= 12 && !memcmp(p, "RIFF", 4) && !memcmp(p + 8, "WEBP", 4);
+}
+
+static jv
+parse_webp(jv o, const uint8_t *p, size_t len)
+{
+	if (!detect_webp(p, len))
+		return add_error(o, "not a WEBP file");
+
+	// TODO(p): This can still be parseable.
+	// TODO(p): Warn on trailing data.
+	uint32_t size = u32le(p + 4);
+	if (8 + size < len)
+		return add_error(o, "truncated file");
+
+	const uint8_t *end = p + 8 + size;
+	p += 12;
+
+	jv chunks = jv_array();
+	while (p < end) {
+		if (end - p < 8) {
+			o = add_warning(o, "framing mismatch");
+			printf("%ld", end - p);
+			break;
+		}
+
+		uint32_t chunk_size = u32le(p + 4);
+		uint32_t chunk_advance = (chunk_size + 1) & ~1;
+		if (p + 8 + chunk_advance > end) {
+			o = add_warning(o, "runaway chunk payload");
+			break;
+		}
+
+		char fourcc[5] = "";
+		memcpy(fourcc, p, 4);
+		chunks = jv_array_append(chunks, jv_string(fourcc));
+		p += 8;
+
+		// TODO(p): Decode VP8 and VP8L chunk metadata.
+		if (!strcmp(fourcc, "EXIF"))
+			o = parse_exif(o, p, chunk_size);
+		if (!strcmp(fourcc, "ICCP"))
+			o = parse_icc(o, p, chunk_size);
+		p += chunk_advance;
+	}
+	return jv_set(o, jv_string("chunks"), chunks);
+}
+
 // --- I/O ---------------------------------------------------------------------
+
+static struct {
+	const char *name;
+	bool (*detect) (const uint8_t *, size_t);
+	jv (*parse) (jv, const uint8_t *, size_t);
+} formats[] = {
+	{"JPEG", detect_jpeg, parse_jpeg},
+	{"TIFF", detect_tiff, parse_tiff},
+	{"BMFF", detect_bmff, parse_bmff},
+	{"WebP", detect_webp, parse_webp},
+};
+
+static jv
+parse_any(jv o, const uint8_t *p, size_t len)
+{
+	// TODO(p): Also see if the file extension is appropriate.
+	for (size_t i = 0; i < sizeof formats / sizeof *formats; i++) {
+		if (!formats[i].detect(p, len))
+			continue;
+		if (getenv("INFO_IDENTIFY"))
+			o = jv_set(o, jv_string("format"), jv_string(formats[i].name));
+		return formats[i].parse(o, p, len);
+	}
+	return add_error(o, "unsupported file format");
+}
 
 static jv
 do_file(const char *filename, jv o)
@@ -110,7 +203,13 @@ do_file(const char *filename, jv o)
 		goto error_read;
 	}
 
-	o = parse_bmff(o, data, len);
+#if 0
+	// Not sure if I want to ensure their existence...
+	o = jv_object_set(o, jv_string("info"), jv_array());
+	o = jv_object_set(o, jv_string("warnings"), jv_array());
+#endif
+
+	o = parse_any(o, data, len);
 error_read:
 	fclose(fp);
 	free(data);
@@ -123,19 +222,15 @@ error:
 int
 main(int argc, char *argv[])
 {
-	(void) parse_icc;
-	(void) parse_exif;
-	(void) parse_psir;
-
 	// XXX: Can't use `xargs -P0`, there's a risk of non-atomic writes.
-	// Usage: find . -iname *.png -print0 | xargs -0 ./pnginfo
+	// Usage: find . -print0 | xargs -0 ./info
 	for (int i = 1; i < argc; i++) {
 		const char *filename = argv[i];
 
 		jv o = jv_object();
 		o = jv_object_set(o, jv_string("filename"), jv_string(filename));
 		o = do_file(filename, o);
-		jv_dumpf(o, stdout, 0 /* Might consider JV_PRINT_SORTED. */);
+		jv_dumpf(o, stdout, 0 /* JV_PRINT_SORTED would discard information. */);
 		fputc('\n', stdout);
 	}
 	return 0;

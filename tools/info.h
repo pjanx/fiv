@@ -278,6 +278,25 @@ parse_exif(jv o, const uint8_t *p, size_t len)
 	return o;
 }
 
+static bool
+detect_tiff(const uint8_t *p, size_t len)
+{
+	return tiffer_init(&(struct tiffer) {}, p, len);
+}
+
+// TODO(p): Photoshop data and ICC profiles also have their tag in TIFF,
+// they're not currently processed.
+static jv
+parse_tiff(jv o, const uint8_t *p, size_t len)
+{
+	struct tiffer T = {};
+	if (!tiffer_init(&T, p, len))
+		return add_warning(o, "invalid TIFF");
+	while (tiffer_next_ifd(&T))
+		o = add_to_subarray(o, "TIFF", parse_exif_ifd(&T, tiff_entries));
+	return o;
+}
+
 // --- Photoshop Image Resources -----------------------------------------------
 // Adobe XMP Specification Part 3: Storage in Files, 2020/1, 1.1.3 + 3.1.3
 // https://www.adobe.com/devnet-apps/photoshop/fileformatashtml/
@@ -1082,6 +1101,12 @@ parse_marker(uint8_t marker, const uint8_t *p, const uint8_t *end,
 
 	// TODO(p): Extract all XMP segments.
 	return p;
+}
+
+static bool
+detect_jpeg(const uint8_t *p, size_t len)
+{
+	return len >= 2 && p[0] == 0xff && p[1] == SOI;
 }
 
 static jv
