@@ -245,10 +245,152 @@ orient_thumbnail(cairo_surface_t *surface)
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 #ifdef HAVE_LIBRAW
+#if LIBRAW_VERSION >= LIBRAW_MAKE_VERSION(0, 21, 0)
+
+static int
+extract_libraw_compare(const void *a, const void *b)
+{
+	const libraw_thumbnail_item_t **t1 = (const libraw_thumbnail_item_t **) a;
+	const libraw_thumbnail_item_t **t2 = (const libraw_thumbnail_item_t **) b;
+	float p1 = (float) (*t1)->twidth * (*t1)->theight;
+	float p2 = (float) (*t2)->twidth * (*t2)->theight;
+	return (p2 < p1) - (p1 < p2);
+}
+
+static gboolean
+extract_libraw_unpack(libraw_data_t *iprc, int *flip, GError **error)
+{
+	int count = iprc->thumbs_list.thumbcount;
+	if (count <= 0) {
+		set_error(error, "no thumbnails found");
+		return FALSE;
+	}
+
+	// The old libraw_unpack_thumb() goes for the largest thumbnail,
+	// but we currently want the smallest usable thumbnail. Order them.
+	libraw_thumbnail_item_t **sorted = g_malloc_n(count, sizeof *sorted);
+	for (int i = 0; i < count; i++)
+		sorted[i] = &iprc->thumbs_list.thumblist[i];
+	qsort(sorted, count, sizeof *sorted, extract_libraw_compare);
+
+	// With the raw.pixls.us database, zero dimensions occur in two cases:
+	//  - when thumbcount should really be 0,
+	//  - with the last, huge JPEG thumbnail in CR3 raws.
+	// The maintainer refuses to change anything about it (#589).
+	int i = 0;
+	while (i < count && (!sorted[i]->twidth || !sorted[i]->theight))
+		i++;
+
+	// Ignore thumbnails whose decoding is likely to be a waste of time.
+	// XXX: This primarily targets the TIFF/EP shortcut code,
+	// because decoding a thumbnail will always be /much/ quicker than a render.
+	// TODO(p): Maybe don't mark raw image thumbnails as low-quality
+	// if they're the right aspect ratio, and of sufficiently large size.
+	// And I still worry about tflip.
+	float output_pixels = (float) iprc->sizes.iwidth * iprc->sizes.iheight;
+	// Note that the ratio may even be larger than 1, as seen with CR2 files.
+	while (i < count &&
+		(float) sorted[count - 1]->twidth * sorted[count - 1]->theight >
+			output_pixels * 0.75)
+		count--;
+
+	// The smallest size thumbnail is very often forced to be 4:3,
+	// and the remaining space is filled with black, looking quite wrong.
+	// It isn't really possible to strip those borders, because many are JPEGs.
+	//
+	// Another reason to skip thumbnails of mismatching aspect ratios is
+	// to avoid browser items from jumping around when low-quality thumbnails
+	// get replaced with their final versions.
+	//
+	// Note that some of them actually have borders on all four sides
+	// (Nikon/D50/DSC_5155.NEF, Nikon/D70/20170902_0047.NEF,
+	// Nikon/D70s/RAW_NIKON_D70S.NEF), or even on just one side
+	// (Leica/LEICA M MONOCHROM (Typ 246), Leica/M (Typ 240)).
+	// Another interesting possibility is Sony/DSC-HX99/DSC00001.ARW,
+	// where the correct-ratio thumbnail has borders but the main image doesn't.
+	//
+	// The problematic thumbnail is usually, but not always, sized 160x120,
+	// and some of them may actually be fine.
+	float output_ratio = (float) iprc->sizes.iwidth / iprc->sizes.iheight;
+	while (i < count) {
+		// XXX: tflip is less reliable than libraw_dcraw_make_mem_thumb()
+		// and reading out Orientation from the resulting Exif.
+		float ratio = sorted[i]->tflip == 5 || sorted[i]->tflip == 6
+			? (float) sorted[i]->theight / sorted[i]->twidth
+			: (float) sorted[i]->twidth / sorted[i]->theight;
+		if (fabsf(ratio - output_ratio) < 0.05)
+			break;
+		i++;
+	}
+
+	// Avoid pink-tinted readouts of CR2 IFD2 (#590).
+	//
+	// This thumbnail can also have a black stripe on the left and the top,
+	// which we should remove if using fixed LibRaw > 0.21.1.
+	if (i < count && iprc->idata.maker_index == LIBRAW_CAMERAMAKER_Canon &&
+		sorted[i]->tformat == LIBRAW_INTERNAL_THUMBNAIL_KODAK_THUMB)
+		i++;
+
+	if (i < count)
+		i = sorted[i] - iprc->thumbs_list.thumblist;
+
+	g_free(sorted);
+	if (i == count) {
+		set_error(error, "no suitable thumbnails found");
+		return FALSE;
+	}
+
+	int err = 0;
+	if ((err = libraw_unpack_thumb_ex(iprc, i))) {
+		set_error(error, libraw_strerror(err));
+		return FALSE;
+	}
+	*flip = iprc->thumbs_list.thumblist[i].tflip;
+	return TRUE;
+}
+
+#else  // LIBRAW_VERSION < LIBRAW_MAKE_VERSION(0, 21, 0)
+
+static gboolean
+extract_libraw_unpack(libraw_data_t *iprc, int *flip, GError **error)
+{
+	int err = 0;
+	if ((err = libraw_unpack_thumb(iprc))) {
+		set_error(error, libraw_strerror(err));
+		return FALSE;
+	}
+
+	// The main image's "flip" often matches up, but sometimes doesn't, e.g.:
+	//  - Phase One/H 25/H25_Outdoor_.IIQ
+	//  - Phase One/H 25/H25_IT8.7-2_Card.TIF
+	//  - Leaf/Aptus 22/L_003172.mos (JPEG)
+	*flip = iprc->sizes.flip
+	return TRUE;
+}
+
+#endif  // LIBRAW_VERSION < LIBRAW_MAKE_VERSION(0, 21, 0)
+
+// LibRaw does a weird permutation here, so follow the documentation,
+// which assumes that mirrored orientations never happen.
+static FivIoOrientation
+extract_libraw_unflip(int flip)
+{
+	switch (flip) {
+	break; case 0:
+		return FivIoOrientation0;
+	break; case 3:
+		return FivIoOrientation180;
+	break; case 5:
+		return FivIoOrientation270;
+	break; case 6:
+		return FivIoOrientation90;
+	break; default:
+		return FivIoOrientationUnknown;
+	}
+}
 
 static cairo_surface_t *
-extract_libraw_bitmap(
-	libraw_data_t *iprc, libraw_processed_image_t *image, GError **error)
+extract_libraw_bitmap(libraw_processed_image_t *image, int flip, GError **error)
 {
 	// Anything else is extremely rare.
 	if (image->colors != 3 || image->bits != 8) {
@@ -264,19 +406,7 @@ extract_libraw_bitmap(
 		out[i++] = in[0] << 16 | in[1] << 8 | in[2];
 	cairo_surface_mark_dirty(surface);
 
-	// LibRaw actually turns an 8 to 5, so follow the documentation.
-	FivIoOrientation orient = FivIoOrientationUnknown;
-	switch (iprc->sizes.flip) {
-	break; case 3:
-		orient = FivIoOrientation180;
-	break; case 5:
-		orient = FivIoOrientation270;
-	break; case 6:
-		orient = FivIoOrientation90;
-	break; default:
-		return surface;
-	}
-
+	FivIoOrientation orient = extract_libraw_unflip(flip);
 	cairo_surface_set_user_data(
 		surface, &fiv_io_key_orientation, (void *) (intptr_t) orient, NULL);
 	return surface;
@@ -299,37 +429,14 @@ extract_libraw(GFile *target, GMappedFile *mf, GError **error)
 		set_error(error, libraw_strerror(err));
 		goto fail;
 	}
-
-#if LIBRAW_VERSION >= LIBRAW_MAKE_VERSION(0, 21, 0)
-	if (!iprc->thumbs_list.thumbcount) {
-		set_error(error, "no thumbnails found");
-		goto fail;
-	}
-
-	// The old libraw_unpack_thumb() goes for the largest thumbnail,
-	// but we currently want the smallest thumbnail.
-	// TODO(p): To handle the ugly IFD0 thumbnail of NEF,
-	// try to go for the second smallest size. Remember to reflect tflip.
-	int best_index = 0;
-	float best_pixels = INFINITY;
-	for (int i = 0; i < iprc->thumbs_list.thumbcount; i++) {
-		float pixels = (float) iprc->thumbs_list.thumblist[i].twidth *
-			(float) iprc->thumbs_list.thumblist[i].theight;
-		if (pixels && pixels < best_pixels) {
-			best_index = i;
-			best_pixels = pixels;
-		}
-	}
-	if ((err = libraw_unpack_thumb_ex(iprc, best_index))) {
+	if ((err = libraw_adjust_sizes_info_only(iprc))) {
 		set_error(error, libraw_strerror(err));
 		goto fail;
 	}
-#else  // LIBRAW_VERSION < LIBRAW_MAKE_VERSION(0, 21, 0)
-	if ((err = libraw_unpack_thumb(iprc))) {
-		set_error(error, libraw_strerror(err));
+
+	int flip = 0;
+	if (!extract_libraw_unpack(iprc, &flip, error))
 		goto fail;
-	}
-#endif  // LIBRAW_VERSION < LIBRAW_MAKE_VERSION(0, 21, 0)
 
 	libraw_processed_image_t *image = libraw_dcraw_make_mem_thumb(iprc, &err);
 	if (!image) {
@@ -340,10 +447,6 @@ extract_libraw(GFile *target, GMappedFile *mf, GError **error)
 	// Bitmap thumbnails generally need rotating, e.g.:
 	//  - Hasselblad/H4D-50/2-9-2017_street_0012.fff
 	//  - OnePlus/One/IMG_20150729_201116.dng (and more DNGs in general)
-	// Though it's apparent LibRaw doesn't adjust the thumbnails to match
-	// the main image's "flip" field (it just happens to match up often), e.g.:
-	//  - Phase One/H 25/H25_Outdoor_.IIQ (correct Orientation in IFD0)
-	//  - Phase One/H 25/H25_IT8.7-2_Card.TIF (correctly missing in IFD0)
 	//
 	// JPEG thumbnails generally have the right rotation in their Exif, e.g.:
 	//  - Canon/EOS-1Ds Mark II/RAW_CANON_1DSM2.CR2
@@ -353,10 +456,10 @@ extract_libraw(GFile *target, GMappedFile *mf, GError **error)
 	//  - Panasonic/DMC-FZ70/P1000836.RW2
 	//  - Samsung/NX200/2013-05-08-194524__sam6589.srw
 	//  - Sony/DSC-HX95/DSC00018.ARW
+	// Note that LibRaw inserts its own Exif segment if it doesn't find one,
+	// and this may differ from flip.
 	//
 	// Some files are problematic and we won't bother with special-casing:
-	//  - Leaf/Aptus 22/L_003172.mos (JPEG)'s thumbnail wrongly contains
-	//    Exif Orientation 6, and sizes.flip also contains 6.
 	//  - Nokia/Lumia 1020/RAW_NOKIA_LUMIA_1020.DNG (bitmap) has wrong color.
 	//  - Ricoh/GXR/R0017428.DNG (JPEG) seems to be plainly invalid.
 	switch (image->type) {
@@ -366,7 +469,7 @@ extract_libraw(GFile *target, GMappedFile *mf, GError **error)
 			target, g_bytes_new(image->data, image->data_size), &dummy, error);
 		break;
 	case LIBRAW_IMAGE_BITMAP:
-		surface = extract_libraw_bitmap(iprc, image, error);
+		surface = extract_libraw_bitmap(image, flip, error);
 		break;
 	default:
 		set_error(error, "unsupported embedded thumbnail");
