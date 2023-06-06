@@ -33,7 +33,7 @@ static void
 one_file(const char *filename)
 {
 	GFile *file = g_file_new_for_commandline_arg(filename);
-	double since_us = timestamp();
+	double since_us = timestamp(), us = 0;
 	FivIoOpenContext ctx = {
 		.uri = g_file_get_uri(file),
 		.screen_dpi = 96,
@@ -49,20 +49,19 @@ one_file(const char *filename)
 		return;
 
 	cairo_surface_destroy(loaded_by_us);
-	double us = timestamp() - since_us;
+	us = timestamp() - since_us;
 
-	double since_pixbuf = timestamp();
+	double since_pixbuf = timestamp(), pixbuf = 0;
 	GdkPixbuf *gdk_pixbuf = gdk_pixbuf_new_from_file(filename, NULL);
-	if (!gdk_pixbuf)
-		return;
+	if (gdk_pixbuf) {
+		cairo_surface_t *loaded_by_pixbuf =
+			gdk_cairo_surface_create_from_pixbuf(gdk_pixbuf, 1, NULL);
+		g_object_unref(gdk_pixbuf);
+		cairo_surface_destroy(loaded_by_pixbuf);
+		pixbuf = timestamp() - since_pixbuf;
+	}
 
-	cairo_surface_t *loaded_by_pixbuf =
-		gdk_cairo_surface_create_from_pixbuf(gdk_pixbuf, 1, NULL);
-	g_object_unref(gdk_pixbuf);
-	cairo_surface_destroy(loaded_by_pixbuf);
-	double pixbuf = timestamp() - since_pixbuf;
-
-	printf("%f\t%f\t%.0f%%\t%s\n", us, pixbuf, us / pixbuf * 100, filename);
+	printf("%.3f\t%.3f\t%.0f%%\t%s\n", us, pixbuf, us / pixbuf * 100, filename);
 }
 
 int
