@@ -1,7 +1,7 @@
 //
 // benchmark-io.c: measure and compare image loading times
 //
-// Copyright (c) 2021 - 2022, Přemysl Eric Janouch <p@janouch.name>
+// Copyright (c) 2021 - 2023, Přemysl Eric Janouch <p@janouch.name>
 //
 // Permission to use, copy, modify, and/or distribute this software for any
 // purpose with or without fee is hereby granted.
@@ -32,15 +32,17 @@ timestamp(void)
 static void
 one_file(const char *filename)
 {
+	GFile *file = g_file_new_for_commandline_arg(filename);
 	double since_us = timestamp();
 	FivIoOpenContext ctx = {
-		.uri = g_filename_to_uri(filename, NULL, NULL),
+		.uri = g_file_get_uri(file),
 		.screen_dpi = 96,
 		// Only using this array as a redirect.
 		.warnings = g_ptr_array_new_with_free_func(g_free),
 	};
 
 	cairo_surface_t *loaded_by_us = fiv_io_open(&ctx, NULL);
+	g_clear_object(&file);
 	g_free((char *) ctx.uri);
 	g_ptr_array_free(ctx.warnings, TRUE);
 	if (!loaded_by_us)
