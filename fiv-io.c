@@ -2298,8 +2298,8 @@ load_resvg_destroy(void *closure)
 }
 
 static cairo_surface_t *
-load_resvg_render_internal(
-	FivIoRenderClosureResvg *self, double scale, GError **error)
+load_resvg_render_internal(FivIoRenderClosureResvg *self,
+	double scale, FivIoProfile target, GError **error)
 {
 	double w = ceil(self->width * scale), h = ceil(self->height * scale);
 	if (w > SHRT_MAX || h > SHRT_MAX) {
@@ -2324,21 +2324,21 @@ load_resvg_render_internal(
 		cairo_image_surface_get_width(surface),
 		cairo_image_surface_get_height(surface), (char *) pixels);
 
-	// TODO(p): Also apply colour management, we'll need to un-premultiply.
 	for (int i = 0; i < w * h; i++) {
 		uint32_t rgba = g_ntohl(pixels[i]);
 		pixels[i] = rgba << 24 | rgba >> 8;
 	}
 
 	cairo_surface_mark_dirty(surface);
-	return surface;
+	return fiv_io_profile_finalize(surface, target);
 }
 
 static cairo_surface_t *
 load_resvg_render(FivIoRenderClosure *closure, double scale)
 {
 	FivIoRenderClosureResvg *self = (FivIoRenderClosureResvg *) closure;
-	return load_resvg_render_internal(self, scale, NULL);
+	// TODO(p): Somehow get the target colour management profile.
+	return load_resvg_render_internal(self, scale, NULL, NULL);
 }
 
 static const char *
@@ -2395,7 +2395,8 @@ open_resvg(
 	closure->width = size.width;
 	closure->height = size.height;
 
-	cairo_surface_t *surface = load_resvg_render_internal(closure, 1., error);
+	cairo_surface_t *surface =
+		load_resvg_render_internal(closure, 1., ctx->screen_profile, error);
 	if (!surface) {
 		load_resvg_destroy(closure);
 		return NULL;
@@ -2450,6 +2451,8 @@ load_librsvg_render(FivIoRenderClosure *closure, double scale)
 		cairo_surface_destroy(surface);
 		return NULL;
 	}
+
+	// TODO(p): Somehow get the target colour management profile.
 	return surface;
 }
 
@@ -2515,7 +2518,7 @@ open_librsvg(
 	closure->height = h;
 	cairo_surface_set_user_data(
 		surface, &fiv_io_key_render, closure, load_librsvg_destroy);
-	return surface;
+	return fiv_io_profile_finalize(surface, ctx->screen_profile);
 }
 
 #endif  // HAVE_LIBRSVG --------------------------------------------------------
@@ -2998,6 +3001,9 @@ load_libtiff_directory(TIFF *tiff, GError **error)
 	cairo_surface_mark_dirty(surface);
 	// XXX: The whole file is essentially an Exif, any ideas?
 
+	// TODO(p): TIFF has a number of fields that an ICC profile can be
+	// constructed from--it's not a good idea to blindly default to sRGB
+	// if we don't find an ICC profile.
 	const uint32_t meta_len = 0;
 	const void *meta = NULL;
 	if (TIFFGetField(tiff, TIFFTAG_ICCPROFILE, &meta_len, &meta)) {
@@ -3073,10 +3079,6 @@ fail:
 	TIFFSetWarningHandlerExt(whe);
 	TIFFSetErrorHandler(eh);
 	TIFFSetWarningHandler(wh);
-
-	// TODO(p): Colour management even for un/associated alpha channels.
-	// Note that TIFF has a number of fields that an ICC profile can be
-	// constructed from--it's not a good idea to blindly assume sRGB.
 	return fiv_io_profile_finalize(result, ctx->screen_profile);
 }
 
