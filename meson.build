@@ -165,12 +165,6 @@ exe = executable('fiv', 'fiv.c', 'fiv-view.c', 'fiv-io.c', 'fiv-context-menu.c',
 	dependencies : dependencies,
 	win_subsystem : 'windows',
 )
-if gdkpixbuf.found()
-	executable('io-benchmark', 'fiv-io-benchmark.c', 'fiv-io.c',
-		'xdg.c', tiff_tables,
-		build_by_default : false,
-		dependencies : [dependencies, gdkpixbuf])
-endif
 
 desktops += 'fiv-jpegcrop.desktop'
 jpegcrop = executable('fiv-jpegcrop', 'fiv-jpegcrop.c', rc, config,
@@ -194,6 +188,11 @@ if get_option('tools').enabled()
 			dependencies : tools_dependencies,
 			c_args: tools_c_args)
 	endforeach
+
+	if gdkpixbuf.found()
+		executable('benchmark-io', 'tools/benchmark-io.c', 'fiv-io.c', 'xdg.c',
+			tiff_tables, dependencies : [dependencies, gdkpixbuf])
+	endif
 endif
 
 gsettings_schemas = ['fiv.gschema.xml']

@@ -1,5 +1,5 @@
 //
-// fiv-io-benchmark.c: see if we suck
+// benchmark-io.c: measure and compare image loading times
 //
 // Copyright (c) 2021 - 2022, Přemysl Eric Janouch <p@janouch.name>
 //
