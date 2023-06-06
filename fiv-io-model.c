@@ -342,22 +342,21 @@ static void
 monitor_apply(enum monitor_event event, GPtrArray *target, int index,
 	FivIoModelEntry *new_entry)
 {
-	// The file used to be filtered out but isn't anymore.
-	// TODO(p): Handle the inverse transition as well.
 	if (event == MONITOR_RENAMING && index < 0)
+		// The file used to be filtered out but isn't anymore.
 		event = MONITOR_ADDING;
+	else if (!new_entry && index >= 0)
+		// The file wasn't filtered out but now it is.
+		event = MONITOR_REMOVING;
 
 	if (event == MONITOR_CHANGING) {
-		g_assert(new_entry != NULL);
 		fiv_io_model_entry_unref(target->pdata[index]);
 		target->pdata[index] = fiv_io_model_entry_ref(new_entry);
 	}
 	if (event == MONITOR_REMOVING || event == MONITOR_RENAMING)
 		g_ptr_array_remove_index(target, index);
-	if (event == MONITOR_RENAMING || event == MONITOR_ADDING) {
-		g_assert(new_entry != NULL);
+	if (event == MONITOR_RENAMING || event == MONITOR_ADDING)
 		g_ptr_array_add(target, fiv_io_model_entry_ref(new_entry));
-	}
 }
 
 static void
@@ -370,25 +369,25 @@ on_monitor_changed(G_GNUC_UNUSED GFileMonitor *monitor, GFile *file,
 	gint files_index = model_find(self->files, file, &old_entry);
 	gint subdirs_index = model_find(self->subdirs, file, &old_entry);
 
-	enum monitor_event action = MONITOR_NONE;
+	enum monitor_event event = MONITOR_NONE;
 	GFile *new_entry_file = NULL;
 	switch (event_type) {
 	case G_FILE_MONITOR_EVENT_CHANGED:
 	case G_FILE_MONITOR_EVENT_ATTRIBUTE_CHANGED:
-		action = MONITOR_CHANGING;
+		event = MONITOR_CHANGING;
 		new_entry_file = file;
 		break;
 	case G_FILE_MONITOR_EVENT_RENAMED:
-		action = MONITOR_RENAMING;
+		event = MONITOR_RENAMING;
 		new_entry_file = other_file;
 		break;
 	case G_FILE_MONITOR_EVENT_DELETED:
 	case G_FILE_MONITOR_EVENT_MOVED_OUT:
-		action = MONITOR_REMOVING;
+		event = MONITOR_REMOVING;
 		break;
 	case G_FILE_MONITOR_EVENT_CREATED:
 	case G_FILE_MONITOR_EVENT_MOVED_IN:
-		action = MONITOR_ADDING;
+		event = MONITOR_ADDING;
 		old_entry = NULL;
 		new_entry_file = file;
 		break;
@@ -432,12 +431,12 @@ run:
 		fiv_io_model_entry_ref(old_entry);
 
 	if (files_index != -1 || new_target == self->files) {
-		monitor_apply(action, self->files, files_index, new_entry);
+		monitor_apply(event, self->files, files_index, new_entry);
 		g_signal_emit(self, model_signals[FILES_CHANGED],
 			0, old_entry, new_entry);
 	}
 	if (subdirs_index != -1 || new_target == self->subdirs) {
-		monitor_apply(action, self->subdirs, subdirs_index, new_entry);
+		monitor_apply(event, self->subdirs, subdirs_index, new_entry);
 		g_signal_emit(self, model_signals[SUBDIRECTORIES_CHANGED],
 			0, old_entry, new_entry);
 	}
