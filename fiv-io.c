@@ -429,30 +429,6 @@ fiv_io_profile_page(cairo_surface_t *page, FivIoProfile target,
 		fiv_io_profile_free(source);
 }
 
-#define fiv_io_profile_xrgb32_page(page, target) \
-	fiv_io_profile_page((page), (target), fiv_io_profile_xrgb32)
-
-// TODO(p): Offer better integration, upgrade the bit depth if appropriate.
-static cairo_surface_t *
-fiv_io_profile_finalize(cairo_surface_t *image, FivIoProfile target)
-{
-	if (!image || !target)
-		return image;
-
-	for (cairo_surface_t *page = image; page != NULL;
-		page = cairo_surface_get_user_data(page, &fiv_io_key_page_next)) {
-		// TODO(p): 1. un/premultiply ARGB, 2. do colour management
-		// early enough, so that no avoidable increase of quantization error
-		// occurs beforehands, and also for correct alpha compositing.
-		// FIXME: This assumes that if the first frame is opaque, they all are.
-		if (cairo_image_surface_get_format(page) == CAIRO_FORMAT_RGB24)
-			fiv_io_profile_xrgb32_page(page, target);
-	}
-	return image;
-}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-
 static void
 fiv_io_premultiply_argb32(cairo_surface_t *surface)
 {
@@ -481,12 +457,26 @@ fiv_io_premultiply_argb32(cairo_surface_t *surface)
 	(G_BYTE_ORDER == G_LITTLE_ENDIAN ? TYPE_BGRA_8_PREMUL : TYPE_ARGB_8_PREMUL)
 
 static void
+fiv_io_profile_argb32(cairo_surface_t *surface,
+	FivIoProfile source, FivIoProfile target)
+{
+	g_return_if_fail(
+		cairo_image_surface_get_format(surface) == CAIRO_FORMAT_ARGB32);
+
+	unsigned char *data = cairo_image_surface_get_data(surface);
+	int w = cairo_image_surface_get_width(surface);
+	int h = cairo_image_surface_get_height(surface);
+	fiv_io_profile_rgb_direct(data, w, h, source, target,
+		FIV_IO_PROFILE_ARGB32_PREMUL, FIV_IO_PROFILE_ARGB32_PREMUL);
+}
+
+static void
 fiv_io_profile_argb32_premultiply(cairo_surface_t *surface,
 	FivIoProfile source, FivIoProfile target)
 {
+	unsigned char *data = cairo_image_surface_get_data(surface);
 	int w = cairo_image_surface_get_width(surface);
 	int h = cairo_image_surface_get_height(surface);
-	unsigned char *data = cairo_image_surface_get_data(surface);
 	if (cairo_image_surface_get_format(surface) != CAIRO_FORMAT_ARGB32) {
 		fiv_io_profile_xrgb32_direct(data, w, h, source, target);
 	} else if (!fiv_io_profile_rgb_direct(data, w, h, source, target,
@@ -501,11 +491,14 @@ fiv_io_profile_argb32_premultiply(cairo_surface_t *surface,
 
 #else  // ! HAVE_LCMS2 || LCMS_VERSION < 2130
 
+// TODO(p): Unpremultiply, transform, repremultiply. Or require lcms2>=2.13.
+#define fiv_io_profile_argb32(surface, source, target)
+
 static void
 fiv_io_profile_argb32_premultiply_page(
 	cairo_surface_t *page, FivIoProfile target)
 {
-	fiv_io_profile_xrgb32_page(page, target);
+	fiv_io_profile_page(page, target, fiv_io_profile_xrgb32);
 
 	for (cairo_surface_t *frame = page; frame != NULL;
 		frame = cairo_surface_get_user_data(frame, &fiv_io_key_frame_next))
@@ -513,6 +506,38 @@ fiv_io_profile_argb32_premultiply_page(
 }
 
 #endif  // ! HAVE_LCMS2 || LCMS_VERSION < 2130
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+static void
+fiv_io_profile_any(cairo_surface_t *surface,
+	FivIoProfile source, FivIoProfile target)
+{
+	// TODO(p): Ensure we do colour management early enough, so that
+	// no avoidable increase of quantization error occurs beforehands,
+	// and also for correct alpha compositing.
+	switch (cairo_image_surface_get_format(surface)) {
+	break; case CAIRO_FORMAT_RGB24:
+		fiv_io_profile_xrgb32(surface, source, target);
+	break; case CAIRO_FORMAT_ARGB32:
+		fiv_io_profile_argb32(surface, source, target);
+	break; default:
+		g_debug("CM attempted on an unsupported surface format");
+	}
+}
+
+// TODO(p): Offer better integration, upgrade the bit depth if appropriate.
+static cairo_surface_t *
+fiv_io_profile_finalize(cairo_surface_t *image, FivIoProfile target)
+{
+	if (!target)
+		return image;
+
+	for (cairo_surface_t *page = image; page != NULL;
+		page = cairo_surface_get_user_data(page, &fiv_io_key_page_next))
+		fiv_io_profile_page(page, target, fiv_io_profile_any);
+	return image;
+}
 
 // --- Wuffs -------------------------------------------------------------------
 
@@ -1420,7 +1445,7 @@ load_jpeg_finalize(cairo_surface_t *surface, bool cmyk,
 	if (cmyk)
 		fiv_io_profile_cmyk(surface, source, ctx->screen_profile);
 	else
-		fiv_io_profile_xrgb32(surface, source, ctx->screen_profile);
+		fiv_io_profile_any(surface, source, ctx->screen_profile);
 
 	if (source)
 		fiv_io_profile_free(source);
