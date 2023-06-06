@@ -286,10 +286,15 @@ fiv_io_profile_free(FivIoProfile self)
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 // TODO(p): In general, try to use CAIRO_FORMAT_RGB30 or CAIRO_FORMAT_RGBA128F.
-#define FIV_IO_LCMS2_ARGB32 \
+#ifndef HAVE_LCMS2
+#define FIV_IO_PROFILE_ARGB32 0
+#define FIV_IO_PROFILE_4X16LE 0
+#else
+#define FIV_IO_PROFILE_ARGB32 \
 	(G_BYTE_ORDER == G_LITTLE_ENDIAN ? TYPE_BGRA_8 : TYPE_ARGB_8)
-#define FIV_IO_LCMS2_4X16LE \
+#define FIV_IO_PROFILE_4X16LE \
 	(G_BYTE_ORDER == G_LITTLE_ENDIAN ? TYPE_BGRA_16 : TYPE_BGRA_16_SE)
+#endif
 
 // CAIRO_STRIDE_ALIGNMENT is 4 bytes, so there will be no padding with
 // ARGB/BGRA/XRGB/BGRX.
@@ -332,7 +337,7 @@ fiv_io_profile_cmyk(
 	cmsHTRANSFORM transform = NULL;
 	if (source && target) {
 		transform = cmsCreateTransform(source, TYPE_CMYK_8_REV, target,
-			FIV_IO_LCMS2_ARGB32, INTENT_PERCEPTUAL, 0);
+			FIV_IO_PROFILE_ARGB32, INTENT_PERCEPTUAL, 0);
 	}
 	if (transform) {
 		cmsDoTransform(transform, data, data, w * h);
@@ -343,16 +348,20 @@ fiv_io_profile_cmyk(
 	trivial_cmyk_to_host_byte_order_argb(data, w * h);
 }
 
-static void
-fiv_io_profile_xrgb32_direct(unsigned char *data, int w, int h,
-	FivIoProfile source, FivIoProfile target)
+static bool
+fiv_io_profile_rgb_direct(unsigned char *data, int w, int h,
+	FivIoProfile source, FivIoProfile target,
+	uint32_t source_format, uint32_t target_format)
 {
 #ifndef HAVE_LCMS2
 	(void) data;
 	(void) w;
 	(void) h;
 	(void) source;
+	(void) source_format;
 	(void) target;
+	(void) target_format;
+	return false;
 #else
 	// TODO(p): We should make this optional.
 	cmsHPROFILE src_fallback = NULL;
@@ -361,8 +370,8 @@ fiv_io_profile_xrgb32_direct(unsigned char *data, int w, int h,
 
 	cmsHTRANSFORM transform = NULL;
 	if (source && target) {
-		transform = cmsCreateTransform(source, FIV_IO_LCMS2_ARGB32, target,
-			FIV_IO_LCMS2_ARGB32, INTENT_PERCEPTUAL, 0);
+		transform = cmsCreateTransform(
+			source, source_format, target, target_format, INTENT_PERCEPTUAL, 0);
 	}
 	if (transform) {
 		cmsDoTransform(transform, data, data, w * h);
@@ -370,7 +379,16 @@ fiv_io_profile_xrgb32_direct(unsigned char *data, int w, int h,
 	}
 	if (src_fallback)
 		cmsCloseProfile(src_fallback);
+	return transform != NULL;
 #endif
+}
+
+static void
+fiv_io_profile_xrgb32_direct(
+	unsigned char *data, int w, int h, FivIoProfile source, FivIoProfile target)
+{
+	fiv_io_profile_rgb_direct(data, w, h, source, target,
+		FIV_IO_PROFILE_ARGB32, FIV_IO_PROFILE_ARGB32);
 }
 
 static void
@@ -387,36 +405,15 @@ static void
 fiv_io_profile_4x16le_direct(
 	unsigned char *data, int w, int h, FivIoProfile source, FivIoProfile target)
 {
-#ifndef HAVE_LCMS2
-	(void) data;
-	(void) w;
-	(void) h;
-	(void) source;
-	(void) target;
-#else
-	// TODO(p): We should make this optional.
-	cmsHPROFILE src_fallback = NULL;
-	if (target && !source)
-		source = src_fallback = cmsCreate_sRGBProfile();
-
-	cmsHTRANSFORM transform = NULL;
-	if (source && target) {
-		transform = cmsCreateTransform(source, FIV_IO_LCMS2_4X16LE, target,
-			FIV_IO_LCMS2_4X16LE, INTENT_PERCEPTUAL, 0);
-	}
-	if (transform) {
-		cmsDoTransform(transform, data, data, w * h);
-		cmsDeleteTransform(transform);
-	}
-	if (src_fallback)
-		cmsCloseProfile(src_fallback);
-#endif
+	fiv_io_profile_rgb_direct(data, w, h, source, target,
+		FIV_IO_PROFILE_4X16LE, FIV_IO_PROFILE_4X16LE);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 static void
-fiv_io_profile_xrgb32_page(cairo_surface_t *page, FivIoProfile target)
+fiv_io_profile_page(cairo_surface_t *page, FivIoProfile target,
+	void (*frame_cb) (cairo_surface_t *, FivIoProfile, FivIoProfile))
 {
 	GBytes *bytes = NULL;
 	FivIoProfile source = NULL;
@@ -426,11 +423,14 @@ fiv_io_profile_xrgb32_page(cairo_surface_t *page, FivIoProfile target)
 	// TODO(p): All animations need to be composited in a linear colour space.
 	for (cairo_surface_t *frame = page; frame != NULL;
 		frame = cairo_surface_get_user_data(frame, &fiv_io_key_frame_next))
-		fiv_io_profile_xrgb32(frame, source, target);
+		frame_cb(frame, source, target);
 
 	if (source)
 		fiv_io_profile_free(source);
 }
+
+#define fiv_io_profile_xrgb32_page(page, target) \
+	fiv_io_profile_page((page), (target), fiv_io_profile_xrgb32)
 
 // TODO(p): Offer better integration, upgrade the bit depth if appropriate.
 static cairo_surface_t *
@@ -450,6 +450,8 @@ fiv_io_profile_finalize(cairo_surface_t *image, FivIoProfile target)
 	}
 	return image;
 }
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 static void
 fiv_io_premultiply_argb32(cairo_surface_t *surface)
@@ -473,13 +475,44 @@ fiv_io_premultiply_argb32(cairo_surface_t *surface)
 	}
 }
 
+#if defined HAVE_LCMS2 && LCMS_VERSION >= 2130
+
+#define FIV_IO_PROFILE_ARGB32_PREMUL \
+	(G_BYTE_ORDER == G_LITTLE_ENDIAN ? TYPE_BGRA_8_PREMUL : TYPE_ARGB_8_PREMUL)
+
 static void
-fiv_io_premultiply_argb32_page(cairo_surface_t *page)
+fiv_io_profile_argb32_premultiply(cairo_surface_t *surface,
+	FivIoProfile source, FivIoProfile target)
 {
+	int w = cairo_image_surface_get_width(surface);
+	int h = cairo_image_surface_get_height(surface);
+	unsigned char *data = cairo_image_surface_get_data(surface);
+	if (cairo_image_surface_get_format(surface) != CAIRO_FORMAT_ARGB32) {
+		fiv_io_profile_xrgb32_direct(data, w, h, source, target);
+	} else if (!fiv_io_profile_rgb_direct(data, w, h, source, target,
+			FIV_IO_PROFILE_ARGB32, FIV_IO_PROFILE_ARGB32_PREMUL)) {
+		g_debug("failed to create a premultiplying transform");
+		fiv_io_premultiply_argb32(surface);
+	}
+}
+
+#define fiv_io_profile_argb32_premultiply_page(page, target) \
+	fiv_io_profile_page((page), (target), fiv_io_profile_argb32_premultiply)
+
+#else  // ! HAVE_LCMS2 || LCMS_VERSION < 2130
+
+static void
+fiv_io_profile_argb32_premultiply_page(
+	cairo_surface_t *page, FivIoProfile target)
+{
+	fiv_io_profile_xrgb32_page(page, target);
+
 	for (cairo_surface_t *frame = page; frame != NULL;
 		frame = cairo_surface_get_user_data(frame, &fiv_io_key_frame_next))
 		fiv_io_premultiply_argb32(frame);
 }
+
+#endif  // ! HAVE_LCMS2 || LCMS_VERSION < 2130
 
 // --- Wuffs -------------------------------------------------------------------
 
@@ -1831,10 +1864,8 @@ open_libwebp(
 	}
 
 	WebPDemuxDelete(demux);
-	if (ctx->screen_profile) {
-		fiv_io_profile_xrgb32_page(result, ctx->screen_profile);
-		fiv_io_premultiply_argb32_page(result);
-	}
+	if (ctx->screen_profile)
+		fiv_io_profile_argb32_premultiply_page(result, ctx->screen_profile);
 
 fail:
 	WebPFreeDecBuffer(&config.output);
@@ -3102,12 +3133,10 @@ open_gdkpixbuf(
 	}
 
 	g_object_unref(pixbuf);
-	if (custom_argb32) {
-		fiv_io_profile_xrgb32_page(surface, ctx->screen_profile);
-		fiv_io_premultiply_argb32_page(surface);
-	} else {
+	if (custom_argb32)
+		fiv_io_profile_argb32_premultiply_page(surface, ctx->screen_profile);
+	else
 		surface = fiv_io_profile_finalize(surface, ctx->screen_profile);
-	}
 	return surface;
 }
 

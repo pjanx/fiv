@@ -24,9 +24,7 @@
 
 // --- Colour management -------------------------------------------------------
 
-// TODO(p): Make it possible to use Skia's skcms,
-// which also supports premultiplied alpha.
-// NOTE: Little CMS 2.13 already supports premultiplied alpha, too.
+// TODO(p): Make it also possible to use Skia's skcms.
 typedef void *FivIoProfile;
 FivIoProfile fiv_io_profile_new(const void *data, size_t len);
 FivIoProfile fiv_io_profile_new_sRGB(void);
