@@ -219,9 +219,11 @@ adjust_thumbnail(cairo_surface_t *thumbnail, double row_height)
 }
 
 static cairo_surface_t *
-orient_thumbnail(cairo_surface_t *surface, FivIoOrientation orientation)
+orient_thumbnail(cairo_surface_t *surface)
 {
-	if (!surface || orientation <= FivIoOrientation0)
+	int orientation = (intptr_t) cairo_surface_get_user_data(
+		surface, &fiv_io_key_orientation);
+	if (orientation <= FivIoOrientation0)
 		return surface;
 
 	double w = 0, h = 0;
@@ -408,16 +410,10 @@ fiv_thumbnail_extract(GFile *target, FivThumbnailSize max_size, GError **error)
 #endif  // ! HAVE_LIBRAW
 	g_mapped_file_unref(mf);
 
-	// Hardcode Exif orientation before adjust_thumbnail() might do so,
-	// before the early return below.
-	if (surface) {
-		int orientation = (intptr_t) cairo_surface_get_user_data(
-			surface, &fiv_io_key_orientation);
-		surface = orient_thumbnail(surface, orientation);
-	}
-	if (!surface || max_size < FIV_THUMBNAIL_SIZE_MIN ||
-		max_size > FIV_THUMBNAIL_SIZE_MAX)
-		return surface;
+	if (!surface)
+		return NULL;
+	if (max_size < FIV_THUMBNAIL_SIZE_MIN || max_size > FIV_THUMBNAIL_SIZE_MAX)
+		return orient_thumbnail(surface);
 
 	cairo_surface_t *result =
 		adjust_thumbnail(surface, fiv_thumbnail_sizes[max_size].size);
