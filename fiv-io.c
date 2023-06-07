@@ -1612,9 +1612,6 @@ open_libjpeg_enhanced(
 	while (cinfo.output_scanline < cinfo.output_height)
 		(void) jpeg_read_scanlines(&cinfo, lines + cinfo.output_scanline,
 			cinfo.output_height - cinfo.output_scanline);
-	if (cinfo.out_color_space == JCS_CMYK)
-		trivial_cmyk_to_host_byte_order_argb(
-			surface_data, cinfo.output_width * cinfo.output_height);
 	(void) jpegqs_finish_decompress(&cinfo);
 
 	load_jpeg_finalize(surface, use_cmyk, ctx, data, len);
