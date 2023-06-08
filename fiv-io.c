@@ -1880,13 +1880,16 @@ fail:
 // typically contain a nearly full-size JPEG preview.
 //
 // LibRaw takes too long a time to render something that will never be as good
-// as the large preview, and libtiff can only read the horrible IFD0 thumbnail.
+// as that large preview--e.g., due to exposure correction or denoising.
+// While since version 0.21.0 the library provides an API that would allow us
+// to extract the JPEG, a little bit of custom processing won't hurt either.
+// TODO(p): Though it can also extract thumbnails from many more formats,
+// so maybe keep this code as a fallback for old or missing LibRaw.
+//
+// Note that libtiff can only read the horrible IFD0 thumbnail.
 // (TIFFSetSubDirectory() requires an ImageLength tag that's missing from JPEG
 // SubIFDs, and TIFFReadCustomDirectory() takes a privately defined struct that
 // may not be omitted.)
-//
-// While LibRaw since 0.21.0 provides an API that would allow us to extract
-// the JPEG, a little bit of custom processing won't hurt either.
 
 static bool
 tiffer_find(const struct tiffer *self, uint16_t tag, struct tiffer_entry *entry)
@@ -3234,15 +3237,19 @@ fiv_io_open_from_data(
 		surface = open_libwebp(data, len, ctx, error);
 		break;
 	default:
-		// Try to extract full-size previews from TIFF/EP-compatible raws.
+		// Try to extract full-size previews from TIFF/EP-compatible raws,
+		// but allow for running the full render.
+#ifdef HAVE_LIBRAW  // ---------------------------------------------------------
+		if (!ctx->enhance) {
+#endif  // HAVE_LIBRAW ---------------------------------------------------------
 		if ((surface = open_tiff_ep(data, len, ctx, error)))
 			break;
 		if (error) {
 			g_debug("%s", (*error)->message);
 			g_clear_error(error);
 		}
-
 #ifdef HAVE_LIBRAW  // ---------------------------------------------------------
+		}
 		if ((surface = open_libraw(data, len, ctx, error)))
 			break;
 
