@@ -19,20 +19,18 @@
 
 #include <errno.h>
 #include <math.h>
+#include <setjmp.h>
+#include <stdio.h>
 
 #include <cairo.h>
 #include <glib.h>
+#include <jpeglib.h>
 #include <turbojpeg.h>
 #include <webp/decode.h>
 #include <webp/demux.h>
 #include <webp/encode.h>
 #include <webp/mux.h>
-
 #ifdef HAVE_JPEG_QS
-#include <setjmp.h>
-#include <stdio.h>
-
-#include <jpeglib.h>
 #include <libjpegqs.h>
 #endif  // HAVE_JPEG_QS
 
@@ -1454,95 +1452,13 @@ load_jpeg_finalize(cairo_surface_t *surface, bool cmyk,
 	cairo_surface_mark_dirty(surface);
 }
 
-static cairo_surface_t *
-open_libjpeg_turbo(
-	const char *data, gsize len, const FivIoOpenContext *ctx, GError **error)
-{
-	// Note that there doesn't seem to be much of a point in using this
-	// simplified API anymore, because JPEG-QS needs the original libjpeg API.
-	// It's just more or less duplicated code which won't compile with
-	// the slow version of the library.
-	tjhandle dec = tjInitDecompress();
-	if (!dec) {
-		set_error(error, tjGetErrorStr2(dec));
-		return NULL;
-	}
-
-	int width = 0, height = 0, subsampling = TJSAMP_444, colorspace = TJCS_RGB;
-	if (tjDecompressHeader3(dec, (const unsigned char *) data, len,
-			&width, &height, &subsampling, &colorspace)) {
-		set_error(error, tjGetErrorStr2(dec));
-		tjDestroy(dec);
-		return NULL;
-	}
-
-	bool use_cmyk = colorspace == TJCS_CMYK || colorspace == TJCS_YCCK;
-	int pixel_format = use_cmyk
-		? TJPF_CMYK
-		: (G_BYTE_ORDER == G_LITTLE_ENDIAN ? TJPF_BGRX : TJPF_XRGB);
-
-	// The limit of Cairo/pixman is 32767. but JPEG can go as high as 65535.
-	// Prevent Cairo from throwing an error, and make use of libjpeg's scaling.
-	// gdk-pixbuf circumvents this check, producing unrenderable surfaces.
-	const int max = 32767;
-
-	int nfs = 0;
-	tjscalingfactor *fs = tjGetScalingFactors(&nfs), f = {0, 1};
-	if (fs && (width > max || height > max)) {
-		for (int i = 0; i < nfs; i++) {
-			if (TJSCALED(width, fs[i]) <= max &&
-				TJSCALED(height, fs[i]) <= max &&
-				fs[i].num * f.denom > f.num * fs[i].denom)
-				f = fs[i];
-		}
-
-		add_warning(ctx,
-			"the image is too large, and had to be scaled by %d/%d",
-			f.num, f.denom);
-		width = TJSCALED(width, f);
-		height = TJSCALED(height, f);
-	}
-
-	cairo_surface_t *surface =
-		cairo_image_surface_create(CAIRO_FORMAT_RGB24, width, height);
-	cairo_status_t surface_status = cairo_surface_status(surface);
-	if (surface_status != CAIRO_STATUS_SUCCESS) {
-		set_error(error, cairo_status_to_string(surface_status));
-		cairo_surface_destroy(surface);
-		tjDestroy(dec);
-		return NULL;
-	}
-
-	// Starting to modify pixel data directly. Probably an unnecessary call.
-	cairo_surface_flush(surface);
-
-	int stride = cairo_image_surface_get_stride(surface);
-	if (tjDecompress2(dec, (const unsigned char *) data, len,
-			cairo_image_surface_get_data(surface), width, stride, height,
-			pixel_format, TJFLAG_ACCURATEDCT)) {
-		if (tjGetErrorCode(dec) == TJERR_WARNING) {
-			add_warning(ctx, "%s", tjGetErrorStr2(dec));
-		} else {
-			set_error(error, tjGetErrorStr2(dec));
-			cairo_surface_destroy(surface);
-			tjDestroy(dec);
-			return NULL;
-		}
-	}
-
-	load_jpeg_finalize(surface, use_cmyk, ctx, data, len);
-	tjDestroy(dec);
-	return surface;
-}
-
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-
-#ifdef HAVE_JPEG_QS
 
 struct libjpeg_error_mgr {
 	struct jpeg_error_mgr pub;
 	jmp_buf buf;
 	GError **error;
+	const FivIoOpenContext *ctx;
 };
 
 static void
@@ -1555,15 +1471,25 @@ libjpeg_error_exit(j_common_ptr cinfo)
 	longjmp(err->buf, 1);
 }
 
+static void
+libjpeg_output_message(j_common_ptr cinfo)
+{
+	struct libjpeg_error_mgr *err = (struct libjpeg_error_mgr *) cinfo->err;
+	char buf[JMSG_LENGTH_MAX] = "";
+	(*cinfo->err->format_message)(cinfo, buf);
+	add_warning(err->ctx, "%s", buf);
+}
+
 static cairo_surface_t *
-open_libjpeg_enhanced(
-	const char *data, gsize len, const FivIoOpenContext *ctx, GError **error)
+load_libjpeg_turbo(const char *data, gsize len, const FivIoOpenContext *ctx,
+	void (*loop)(struct jpeg_decompress_struct *, JSAMPARRAY), GError **error)
 {
 	cairo_surface_t *volatile surface = NULL;
 
-	struct libjpeg_error_mgr jerr = {.error = error};
+	struct libjpeg_error_mgr jerr = {.error = error, .ctx = ctx};
 	struct jpeg_decompress_struct cinfo = {.err = jpeg_std_error(&jerr.pub)};
 	jerr.pub.error_exit = libjpeg_error_exit;
+	jerr.pub.output_message = libjpeg_output_message;
 	if (setjmp(jerr.buf)) {
 		g_clear_pointer(&surface, cairo_surface_destroy);
 		jpeg_destroy_decompress(&cinfo);
@@ -1587,6 +1513,30 @@ open_libjpeg_enhanced(
 	int width = cinfo.output_width;
 	int height = cinfo.output_height;
 
+	// The limit of Cairo/pixman is 32767. but JPEG can go as high as 65535.
+	// Prevent Cairo from throwing an error, and make use of libjpeg's scaling.
+	// gdk-pixbuf circumvents this check, producing unrenderable surfaces.
+	const int max = 32767;
+
+	int nfs = 0;
+	tjscalingfactor *fs = tjGetScalingFactors(&nfs), f = {0, 1};
+	if (fs && (width > max || height > max)) {
+		for (int i = 0; i < nfs; i++) {
+			if (TJSCALED(width, fs[i]) <= max &&
+				TJSCALED(height, fs[i]) <= max &&
+				fs[i].num * f.denom > f.num * fs[i].denom)
+				f = fs[i];
+		}
+
+		add_warning(ctx,
+			"the image is too large, and had to be scaled by %d/%d",
+			f.num, f.denom);
+		width = TJSCALED(width, f);
+		height = TJSCALED(height, f);
+		cinfo.scale_num = f.num;
+		cinfo.scale_denom = f.denom;
+	}
+
 	surface = cairo_image_surface_create(CAIRO_FORMAT_RGB24, width, height);
 	cairo_status_t surface_status = cairo_surface_status(surface);
 	if (surface_status != CAIRO_STATUS_SUCCESS) {
@@ -1601,6 +1551,31 @@ open_libjpeg_enhanced(
 	for (int i = 0; i < height; i++)
 		lines[i] = surface_data + i * surface_stride;
 
+	// Slightly unfortunate generalization.
+	loop(&cinfo, lines);
+
+	load_jpeg_finalize(surface, use_cmyk, ctx, data, len);
+	jpeg_destroy_decompress(&cinfo);
+	return surface;
+}
+
+static void
+load_libjpeg_simple(
+	struct jpeg_decompress_struct *cinfo, JSAMPARRAY lines)
+{
+	(void) jpeg_start_decompress(cinfo);
+	while (cinfo->output_scanline < cinfo->output_height)
+		(void) jpeg_read_scanlines(cinfo, lines + cinfo->output_scanline,
+			cinfo->output_height - cinfo->output_scanline);
+	(void) jpeg_finish_decompress(cinfo);
+}
+
+#ifdef HAVE_JPEG_QS
+
+static void
+load_libjpeg_enhanced(
+	struct jpeg_decompress_struct *cinfo, JSAMPARRAY lines)
+{
 	// Go for the maximum quality setting.
 	jpegqs_control_t opts = {
 		.flags = JPEGQS_DIAGONALS | JPEGQS_JOINT_YUV | JPEGQS_UPSAMPLE_UV,
@@ -1608,20 +1583,25 @@ open_libjpeg_enhanced(
 		.niter = 3,
 	};
 
-	(void) jpegqs_start_decompress(&cinfo, &opts);
-	while (cinfo.output_scanline < cinfo.output_height)
-		(void) jpeg_read_scanlines(&cinfo, lines + cinfo.output_scanline,
-			cinfo.output_height - cinfo.output_scanline);
-	(void) jpegqs_finish_decompress(&cinfo);
-
-	load_jpeg_finalize(surface, use_cmyk, ctx, data, len);
-	jpeg_destroy_decompress(&cinfo);
-	return surface;
+	(void) jpegqs_start_decompress(cinfo, &opts);
+	while (cinfo->output_scanline < cinfo->output_height)
+		(void) jpeg_read_scanlines(cinfo, lines + cinfo->output_scanline,
+			cinfo->output_height - cinfo->output_scanline);
+	(void) jpegqs_finish_decompress(cinfo);
 }
 
 #else
-#define open_libjpeg_enhanced open_libjpeg_turbo
+#define load_libjpeg_enhanced libjpeg_turbo_load_simple
 #endif
+
+static cairo_surface_t *
+open_libjpeg_turbo(
+	const char *data, gsize len, const FivIoOpenContext *ctx, GError **error)
+{
+	return load_libjpeg_turbo(data, len, ctx,
+		ctx->enhance ? load_libjpeg_enhanced : load_libjpeg_simple,
+		error);
+}
 
 // --- WebP --------------------------------------------------------------------
 
@@ -3248,9 +3228,7 @@ fiv_io_open_from_data(
 			ctx, error);
 		break;
 	case WUFFS_BASE__FOURCC__JPEG:
-		surface = ctx->enhance
-			? open_libjpeg_enhanced(data, len, ctx, error)
-			: open_libjpeg_turbo(data, len, ctx, error);
+		surface = open_libjpeg_turbo(data, len, ctx, error);
 		break;
 	case WUFFS_BASE__FOURCC__WEBP:
 		surface = open_libwebp(data, len, ctx, error);
