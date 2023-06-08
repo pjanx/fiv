@@ -247,19 +247,23 @@ parse_exif_ifd(struct tiffer *T, const struct tiff_entry *info)
 	}
 
 	// This is how Exif specifies it, which doesn't follow TIFF 6.0.
-	if (info == tiff_entries && compression == TIFF_Compression_JPEG &&
+	// Also support CR2 IFD1, which isn't tagged with compression at all.
+	if (info == tiff_entries && /* compression == TIFF_Compression_JPEG && */
 		jpeg > 0 && jpeg_length > 0 &&
-		jpeg + jpeg_length < (T->end - T->begin)) {
+		jpeg + jpeg_length <= (T->end - T->begin)) {
 		ifd = jv_set(ifd, jv_string("JPEG image data"),
 			parse_jpeg(
 				jv_object(), T->begin + jpeg, jpeg_length));
 	}
 
+	// As specified by DRAFT TIFF Technical Note 2 + TIFFphotoshop.pdf.
 	// Theoretically, there may be more strips, but this is not expected.
+	// Also support CR2 IFD0, which is tagged with the "wrong" compression.
 	if (info == tiff_entries &&
-		compression == TIFF_Compression_JPEGDatastream &&
+		(compression == TIFF_Compression_JPEGDatastream ||
+			compression == TIFF_Compression_JPEG) &&
 		strip_offsets > 0 && strip_byte_counts > 0 &&
-		strip_offsets + strip_byte_counts < (T->end - T->begin)) {
+		strip_offsets + strip_byte_counts <= (T->end - T->begin)) {
 		ifd = jv_set(ifd, jv_string("JPEG image data"),
 			parse_jpeg(
 				jv_object(), T->begin + strip_offsets, strip_byte_counts));
