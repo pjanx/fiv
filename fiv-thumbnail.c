@@ -286,7 +286,8 @@ extract_libraw_unpack(libraw_data_t *iprc, int *flip, GError **error)
 	// because decoding a thumbnail will always be /much/ quicker than a render.
 	// TODO(p): Maybe don't mark raw image thumbnails as low-quality
 	// if they're the right aspect ratio, and of sufficiently large size.
-	// And I still worry about tflip.
+	// The only downsides to camera-provided thumbnails seem to be cropping,
+	// and when they're decoded incorrectly. Also don't trust tflip.
 	float output_pixels = (float) iprc->sizes.iwidth * iprc->sizes.iheight;
 	// Note that the ratio may even be larger than 1, as seen with CR2 files.
 	while (i < count &&
@@ -363,7 +364,6 @@ extract_libraw_unpack(libraw_data_t *iprc, int *flip, GError **error)
 	// The main image's "flip" often matches up, but sometimes doesn't, e.g.:
 	//  - Phase One/H 25/H25_Outdoor_.IIQ
 	//  - Phase One/H 25/H25_IT8.7-2_Card.TIF
-	//  - Leaf/Aptus 22/L_003172.mos (JPEG)
 	*flip = iprc->sizes.flip
 	return TRUE;
 }
@@ -457,7 +457,8 @@ extract_libraw(GFile *target, GMappedFile *mf, GError **error)
 	//  - Samsung/NX200/2013-05-08-194524__sam6589.srw
 	//  - Sony/DSC-HX95/DSC00018.ARW
 	// Note that LibRaw inserts its own Exif segment if it doesn't find one,
-	// and this may differ from flip.
+	// and this may differ from flip. It may also be wrong, as in:
+	//  - Leaf/Aptus 22/L_003172.mos
 	//
 	// Some files are problematic and we won't bother with special-casing:
 	//  - Nokia/Lumia 1020/RAW_NOKIA_LUMIA_1020.DNG (bitmap) has wrong color.
