@@ -154,7 +154,8 @@ gresources = gnome.compile_resources('resources',
 tiff_tables = custom_target('tiff-tables.h',
 	output : 'tiff-tables.h',
 	input : 'tiff-tables.db',
-	command : ['tiff-tables.awk', '@INPUT@'],
+	# Meson 0.56 chokes on files() as well as on a relative path.
+	command : [meson.current_source_dir() / 'tiff-tables.awk', '@INPUT@'],
 	capture : true,
 )
 

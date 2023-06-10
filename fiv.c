@@ -1352,7 +1352,7 @@ show_preferences(void)
 	if (!g_spawn_async(
 		NULL, argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, &error)) {
 		if (g_error_matches(error, G_SPAWN_ERROR, G_SPAWN_ERROR_NOENT))
-			g_prefix_error_literal(&error,
+			g_prefix_error(&error, "%s",
 				"Please install dconf-editor, or use the gsettings utility.\n");
 		show_error_dialog(error);
 	}

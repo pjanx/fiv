@@ -166,6 +166,10 @@ model_entry_array_new(void)
 		(GDestroyNotify) fiv_io_model_entry_unref);
 }
 
+#if !GLIB_CHECK_VERSION(2, 70, 0)
+#define g_pattern_spec_match g_pattern_match
+#endif
+
 static gboolean
 model_supports(FivIoModel *self, const char *filename)
 {
