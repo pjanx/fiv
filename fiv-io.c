@@ -3323,6 +3323,8 @@ fiv_io_open_from_data(
 		GError *err = NULL;
 		if ((surface = open_gdkpixbuf(data, len, ctx, &err))) {
 			g_clear_error(error);
+		} else if (!err) {
+			// Contrary to documentation, this is a possible outcome (libheif).
 		} else if (err->code == GDK_PIXBUF_ERROR_UNKNOWN_TYPE) {
 			g_error_free(err);
 		} else {
