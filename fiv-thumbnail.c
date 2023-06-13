@@ -332,11 +332,12 @@ extract_libraw_unpack(libraw_data_t *iprc, int *flip, GError **error)
 		sorted[i]->tformat == LIBRAW_INTERNAL_THUMBNAIL_KODAK_THUMB)
 		i++;
 
-	if (i < count)
+	bool found = i != count;
+	if (found)
 		i = sorted[i] - iprc->thumbs_list.thumblist;
 
 	g_free(sorted);
-	if (i == count) {
+	if (!found) {
 		set_error(error, "no suitable thumbnails found");
 		return FALSE;
 	}
