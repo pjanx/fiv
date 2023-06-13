@@ -3039,7 +3039,8 @@ open_libtiff(
 		// We inform about unsupported directories, but do not fail on them.
 		GError *err = NULL;
 		if (!try_append_page(
-				load_libtiff_directory(tiff, &err), &result, &result_tail)) {
+				load_libtiff_directory(tiff, &err), &result, &result_tail) &&
+			err) {
 			add_warning(ctx, "%s", err->message);
 			g_error_free(err);
 		}
