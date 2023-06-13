@@ -3107,10 +3107,20 @@ open_gdkpixbuf(
 		gdk_pixbuf_get_bits_per_sample(pixbuf) == 8;
 
 	cairo_surface_t *surface = NULL;
-	if (custom_argb32)
+	if (custom_argb32) {
 		surface = load_gdkpixbuf_argb32_unpremultiplied(pixbuf);
-	else
-		surface = gdk_cairo_surface_create_from_pixbuf(pixbuf, 1, NULL);
+	} else {
+		// Don't depend on GDK being initialized, to speed up thumbnailing
+		// (calling gdk_cairo_surface_create_from_pixbuf() would).
+		cairo_surface_t *dummy =
+			cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
+		cairo_t *cr = cairo_create(dummy);
+		cairo_surface_destroy(dummy);
+		gdk_cairo_set_source_pixbuf(cr, pixbuf, 0, 0);
+		(void) cairo_pattern_get_surface(cairo_get_source(cr), &surface);
+		cairo_surface_reference(surface);
+		cairo_destroy(cr);
+	}
 
 	cairo_status_t surface_status = cairo_surface_status(surface);
 	if (surface_status != CAIRO_STATUS_SUCCESS) {
