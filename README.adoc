@@ -2,7 +2,7 @@ fiv
 ===
 
 'fiv' is a slightly unconventional, general-purpose image browser and viewer
-for Linux (as well as macOS and Windows, though these have known issues).
+for Linux and Windows (macOS still has major issues).
 
 image::docs/fiv.webp["Screenshot of both the browser and the viewer"]
 
@@ -72,7 +72,15 @@ Beware that the build will take up about a gigabyte of disk space.
  $ meson install -C builddir
 
 If everything succeeds, you will find a portable build of the application
-in the 'builddir/package' subdirectory.  Keep your expectations low.
+in the 'builddir/package' subdirectory.  No installer is provided yet.
+
+Faster colour management
+^^^^^^^^^^^^^^^^^^^^^^^^
+To get the Little CMS fast float plugin, you'll have to enter MSYS2 and
+https://www.msys2.org/wiki/Creating-Packages/#re-building-a-package[rebuild]
+_mingw-w64-lcms2_ with the following change:
+
+ sed -i 's/meson setup /&-Dfastfloat=true /' PKGCONFIG
 
 Documentation
 -------------
