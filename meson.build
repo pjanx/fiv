@@ -139,7 +139,8 @@ if win32
 				'--width', size, '--height', size, '@INPUT@'])
 	endforeach
 
-	icon_ico = custom_target(input : icon_png_list, output : 'fiv.ico',
+	icon_ico = custom_target('fiv.ico',
+		output : 'fiv.ico', input : icon_png_list,
 		command : [icotool, '-c', '-o', '@OUTPUT@', '@INPUT@'])
 	rc += windows.compile_resources('fiv.rc', depends : icon_ico)
 endif
@@ -207,16 +208,21 @@ endforeach
 # For the purposes of development: make the program find its GSettings schemas.
 gnome.compile_schemas(depend_files : files(gsettings_schemas))
 
-# Validate various files, if there are tools around to do it.
-xmls = ['fiv.svg', 'fiv.manifest', 'resources/resources.gresource.xml'] + \
-	gsettings_schemas
-xmls += run_command(find_program('sed', required : false, disabler : true),
-	'-n', 's@.*>\([^<>]*[.]svg\)<.*@resources/\\1@p',
+# Meson is broken on Windows and removes the backslashes, so this ends up empty.
+symbolics = run_command(find_program('sed', required : false, disabler : true),
+	'-n', 's@.*>\\([^<>]*[.]svg\\)<.*@resources/\\1@p',
 	configure_file(
 		input : 'resources/resources.gresource.xml',
 		output : 'resources.gresource.xml.stamp',
 		copy : true,
-	), capture : true, check : true).stdout().strip().split('\n')
+	), capture : true, check : true).stdout().strip()
+
+# Validate various files, if there are tools around to do it.
+xmls = ['fiv.svg', 'fiv.manifest', 'resources/resources.gresource.xml'] + \
+	gsettings_schemas
+if symbolics != ''
+	xmls += symbolics.split('\n')
+endif
 
 xmlwf = find_program('xmlwf', required : false, disabler : true)
 xmllint = find_program('xmllint', required : false, disabler : true)
