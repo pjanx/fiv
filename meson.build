@@ -326,10 +326,11 @@ if not win32
 		meson.add_install_script(updater, skip_if_destdir : dynamic_desktops)
 	endif
 elif meson.is_cross_build()
+	# Note that even compiling /from within MSYS2/ can still be a cross-build.
 	msys2_root = meson.get_external_property('msys2_root')
-	meson.add_install_script('msys2-cross-install.sh', msys2_root)
+	meson.add_install_script('msys2-install.sh', msys2_root)
 
-	# This is the minimum to run targets from msys2-cross-configure.sh builds.
+	# This is the minimum to run targets from msys2-configure.sh builds.
 	meson.add_devenv({
 		'WINEPATH' : msys2_root / 'bin',
 		'XDG_DATA_DIRS' : msys2_root / 'share',

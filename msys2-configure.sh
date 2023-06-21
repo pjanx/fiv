@@ -1,8 +1,15 @@
 #!/bin/sh -e
-# msys2-cross-configure.sh: set up an MSYS2-based cross-compiled Meson build.
+# msys2-configure.sh: set up an MSYS2-based Meson build targeting x86-64.
 # Dependencies: AWK, sed, sha256sum, cURL, bsdtar,
 # wine64, Meson, mingw-w64-binutils, mingw-w64-gcc, pkg-config
 repository=https://repo.msys2.org/mingw/mingw64/
+
+# Support running directly from within MSYS2 on Windows.
+if [ -n "$MSYSTEM" ]
+then
+	wine64() { "$@"; }
+	awk() { command awk -v RS='\r?\n' "$@"; }
+fi
 
 status() {
 	echo "$(tput bold)-- $*$(tput sgr0)"
@@ -74,6 +81,8 @@ configure() {
 
 setup() {
 	status Setting up Meson
+	[ -n "$MSYSTEM" ] && wrap=false || wrap=true
+
 	cat >"$toolchain" <<-EOF
 	[binaries]
 	c = 'x86_64-w64-mingw32-gcc'
@@ -88,7 +97,7 @@ setup() {
 	sys_root = '$builddir'
 	msys2_root = '$msys2_root'
 	pkg_config_libdir = '$msys2_root/share/pkgconfig:$msys2_root/lib/pkgconfig'
-	needs_exe_wrapper = true
+	needs_exe_wrapper = $wrap
 
 	[host_machine]
 	system = 'windows'

@@ -3,6 +3,13 @@ export LC_ALL=C
 cd "$MESON_INSTALL_DESTDIR_PREFIX"
 msys2_root=$1
 
+# Support running directly from within MSYS2 on Windows.
+if [ -n "$MSYSTEM" ]
+then
+	wine64() { "$@"; }
+	awk() { command awk -v RS='\r?\n' "$@"; }
+fi
+
 # Copy binaries we directly or indirectly depend on.
 cp -p "$msys2_root"/bin/*.dll .
 cp -p "$msys2_root"/bin/wperl.exe .

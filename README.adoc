@@ -64,7 +64,7 @@ from a context menu.
 Windows
 ~~~~~~~
 'fiv' can be cross-compiled for Windows, provided that you install a bunch of
-dependencies listed at the beginning of 'msys2-cross-configure.sh',
+dependencies listed at the beginning of 'msys2-configure.sh',
 plus rsvg-convert from librsvg2, and icotool from icoutils.
 Beware that the build will take up about a gigabyte of disk space.
 
