@@ -1438,6 +1438,9 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 		break;
 	case 0:
 		switch (event->keyval) {
+		case GDK_KEY_BackSpace:
+			go_back();
+			return TRUE;
 		case GDK_KEY_q:
 			gtk_widget_destroy(g.window);
 			return TRUE;
