@@ -1,14 +1,25 @@
 #!/bin/sh -e
-# msys2-configure.sh: set up an MSYS2-based Meson build targeting x86-64.
-# Dependencies: AWK, sed, sha256sum, cURL, bsdtar,
+# msys2-configure.sh: set up an MSYS2-based Meson build (x86-64 by default)
+#
+# Dependencies: AWK, sed, coreutils, cURL, bsdtar (libarchive),
 # wine64, Meson, mingw-w64-binutils, mingw-w64-gcc, pkg-config
-repository=https://repo.msys2.org/mingw/mingw64/
+#
+# We support running directly from within MSYS2 on Windows,
+# albeit while still downloading a complete copy of runtime depencies.
+pkg=${MINGW_PACKAGE_PREFIX:-mingw-w64-x86_64}
+prefix=${MSYSTEM_PREFIX:-/mingw64}
+repo=https://repo.msys2.org/mingw$prefix
 
-# Support running directly from within MSYS2 on Windows.
+chost=${MSYSTEM_CHOST:-x86_64-w64-mingw32}
+carch=${MSYSTEM_CARCH:-x86_64}
+[ "$carch" = "i686" ] && carch=x86
+
 if [ -n "$MSYSTEM" ]
 then
 	wine64() { "$@"; }
 	awk() { command awk -v RS='\r?\n' "$@"; }
+	pacman -S --needed libarchive $pkg-ca-certificates $pkg-gcc $pkg-icoutils \
+		$pkg-librsvg $pkg-meson $pkg-pkgconf
 fi
 
 status() {
@@ -17,7 +28,7 @@ status() {
 
 dbsync() {
 	status Fetching repository DB
-	[ -f db.tsv ] || curl -# "$repository/mingw64.db" | bsdtar -xOf- | awk '
+	[ -f db.tsv ] || curl -# "$repo$prefix.db" | bsdtar -xOf- | awk '
 		function flush() { print f["%NAME%"] f["%FILENAME%"] f["%DEPENDS%"] }
 		NR > 1 && $0 == "%FILENAME%" { flush(); for (i in f) delete f[i] }
 		!/^[^%]/ { field = $0; next } { f[field] = f[field] $0 "\t" }
@@ -38,7 +49,7 @@ fetch() {
 	} for (i = 0; i < ARGC; i++) get(ARGV[i]) }' "$@" | while IFS= read -r name
 	do
 		status Fetching "$name"
-		[ -f "packages/$name" ] || curl -#o "packages/$name" "$repository/$name"
+		[ -f "packages/$name" ] || curl -#o "packages/$name" "$repo/$name"
 	done
 
 	version=$(curl -# https://exiftool.org/ver.txt)
@@ -59,7 +70,8 @@ extract() {
 	do [ -d "$subdir" -a "$subdir" != packages ] && rm -rf -- "$subdir"
 	done
 	for i in packages/*
-	do bsdtar -xf "$i" --strip-components 1 mingw64
+	do bsdtar -xf "$i" --strip-components 1 \
+		--exclude '*/share/man' --exclude '*/share/doc'
 	done
 
 	bsdtar -xf exiftool.tar.gz
@@ -81,28 +93,30 @@ configure() {
 
 setup() {
 	status Setting up Meson
-	[ -n "$MSYSTEM" ] && wrap=false || wrap=true
+	wrap=true pclibdir=$msys2_root/share/pkgconfig:$msys2_root/lib/pkgconfig
+	[ -n "$MSYSTEM" ] && \
+		wrap=false pclibdir="$(pwd -W)/share/pkgconfig;$(pwd -W)/lib/pkgconfig"
 
 	cat >"$toolchain" <<-EOF
 	[binaries]
-	c = 'x86_64-w64-mingw32-gcc'
-	cpp = 'x86_64-w64-mingw32-g++'
-	ar = 'x86_64-w64-mingw32-gcc-ar'
-	ranlib = 'x86_64-w64-mingw32-gcc-ranlib'
-	strip = 'x86_64-w64-mingw32-strip'
-	windres = 'x86_64-w64-mingw32-windres'
+	c = '$chost-gcc'
+	cpp = '$chost-g++'
+	ar = '$chost-gcc-ar'
+	ranlib = '$chost-gcc-ranlib'
+	strip = '$chost-strip'
+	windres = '$chost-windres'
 	pkgconfig = 'pkg-config'
 
 	[properties]
 	sys_root = '$builddir'
 	msys2_root = '$msys2_root'
-	pkg_config_libdir = '$msys2_root/share/pkgconfig:$msys2_root/lib/pkgconfig'
+	pkg_config_libdir = '$pclibdir'
 	needs_exe_wrapper = $wrap
 
 	[host_machine]
 	system = 'windows'
-	cpu_family = 'x86_64'
-	cpu = 'x86_64'
+	cpu_family = '$carch'
+	cpu = '$carch'
 	endian = 'little'
 	EOF
 
@@ -117,15 +131,13 @@ toolchain=$builddir/msys2-cross-toolchain.meson
 
 # This directory name matches the prefix in .pc files, so we don't need to
 # modify them (pkgconf has --prefix-variable, but Meson can't pass that option).
-msys2_root=$builddir/mingw64
+msys2_root=$builddir$prefix
 
 mkdir -p "$msys2_root"
 cd "$msys2_root"
 dbsync
-fetch mingw-w64-x86_64-gtk3 mingw-w64-x86_64-lcms2 \
-	mingw-w64-x86_64-libraw mingw-w64-x86_64-libheif \
-	mingw-w64-x86_64-perl mingw-w64-x86_64-perl-win32-api \
-	mingw-w64-x86_64-libwinpthread-git # Because we don't do "provides"?
+fetch $pkg-gtk3 $pkg-lcms2 $pkg-libraw $pkg-libheif $pkg-perl \
+	$pkg-perl-win32-api $pkg-libwinpthread-git # Because we don't do "provides"?
 verify
 extract
 configure

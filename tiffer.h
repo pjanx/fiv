@@ -161,7 +161,7 @@ static bool
 tiffer_subifd(
 	const struct tiffer *self, uint32_t offset, struct tiffer *subreader)
 {
-	if (self->end - self->begin < offset)
+	if (self->begin > self->end || self->end - self->begin < offset)
 		return false;
 
 	*subreader = *self;
