@@ -65,14 +65,15 @@ Windows
 ~~~~~~~
 'fiv' can be cross-compiled for Windows, provided that you install a bunch of
 dependencies listed at the beginning of 'msys2-configure.sh',
-plus rsvg-convert from librsvg2, and icotool from icoutils.
+plus rsvg-convert from librsvg2, icotool from icoutils, and msitools ≥ 0.102.
 Beware that the build will take up about a gigabyte of disk space.
 
  $ sh -e msys2-configure.sh builddir
  $ meson install -C builddir
 
 If everything succeeds, you will find a portable build of the application
-in the 'builddir/package' subdirectory.  No installer is provided yet.
+in the 'builddir/package' subdirectory, and a very basic MSI installation
+package in 'builddir'.
 
 Faster colour management
 ^^^^^^^^^^^^^^^^^^^^^^^^

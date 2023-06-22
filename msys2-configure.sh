@@ -19,7 +19,7 @@ then
 	wine64() { "$@"; }
 	awk() { command awk -v RS='\r?\n' "$@"; }
 	pacman -S --needed libarchive $pkg-ca-certificates $pkg-gcc $pkg-icoutils \
-		$pkg-librsvg $pkg-meson $pkg-pkgconf
+		$pkg-librsvg $pkg-meson $pkg-msitools $pkg-pkgconf
 fi
 
 status() {
