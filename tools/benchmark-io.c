@@ -41,14 +41,14 @@ one_file(const char *filename)
 		.warnings = g_ptr_array_new_with_free_func(g_free),
 	};
 
-	cairo_surface_t *loaded_by_us = fiv_io_open(&ctx, NULL);
+	FivIoImage *loaded_by_us = fiv_io_open(&ctx, NULL);
 	g_clear_object(&file);
 	g_free((char *) ctx.uri);
 	g_ptr_array_free(ctx.warnings, TRUE);
 	if (!loaded_by_us)
 		return;
 
-	cairo_surface_destroy(loaded_by_us);
+	fiv_io_image_unref(loaded_by_us);
 	us = timestamp() - since_us;
 
 	double since_pixbuf = timestamp(), pixbuf = 0;

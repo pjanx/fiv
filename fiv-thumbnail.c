@@ -137,8 +137,8 @@ render(GFile *target, GBytes *data, gboolean *color_managed, GError **error)
 		.warnings = g_ptr_array_new_with_free_func(g_free),
 	};
 
-	cairo_surface_t *surface = fiv_io_open_from_data(
-		g_bytes_get_data(data, NULL), g_bytes_get_size(data), &ctx, error);
+	cairo_surface_t *surface = fiv_io_image_to_surface(fiv_io_open_from_data(
+		g_bytes_get_data(data, NULL), g_bytes_get_size(data), &ctx, error));
 	g_free((gchar *) ctx.uri);
 	g_ptr_array_free(ctx.warnings, TRUE);
 	if ((*color_managed = !!ctx.screen_profile))
@@ -793,8 +793,8 @@ read_wide_thumbnail(const char *path, const Stat *st, GError **error)
 	if (!thumbnail_uri)
 		return NULL;
 
-	cairo_surface_t *surface =
-		fiv_io_open(&(FivIoOpenContext){.uri = thumbnail_uri}, error);
+	cairo_surface_t *surface = fiv_io_image_to_surface(
+		fiv_io_open(&(FivIoOpenContext){.uri = thumbnail_uri}, error));
 	g_free(thumbnail_uri);
 	if (!surface)
 		return NULL;

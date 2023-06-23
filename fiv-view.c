@@ -1374,7 +1374,8 @@ open_without_swapping_in(FivView *self, const char *uri)
 	};
 
 	GError *error = NULL;
-	cairo_surface_t *surface = fiv_io_open(&ctx, &error);
+	cairo_surface_t *surface =
+		fiv_io_image_to_surface(fiv_io_open(&ctx, &error));
 	if (error) {
 		g_ptr_array_add(ctx.warnings, g_strdup(error->message));
 		g_error_free(error);
