@@ -553,25 +553,23 @@ fiv_io_profile_argb32_premultiply(
 	}
 }
 
-#define fiv_io_profile_argb32_premultiply_page(page, target) \
-	fiv_io_profile_page((page), (target), fiv_io_profile_argb32_premultiply)
-
 #else  // ! HAVE_LCMS2 || LCMS_VERSION < 2130
 
 // TODO(p): Unpremultiply, transform, repremultiply. Or require lcms2>=2.13.
 #define fiv_io_profile_argb32(surface, source, target)
 
 static void
-fiv_io_profile_argb32_premultiply_page(
-	FivIoImage *page, FivIoProfile target)
+fiv_io_profile_argb32_premultiply(
+	FivIoImage *image, FivIoProfile source, FivIoProfile target)
 {
-	fiv_io_profile_page(page, target, fiv_io_profile_xrgb32);
-
-	for (FivIoImage *frame = page; frame != NULL; frame = frame->frame_next)
-		fiv_io_premultiply_argb32(frame);
+	fiv_io_profile_xrgb32(image, source, target);
+	fiv_io_premultiply_argb32(image);
 }
 
 #endif  // ! HAVE_LCMS2 || LCMS_VERSION < 2130
+
+#define fiv_io_profile_argb32_premultiply_page(page, target) \
+	fiv_io_profile_page((page), (target), fiv_io_profile_argb32_premultiply)
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
@@ -768,8 +766,7 @@ load_wuffs_frame(struct load_wuffs_frame_context *ctx, GError **error)
 				targetbuf, ctx->width, ctx->height, ctx->source, ctx->target);
 			// The first one premultiplies below, the second doesn't need to.
 		} else {
-			fiv_io_profile_xrgb32(image, ctx->source, ctx->target);
-			fiv_io_premultiply_argb32(image);
+			fiv_io_profile_argb32_premultiply(image, ctx->source, ctx->target);
 		}
 	}
 
