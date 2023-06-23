@@ -156,12 +156,18 @@ tiffer_next_ifd(struct tiffer *self)
 	return tiffer_u16(self, &self->remaining_fields);
 }
 
+static size_t
+tiffer_length(const struct tiffer *self)
+{
+	return self->begin > self->end ? 0 : self->end - self->begin;
+}
+
 /// Initialize a derived TIFF reader for a subIFD at the given location.
 static bool
 tiffer_subifd(
 	const struct tiffer *self, uint32_t offset, struct tiffer *subreader)
 {
-	if (self->begin > self->end || self->end - self->begin < offset)
+	if (tiffer_length(self) < offset)
 		return false;
 
 	*subreader = *self;
@@ -332,7 +338,7 @@ tiffer_next_entry(struct tiffer *self, struct tiffer_entry *entry)
 	if (values_size <= sizeof offset) {
 		entry->p = self->p;
 		self->p += sizeof offset;
-	} else if (tiffer_u32(self, &offset) && self->end - self->begin >= offset) {
+	} else if (tiffer_u32(self, &offset) && tiffer_length(self) >= offset) {
 		entry->p = self->begin + offset;
 	} else {
 		return false;

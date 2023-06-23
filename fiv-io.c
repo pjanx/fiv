@@ -1263,7 +1263,7 @@ parse_mpf_index_ifd(struct tiffer *T)
 
 static bool
 parse_mpf(
-	GPtrArray *individuals, const uint8_t *mpf, size_t len, const uint8_t *end)
+	GPtrArray *individuals, const uint8_t *mpf, size_t len, size_t total_len)
 {
 	struct tiffer T;
 	if (!tiffer_init(&T, mpf, len) || !tiffer_next_ifd(&T))
@@ -1274,7 +1274,7 @@ parse_mpf(
 	uint32_t *offsets = parse_mpf_index_ifd(&T);
 	if (offsets) {
 		for (const uint32_t *o = offsets; *o; o++)
-			if (*o <= end - mpf)
+			if (*o <= total_len)
 				g_ptr_array_add(individuals, (gpointer) mpf + *o);
 		free(offsets);
 	}
@@ -1378,7 +1378,7 @@ parse_jpeg_metadata(const char *data, size_t len, struct jpeg_metadata *meta)
 		if (meta->mpf && marker == APP2 && p - payload >= 8 &&
 			!memcmp(payload, "MPF\0", 4) && !meta->mpf->len) {
 			payload += 4;
-			parse_mpf(meta->mpf, payload, p - payload, end);
+			parse_mpf(meta->mpf, payload, p - payload, end - payload);
 		}
 
 		// TODO(p): Extract the main XMP segment.
