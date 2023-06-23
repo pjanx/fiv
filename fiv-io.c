@@ -180,7 +180,7 @@ add_warning(const FivIoOpenContext *ctx, const char *format, ...)
 
 // --- Images ------------------------------------------------------------------
 
-static FivIoImage *
+FivIoImage *
 fiv_io_image_new(cairo_format_t format, uint32_t width, uint32_t height)
 {
 	// CAIRO_STRIDE_ALIGNMENT is 4 bytes, we only use multiples.
@@ -230,6 +230,9 @@ fiv_io_image_finalize(FivIoImage *image)
 	g_bytes_unref(image->xmp);
 	g_bytes_unref(image->thum);
 
+	if (image->text)
+		g_hash_table_unref(image->text);
+
 	if (image->render)
 		image->render->destroy(image->render);
 
@@ -245,7 +248,7 @@ fiv_io_image_unref(FivIoImage *self)
 	g_rc_box_release_full(self, (GDestroyNotify) fiv_io_image_finalize);
 }
 
-static cairo_surface_t *
+cairo_surface_t *
 fiv_io_image_to_surface_noref(const FivIoImage *image)
 {
 	return cairo_image_surface_create_for_data(
@@ -560,12 +563,11 @@ fiv_io_profile_argb32_premultiply(
 
 static void
 fiv_io_profile_argb32_premultiply_page(
-	cairo_surface_t *page, FivIoProfile target)
+	FivIoImage *page, FivIoProfile target)
 {
 	fiv_io_profile_page(page, target, fiv_io_profile_xrgb32);
 
-	for (cairo_surface_t *frame = page; frame != NULL;
-		frame = cairo_surface_get_user_data(frame, &fiv_io_key_frame_next))
+	for (FivIoImage *frame = page; frame != NULL; frame = frame->frame_next)
 		fiv_io_premultiply_argb32(frame);
 }
 
@@ -1121,7 +1123,7 @@ pull_metadata_kvp(wuffs_png__decoder *dec, wuffs_base__io_buffer *src,
 }
 
 // An uncomplicated variant of fiv_io_open(), might be up for refactoring.
-cairo_surface_t *
+FivIoImage *
 fiv_io_open_png_thumbnail(const char *path, GError **error)
 {
 	wuffs_png__decoder dec = {};
@@ -1144,7 +1146,7 @@ fiv_io_open_png_thumbnail(const char *path, GError **error)
 
 	wuffs_base__image_config cfg = {};
 	wuffs_base__slice_u8 workbuf = {};
-	cairo_surface_t *surface = NULL;
+	FivIoImage *image = NULL;
 	bool success = false;
 
 	GHashTable *texts =
@@ -1186,23 +1188,19 @@ fiv_io_open_png_thumbnail(const char *path, GError **error)
 		}
 	}
 
-	surface = cairo_image_surface_create(
+	image = fiv_io_image_new(
 		wuffs_base__image_config__first_frame_is_opaque(&cfg)
 			? CAIRO_FORMAT_RGB24
 			: CAIRO_FORMAT_ARGB32,
 		width, height);
-
-	cairo_status_t surface_status = cairo_surface_status(surface);
-	if (surface_status != CAIRO_STATUS_SUCCESS) {
-		set_error(error, cairo_status_to_string(surface_status));
+	if (!image) {
+		set_error(error, "image allocation failure");
 		goto fail;
 	}
 
 	wuffs_base__pixel_buffer pb = {};
 	status = wuffs_base__pixel_buffer__set_from_slice(&pb, &cfg.pixcfg,
-		wuffs_base__make_slice_u8(cairo_image_surface_get_data(surface),
-			cairo_image_surface_get_stride(surface) *
-				cairo_image_surface_get_height(surface)));
+		wuffs_base__make_slice_u8(image->data, image->stride * image->height));
 	if (!wuffs_base__status__is_ok(&status)) {
 		set_error(error, wuffs_base__status__message(&status));
 		goto fail;
@@ -1235,19 +1233,17 @@ fiv_io_open_png_thumbnail(const char *path, GError **error)
 
 	g_assert(key == NULL);
 
-	cairo_surface_mark_dirty(surface);
-	cairo_surface_set_user_data(surface, &fiv_io_key_text,
-		g_hash_table_ref(texts), (cairo_destroy_func_t) g_hash_table_unref);
+	image->text = g_hash_table_ref(texts);
 	success = true;
 
 fail:
 	if (!success)
-		g_clear_pointer(&surface, cairo_surface_destroy);
+		g_clear_pointer(&image, fiv_io_image_unref);
 
 	free(workbuf.ptr);
 	g_free(data);
 	g_hash_table_unref(texts);
-	return surface;
+	return image;
 }
 
 // --- Multi-Picture Format ----------------------------------------------------
@@ -2309,13 +2305,12 @@ load_resvg_render_internal(FivIoRenderClosureResvg *self,
 	return fiv_io_profile_finalize(image, target);
 }
 
-static cairo_surface_t *
+static FivIoImage *
 load_resvg_render(FivIoRenderClosure *closure, double scale)
 {
 	FivIoRenderClosureResvg *self = (FivIoRenderClosureResvg *) closure;
 	// TODO(p): Somehow get the target colour management profile.
-	return fiv_io_image_to_surface(
-		load_resvg_render_internal(self, scale, NULL, NULL));
+	return load_resvg_render_internal(self, scale, NULL, NULL);
 }
 
 static const char *
@@ -2433,13 +2428,12 @@ load_librsvg_render_internal(FivIoRenderClosureLibrsvg *self, double scale,
 	return fiv_io_profile_finalize(image, target);
 }
 
-static cairo_surface_t *
+static FivIoImage *
 load_librsvg_render(FivIoRenderClosure *closure, double scale)
 {
 	FivIoRenderClosureLibrsvg *self = (FivIoRenderClosureLibrsvg *) closure;
 	// TODO(p): Somehow get the target colour management profile.
-	return fiv_io_image_to_surface(
-		load_librsvg_render_internal(self, scale, NULL, NULL));
+	return load_librsvg_render_internal(self, scale, NULL, NULL);
 }
 
 static FivIoImage *
@@ -3139,24 +3133,6 @@ open_gdkpixbuf(
 
 #endif  // HAVE_GDKPIXBUF ------------------------------------------------------
 
-// TODO(p): Check that all cairo_surface_set_user_data() calls succeed.
-cairo_user_data_key_t fiv_io_key_exif;
-cairo_user_data_key_t fiv_io_key_orientation;
-cairo_user_data_key_t fiv_io_key_icc;
-cairo_user_data_key_t fiv_io_key_xmp;
-cairo_user_data_key_t fiv_io_key_thum;
-cairo_user_data_key_t fiv_io_key_text;
-
-cairo_user_data_key_t fiv_io_key_frame_next;
-cairo_user_data_key_t fiv_io_key_frame_previous;
-cairo_user_data_key_t fiv_io_key_frame_duration;
-cairo_user_data_key_t fiv_io_key_loops;
-
-cairo_user_data_key_t fiv_io_key_page_next;
-cairo_user_data_key_t fiv_io_key_page_previous;
-
-cairo_user_data_key_t fiv_io_key_render;
-
 FivIoImage *
 fiv_io_open(const FivIoOpenContext *ctx, GError **error)
 {
@@ -3479,23 +3455,26 @@ fiv_io_serialize_for_search(cairo_surface_t *surface, GError **error)
 
 unsigned char *
 fiv_io_encode_webp(
-	cairo_surface_t *surface, const WebPConfig *config, size_t *len)
+	FivIoImage *image, const WebPConfig *config, size_t *len)
 {
-	cairo_format_t format = cairo_image_surface_get_format(surface);
-	int w = cairo_image_surface_get_width(surface);
-	int h = cairo_image_surface_get_height(surface);
-	if (format != CAIRO_FORMAT_ARGB32 &&
-		format != CAIRO_FORMAT_RGB24) {
-		cairo_surface_t *converted =
-			cairo_image_surface_create((format = CAIRO_FORMAT_ARGB32), w, h);
-		cairo_t *cr = cairo_create(converted);
+	if (image->format != CAIRO_FORMAT_ARGB32 &&
+		image->format != CAIRO_FORMAT_RGB24) {
+		FivIoImage *converted =
+			fiv_io_image_new(CAIRO_FORMAT_ARGB32, image->width, image->height);
+
+		cairo_surface_t *surface = fiv_io_image_to_surface_noref(converted);
+		cairo_t *cr = cairo_create(surface);
+		cairo_surface_destroy(surface);
+
+		surface = fiv_io_image_to_surface_noref(image);
 		cairo_set_source_surface(cr, surface, 0, 0);
+		cairo_surface_destroy(surface);
 		cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
 		cairo_paint(cr);
 		cairo_destroy(cr);
-		surface = converted;
+		image = converted;
 	} else {
-		surface = cairo_surface_reference(surface);
+		image = fiv_io_image_ref(image);
 	}
 
 	WebPMemoryWriter writer = {};
@@ -3505,27 +3484,26 @@ fiv_io_encode_webp(
 		goto fail;
 
 	picture.use_argb = true;
-	picture.width = w;
-	picture.height = h;
+	picture.width = image->width;
+	picture.height = image->height;
 	if (!WebPPictureAlloc(&picture))
 		goto fail;
 
 	// Cairo uses a similar internal format, so we should be able to
 	// copy it over and fix up the minor differences.
 	// This is written to be easy to follow rather than fast.
-	int stride = cairo_image_surface_get_stride(surface);
-	if (picture.argb_stride != w ||
-		picture.argb_stride * (int) sizeof *picture.argb != stride ||
-		INT_MAX / picture.argb_stride < h)
+	if (picture.argb_stride != (int) image->width ||
+		picture.argb_stride * sizeof *picture.argb != image->stride ||
+		UINT32_MAX / picture.argb_stride < image->height)
 		goto fail_compatibility;
 
 	uint32_t *argb =
-		memcpy(picture.argb, cairo_image_surface_get_data(surface), stride * h);
-	if (format == CAIRO_FORMAT_ARGB32)
-		for (int i = h * picture.argb_stride; i-- > 0; argb++)
+		memcpy(picture.argb, image->data, image->stride * image->height);
+	if (image->format == CAIRO_FORMAT_ARGB32)
+		for (int i = image->height * picture.argb_stride; i-- > 0; argb++)
 			*argb = wuffs_base__color_u32_argb_premul__as__color_u32_argb_nonpremul(*argb);
 	else
-		for (int i = h * picture.argb_stride; i-- > 0; argb++)
+		for (int i = image->height * picture.argb_stride; i-- > 0; argb++)
 			*argb |= 0xFF000000;
 
 	// TODO(p): Prevent or propagate VP8_ENC_ERROR_BAD_DIMENSION.
@@ -3537,13 +3515,13 @@ fiv_io_encode_webp(
 fail_compatibility:
 	WebPPictureFree(&picture);
 fail:
-	cairo_surface_destroy(surface);
+	fiv_io_image_unref(image);
 	*len = writer.size;
 	return writer.mem;
 }
 
 static WebPData
-encode_lossless_webp(cairo_surface_t *surface)
+encode_lossless_webp(FivIoImage *image)
 {
 	WebPData bitstream = {};
 	WebPConfig config = {};
@@ -3554,12 +3532,12 @@ encode_lossless_webp(cairo_surface_t *surface)
 	if (!WebPValidateConfig(&config))
 		return bitstream;
 
-	bitstream.bytes = fiv_io_encode_webp(surface, &config, &bitstream.size);
+	bitstream.bytes = fiv_io_encode_webp(image, &config, &bitstream.size);
 	return bitstream;
 }
 
 static gboolean
-encode_webp_image(WebPMux *mux, cairo_surface_t *frame)
+encode_webp_image(WebPMux *mux, FivIoImage *frame)
 {
 	WebPData bitstream = encode_lossless_webp(frame);
 	gboolean ok = WebPMuxSetImage(mux, &bitstream, true) == WEBP_MUX_OK;
@@ -3568,15 +3546,13 @@ encode_webp_image(WebPMux *mux, cairo_surface_t *frame)
 }
 
 static gboolean
-encode_webp_animation(WebPMux *mux, cairo_surface_t *page)
+encode_webp_animation(WebPMux *mux, FivIoImage *page)
 {
 	gboolean ok = TRUE;
-	for (cairo_surface_t *frame = page; ok && frame; frame =
-			cairo_surface_get_user_data(frame, &fiv_io_key_frame_next)) {
+	for (FivIoImage *frame = page; ok && frame; frame = frame->frame_next) {
 		WebPMuxFrameInfo info = {
 			.bitstream = encode_lossless_webp(frame),
-			.duration = (intptr_t) cairo_surface_get_user_data(
-				frame, &fiv_io_key_frame_duration),
+			.duration = frame->frame_duration,
 			.id = WEBP_CHUNK_ANMF,
 			.dispose_method = WEBP_MUX_DISPOSE_NONE,
 			.blend_method = WEBP_MUX_NO_BLEND,
@@ -3586,8 +3562,7 @@ encode_webp_animation(WebPMux *mux, cairo_surface_t *page)
 	}
 	WebPMuxAnimParams params = {
 		.bgcolor = 0x00000000,  // BGRA, curiously.
-		.loop_count = (uintptr_t)
-			cairo_surface_get_user_data(page, &fiv_io_key_loops),
+		.loop_count = page->loops,
 	};
 	return ok && WebPMuxSetAnimationParams(mux, &params) == WEBP_MUX_OK;
 }
@@ -3605,7 +3580,7 @@ set_metadata(WebPMux *mux, const char *fourcc, GBytes *data)
 }
 
 gboolean
-fiv_io_save(cairo_surface_t *page, cairo_surface_t *frame, FivIoProfile target,
+fiv_io_save(FivIoImage *page, FivIoImage *frame, FivIoProfile target,
 	const char *path, GError **error)
 {
 	g_return_val_if_fail(page != NULL, FALSE);
@@ -3615,17 +3590,14 @@ fiv_io_save(cairo_surface_t *page, cairo_surface_t *frame, FivIoProfile target,
 	WebPMux *mux = WebPMuxNew();
 	if (frame)
 		ok = encode_webp_image(mux, frame);
-	else if (!cairo_surface_get_user_data(page, &fiv_io_key_frame_next))
+	else if (!page->frame_next)
 		ok = encode_webp_image(mux, page);
 	else
 		ok = encode_webp_animation(mux, page);
 
-	ok = ok && set_metadata(mux, "EXIF",
-		cairo_surface_get_user_data(page, &fiv_io_key_exif));
-	ok = ok && set_metadata(mux, "ICCP",
-		cairo_surface_get_user_data(page, &fiv_io_key_icc));
-	ok = ok && set_metadata(mux, "XMP ",
-		cairo_surface_get_user_data(page, &fiv_io_key_xmp));
+	ok = ok && set_metadata(mux, "EXIF", page->exif);
+	ok = ok && set_metadata(mux, "ICCP", page->icc);
+	ok = ok && set_metadata(mux, "XMP ", page->xmp);
 
 	GBytes *iccp = NULL;
 	if (ok && target && (iccp = fiv_io_profile_to_bytes(target)))
@@ -3650,43 +3622,28 @@ fiv_io_save(cairo_surface_t *page, cairo_surface_t *frame, FivIoProfile target,
 // --- Metadata ----------------------------------------------------------------
 
 void
-fiv_io_orientation_dimensions(cairo_surface_t *surface,
-	FivIoOrientation orientation, double *w, double *h)
+fiv_io_orientation_dimensions(
+	const FivIoImage *image, FivIoOrientation orientation, double *w, double *h)
 {
-	cairo_rectangle_t extents = {};
-	switch (cairo_surface_get_type(surface)) {
-	case CAIRO_SURFACE_TYPE_IMAGE:
-		extents.width = cairo_image_surface_get_width(surface);
-		extents.height = cairo_image_surface_get_height(surface);
-		break;
-	case CAIRO_SURFACE_TYPE_RECORDING:
-		if (!cairo_recording_surface_get_extents(surface, &extents))
-			cairo_recording_surface_ink_extents(surface,
-				&extents.x, &extents.y, &extents.width, &extents.height);
-		break;
-	default:
-		g_assert_not_reached();
-	}
-
 	switch (orientation) {
 	case FivIoOrientation90:
 	case FivIoOrientationMirror90:
 	case FivIoOrientation270:
 	case FivIoOrientationMirror270:
-		*w = extents.height;
-		*h = extents.width;
+		*w = image->height;
+		*h = image->width;
 		break;
 	default:
-		*w = extents.width;
-		*h = extents.height;
+		*w = image->width;
+		*h = image->height;
 	}
 }
 
 cairo_matrix_t
-fiv_io_orientation_apply(cairo_surface_t *surface,
+fiv_io_orientation_apply(const FivIoImage *image,
 	FivIoOrientation orientation, double *width, double *height)
 {
-	fiv_io_orientation_dimensions(surface, orientation, width, height);
+	fiv_io_orientation_dimensions(image, orientation, width, height);
 
 	cairo_matrix_t matrix = {};
 	cairo_matrix_init_identity(&matrix);
@@ -3749,7 +3706,7 @@ fiv_io_exif_orientation(const guint8 *tiff, gsize len)
 }
 
 gboolean
-fiv_io_save_metadata(cairo_surface_t *page, const char *path, GError **error)
+fiv_io_save_metadata(const FivIoImage *page, const char *path, GError **error)
 {
 	g_return_val_if_fail(page != NULL, FALSE);
 
@@ -3764,14 +3721,12 @@ fiv_io_save_metadata(cairo_surface_t *page, const char *path, GError **error)
 	// (standalone) with trailing nonsense.
 	fprintf(fp, "\xFF\001Exiv2");
 
-	GBytes *data = NULL;
 	gsize len = 0;
 	gconstpointer p = NULL;
 
 	// Adobe XMP Specification Part 3: Storage in Files, 2020/1, 1.1.3
 	// I don't care if Exiv2 supports it this way.
-	if ((data = cairo_surface_get_user_data(page, &fiv_io_key_exif)) &&
-		(p = g_bytes_get_data(data, &len))) {
+	if (page->exif && (p = g_bytes_get_data(page->exif, &len))) {
 		while (len) {
 			gsize chunk = MIN(len, 0xFFFF - 2 - 6);
 			uint8_t header[10] = "\xFF\xE1\000\000Exif\000\000";
@@ -3787,8 +3742,7 @@ fiv_io_save_metadata(cairo_surface_t *page, const char *path, GError **error)
 	}
 
 	// https://www.color.org/specification/ICC1v43_2010-12.pdf B.4
-	if ((data = cairo_surface_get_user_data(page, &fiv_io_key_icc)) &&
-		(p = g_bytes_get_data(data, &len))) {
+	if (page->icc && (p = g_bytes_get_data(page->icc, &len))) {
 		gsize limit = 0xFFFF - 2 - 12;
 		uint8_t current = 0, total = (len + limit - 1) / limit;
 		while (len) {
@@ -3810,8 +3764,7 @@ fiv_io_save_metadata(cairo_surface_t *page, const char *path, GError **error)
 	// Adobe XMP Specification Part 3: Storage in Files, 2020/1, 1.1.3
 	// If the main segment overflows, then it's a sign of bad luck,
 	// because 1.1.3.1 is way too complex.
-	if ((data = cairo_surface_get_user_data(page, &fiv_io_key_xmp)) &&
-		(p = g_bytes_get_data(data, &len))) {
+	if (page->xmp && (p = g_bytes_get_data(page->xmp, &len))) {
 		while (len) {
 			gsize chunk = MIN(len, 0xFFFF - 2 - 29);
 			uint8_t header[33] =

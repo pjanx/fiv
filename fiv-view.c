@@ -63,10 +63,10 @@ struct _FivView {
 
 	gchar *messages;                    ///< Image load information
 	gchar *uri;                         ///< Path to the current image (if any)
-	cairo_surface_t *image;             ///< The loaded image (sequence)
-	cairo_surface_t *page;              ///< Current page within image, weak
-	cairo_surface_t *page_scaled;       ///< Current page within image, scaled
-	cairo_surface_t *frame;             ///< Current frame within page, weak
+	FivIoImage *image;                  ///< The loaded image (sequence)
+	FivIoImage *page;                   ///< Current page within image, weak
+	FivIoImage *page_scaled;            ///< Current page within image, scaled
+	FivIoImage *frame;                  ///< Current frame within page, weak
 	FivIoOrientation orientation;       ///< Current page orientation
 	bool enable_cms : 1;                ///< Smooth scaling toggle
 	bool filter : 1;                    ///< Smooth scaling toggle
@@ -77,7 +77,7 @@ struct _FivView {
 	double scale;                       ///< Scaling factor
 	double drag_start[2];               ///< Adjustment values for drag origin
 
-	cairo_surface_t *enhance_swap;      ///< Quick swap in/out
+	FivIoImage *enhance_swap;           ///< Quick swap in/out
 	FivIoProfile screen_cms_profile;    ///< Target colour profile for widget
 
 	int remaining_loops;                ///< Greater than zero if limited
@@ -234,9 +234,9 @@ fiv_view_finalize(GObject *gobject)
 {
 	FivView *self = FIV_VIEW(gobject);
 	g_clear_pointer(&self->screen_cms_profile, fiv_io_profile_free);
-	g_clear_pointer(&self->enhance_swap, cairo_surface_destroy);
-	g_clear_pointer(&self->image, cairo_surface_destroy);
-	g_clear_pointer(&self->page_scaled, cairo_surface_destroy);
+	g_clear_pointer(&self->enhance_swap, fiv_io_image_unref);
+	g_clear_pointer(&self->image, fiv_io_image_unref);
+	g_clear_pointer(&self->page_scaled, fiv_io_image_unref);
 	g_free(self->uri);
 	g_free(self->messages);
 
@@ -283,15 +283,13 @@ fiv_view_get_property(
 		g_value_set_boolean(value, !!self->image);
 		break;
 	case PROP_CAN_ANIMATE:
-		g_value_set_boolean(value, self->page &&
-			cairo_surface_get_user_data(self->page, &fiv_io_key_frame_next));
+		g_value_set_boolean(value, self->page && self->page->frame_next);
 		break;
 	case PROP_HAS_PREVIOUS_PAGE:
 		g_value_set_boolean(value, self->image && self->page != self->image);
 		break;
 	case PROP_HAS_NEXT_PAGE:
-		g_value_set_boolean(value, self->page &&
-			cairo_surface_get_user_data(self->page, &fiv_io_key_page_next));
+		g_value_set_boolean(value, self->page && self->page->page_next);
 		break;
 
 	case PROP_HADJUSTMENT:
@@ -403,18 +401,25 @@ static void
 prescale_page(FivView *self)
 {
 	FivIoRenderClosure *closure = NULL;
-	if (!self->image || !(closure =
-			cairo_surface_get_user_data(self->page, &fiv_io_key_render)))
+	if (!self->image || !(closure = self->page->render))
 		return;
 
 	// TODO(p): Restart the animation. No vector formats currently animate.
 	g_return_if_fail(!self->frame_update_connection);
 
 	// If it fails, the previous frame pointer may become invalid.
-	g_clear_pointer(&self->page_scaled, cairo_surface_destroy);
+	g_clear_pointer(&self->page_scaled, fiv_io_image_unref);
 	self->frame = self->page_scaled = closure->render(closure, self->scale);
 	if (!self->page_scaled)
 		self->frame = self->page;
+}
+
+static void
+set_source_image(FivView *self, cairo_t *cr)
+{
+	cairo_surface_t *surface = fiv_io_image_to_surface_noref(self->frame);
+	cairo_set_source_surface(cr, surface, 0, 0);
+	cairo_surface_destroy(surface);
 }
 
 static void
@@ -606,27 +611,9 @@ fiv_view_draw(GtkWidget *widget, cairo_t *cr)
 
 	// Then all frames are pre-scaled.
 	if (self->page_scaled) {
-		cairo_set_source_surface(cr, self->frame, 0, 0);
+		set_source_image(self, cr);
 		cairo_pattern_set_matrix(cairo_get_source(cr), &matrix);
 		cairo_paint(cr);
-		return TRUE;
-	}
-
-	// FIXME: Recording surfaces do not work well with CAIRO_SURFACE_TYPE_XLIB,
-	// we always get a shitty pixmap, where transparency contains junk.
-	if (cairo_surface_get_type(self->frame) == CAIRO_SURFACE_TYPE_RECORDING) {
-		cairo_surface_t *image =
-			cairo_image_surface_create(CAIRO_FORMAT_ARGB32, dw, dh);
-		cairo_t *tcr = cairo_create(image);
-		cairo_scale(tcr, self->scale, self->scale);
-		cairo_set_source_surface(tcr, self->frame, 0, 0);
-		cairo_pattern_set_matrix(cairo_get_source(tcr), &matrix);
-		cairo_paint(tcr);
-		cairo_destroy(tcr);
-
-		cairo_set_source_surface(cr, image, 0, 0);
-		cairo_paint(cr);
-		cairo_surface_destroy(image);
 		return TRUE;
 	}
 
@@ -636,7 +623,7 @@ fiv_view_draw(GtkWidget *widget, cairo_t *cr)
 	cairo_clip(cr);
 
 	cairo_scale(cr, self->scale, self->scale);
-	cairo_set_source_surface(cr, self->frame, 0, 0);
+	set_source_image(self, cr);
 
 	cairo_pattern_t *pattern = cairo_get_source(cr);
 	cairo_pattern_set_matrix(pattern, &matrix);
@@ -817,8 +804,7 @@ stop_animating(FivView *self)
 static gboolean
 advance_frame(FivView *self)
 {
-	cairo_surface_t *next =
-		cairo_surface_get_user_data(self->frame, &fiv_io_key_frame_next);
+	FivIoImage *next = self->frame->frame_next;
 	if (next) {
 		self->frame = next;
 	} else {
@@ -836,8 +822,7 @@ advance_animation(FivView *self, GdkFrameClock *clock)
 	gint64 now = gdk_frame_clock_get_frame_time(clock);
 	while (true) {
 		// TODO(p): See if infinite frames can actually happen, and how.
-		intptr_t duration = (intptr_t) cairo_surface_get_user_data(
-			self->frame, &fiv_io_key_frame_duration);
+		int64_t duration = self->frame->frame_duration;
 		if (duration < 0)
 			return FALSE;
 
@@ -875,30 +860,28 @@ start_animating(FivView *self)
 	stop_animating(self);
 
 	GdkFrameClock *clock = gtk_widget_get_frame_clock(GTK_WIDGET(self));
-	if (!clock || !self->image ||
-		!cairo_surface_get_user_data(self->page, &fiv_io_key_frame_next))
+	if (!clock || !self->image || !self->page->frame_next)
 		return;
 
 	self->frame_time = gdk_frame_clock_get_frame_time(clock);
 	self->frame_update_connection = g_signal_connect(
 		clock, "update", G_CALLBACK(on_frame_clock_update), self);
-	self->remaining_loops =
-		(uintptr_t) cairo_surface_get_user_data(self->page, &fiv_io_key_loops);
+	self->remaining_loops = self->page->loops;
 
 	gdk_frame_clock_begin_updating(clock);
 	g_object_notify_by_pspec(G_OBJECT(self), view_properties[PROP_PLAYING]);
 }
 
 static void
-switch_page(FivView *self, cairo_surface_t *page)
+switch_page(FivView *self, FivIoImage *page)
 {
-	g_clear_pointer(&self->page_scaled, cairo_surface_destroy);
+	g_clear_pointer(&self->page_scaled, fiv_io_image_unref);
 	self->frame = self->page = page;
 	prescale_page(self);
 
 	if (!self->page ||
-		(self->orientation = (uintptr_t) cairo_surface_get_user_data(
-			 self->page, &fiv_io_key_orientation)) == FivIoOrientationUnknown)
+		(self->orientation = self->page->orientation) ==
+			FivIoOrientationUnknown)
 		self->orientation = FivIoOrientation0;
 
 	start_animating(self);
@@ -1027,7 +1010,7 @@ copy(FivView *self)
 	cairo_surface_t *transformed =
 		cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
 	cairo_t *cr = cairo_create(transformed);
-	cairo_set_source_surface(cr, self->frame, 0, 0);
+	set_source_image(self, cr);
 	cairo_pattern_set_matrix(cairo_get_source(cr), &matrix);
 	cairo_paint(cr);
 	cairo_destroy(cr);
@@ -1065,7 +1048,7 @@ on_draw_page(G_GNUC_UNUSED GtkPrintOperation *operation,
 
 	cairo_t *cr = gtk_print_context_get_cairo_context(context);
 	cairo_scale(cr, scale, scale);
-	cairo_set_source_surface(cr, self->frame, 0, 0);
+	set_source_image(self, cr);
 	cairo_pattern_set_matrix(cairo_get_source(cr), &matrix);
 	cairo_paint(cr);
 }
@@ -1100,7 +1083,7 @@ print(FivView *self)
 }
 
 static gboolean
-save_as(FivView *self, cairo_surface_t *frame)
+save_as(FivView *self, FivIoImage *frame)
 {
 	GtkWindow *window = get_toplevel(GTK_WIDGET(self));
 	FivIoProfile target = NULL;
@@ -1362,7 +1345,7 @@ fiv_view_init(FivView *self)
 
 // --- Public interface --------------------------------------------------------
 
-static cairo_surface_t *
+static FivIoImage *
 open_without_swapping_in(FivView *self, const char *uri)
 {
 	FivIoOpenContext ctx = {
@@ -1374,8 +1357,7 @@ open_without_swapping_in(FivView *self, const char *uri)
 	};
 
 	GError *error = NULL;
-	cairo_surface_t *surface =
-		fiv_io_image_to_surface(fiv_io_open(&ctx, &error));
+	FivIoImage *image = fiv_io_open(&ctx, &error);
 	if (error) {
 		g_ptr_array_add(ctx.warnings, g_strdup(error->message));
 		g_error_free(error);
@@ -1388,7 +1370,7 @@ open_without_swapping_in(FivView *self, const char *uri)
 	}
 
 	g_ptr_array_free(ctx.warnings, TRUE);
-	return surface;
+	return image;
 }
 
 // TODO(p): Progressive picture loading, or at least async/cancellable.
@@ -1396,18 +1378,18 @@ gboolean
 fiv_view_set_uri(FivView *self, const char *uri)
 {
 	// This is extremely expensive, and only works sometimes.
-	g_clear_pointer(&self->enhance_swap, cairo_surface_destroy);
+	g_clear_pointer(&self->enhance_swap, fiv_io_image_unref);
 	if (self->enhance) {
 		self->enhance = FALSE;
 		g_object_notify_by_pspec(
 			G_OBJECT(self), view_properties[PROP_ENHANCE]);
 	}
 
-	cairo_surface_t *surface = open_without_swapping_in(self, uri);
-	g_clear_pointer(&self->image, cairo_surface_destroy);
+	FivIoImage *image = open_without_swapping_in(self, uri);
+	g_clear_pointer(&self->image, fiv_io_image_unref);
 
 	self->frame = self->page = NULL;
-	self->image = surface;
+	self->image = image;
 	switch_page(self, self->image);
 
 	// Otherwise, adjustment values and zoom are retained implicitly.
@@ -1419,15 +1401,15 @@ fiv_view_set_uri(FivView *self, const char *uri)
 
 	g_object_notify_by_pspec(G_OBJECT(self), view_properties[PROP_MESSAGES]);
 	g_object_notify_by_pspec(G_OBJECT(self), view_properties[PROP_HAS_IMAGE]);
-	return surface != NULL;
+	return image != NULL;
 }
 
 static void
 page_step(FivView *self, int step)
 {
-	cairo_user_data_key_t *key =
-		step < 0 ? &fiv_io_key_page_previous : &fiv_io_key_page_next;
-	cairo_surface_t *page = cairo_surface_get_user_data(self->page, key);
+	FivIoImage *page = step < 0
+		? self->page->page_previous
+		: self->page->page_next;
 	if (page)
 		switch_page(self, page);
 }
@@ -1436,9 +1418,10 @@ static void
 frame_step(FivView *self, int step)
 {
 	stop_animating(self);
-	cairo_user_data_key_t *key =
-		step < 0 ? &fiv_io_key_frame_previous : &fiv_io_key_frame_next;
-	if (!step || !(self->frame = cairo_surface_get_user_data(self->frame, key)))
+	FivIoImage *frame = step < 0
+		? self->frame->frame_previous
+		: self->frame->frame_next;
+	if (!step || !(self->frame = frame))
 		self->frame = self->page;
 	gtk_widget_queue_draw(GTK_WIDGET(self));
 }
@@ -1446,21 +1429,21 @@ frame_step(FivView *self, int step)
 static gboolean
 reload(FivView *self)
 {
-	cairo_surface_t *surface = open_without_swapping_in(self, self->uri);
+	FivIoImage *image = open_without_swapping_in(self, self->uri);
 	g_object_notify_by_pspec(G_OBJECT(self), view_properties[PROP_MESSAGES]);
-	if (!surface)
+	if (!image)
 		return FALSE;
 
-	g_clear_pointer(&self->image, cairo_surface_destroy);
-	g_clear_pointer(&self->enhance_swap, cairo_surface_destroy);
-	switch_page(self, (self->image = surface));
+	g_clear_pointer(&self->image, fiv_io_image_unref);
+	g_clear_pointer(&self->enhance_swap, fiv_io_image_unref);
+	switch_page(self, (self->image = image));
 	return TRUE;
 }
 
 static void
 swap_enhanced_image(FivView *self)
 {
-	cairo_surface_t *saved = self->image;
+	FivIoImage *saved = self->image;
 	self->image = self->page = self->frame = NULL;
 
 	if (self->enhance_swap) {
@@ -1547,9 +1530,8 @@ fiv_view_command(FivView *self, FivViewCommand command)
 	break; case FIV_VIEW_COMMAND_PAGE_NEXT:
 		page_step(self, +1);
 	break; case FIV_VIEW_COMMAND_PAGE_LAST:
-		for (cairo_surface_t *s = self->page;
-			 (s = cairo_surface_get_user_data(s, &fiv_io_key_page_next)); )
-			self->page = s;
+		for (FivIoImage *I = self->page; (I = I->page_next); )
+			self->page = I;
 		switch_page(self, self->page);
 
 	break; case FIV_VIEW_COMMAND_FRAME_FIRST:

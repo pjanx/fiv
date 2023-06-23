@@ -125,7 +125,7 @@ might_be_a_thumbnail(const char *path_or_uri)
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-static cairo_surface_t *
+static FivIoImage *
 render(GFile *target, GBytes *data, gboolean *color_managed, GError **error)
 {
 	FivIoOpenContext ctx = {
@@ -137,23 +137,22 @@ render(GFile *target, GBytes *data, gboolean *color_managed, GError **error)
 		.warnings = g_ptr_array_new_with_free_func(g_free),
 	};
 
-	cairo_surface_t *surface = fiv_io_image_to_surface(fiv_io_open_from_data(
-		g_bytes_get_data(data, NULL), g_bytes_get_size(data), &ctx, error));
+	FivIoImage *image = fiv_io_open_from_data(
+		g_bytes_get_data(data, NULL), g_bytes_get_size(data), &ctx, error);
 	g_free((gchar *) ctx.uri);
 	g_ptr_array_free(ctx.warnings, TRUE);
 	if ((*color_managed = !!ctx.screen_profile))
 		fiv_io_profile_free(ctx.screen_profile);
 	g_bytes_unref(data);
-	return surface;
+	return image;
 }
 
 // In principle similar to rescale_thumbnail() from fiv-browser.c.
-static cairo_surface_t *
-adjust_thumbnail(cairo_surface_t *thumbnail, double row_height)
+static FivIoImage *
+adjust_thumbnail(FivIoImage *thumbnail, double row_height)
 {
 	// Hardcode orientation.
-	FivIoOrientation orientation = (uintptr_t) cairo_surface_get_user_data(
-		thumbnail, &fiv_io_key_orientation);
+	FivIoOrientation orientation = thumbnail->orientation;
 
 	double w = 0, h = 0;
 	cairo_matrix_t matrix =
@@ -170,33 +169,40 @@ adjust_thumbnail(cairo_surface_t *thumbnail, double row_height)
 	}
 
 	// Vector images should not have orientation, this should handle them all.
-	FivIoRenderClosure *closure =
-		cairo_surface_get_user_data(thumbnail, &fiv_io_key_render);
+	FivIoRenderClosure *closure = thumbnail->render;
 	if (closure && orientation <= FivIoOrientation0) {
 		// This API doesn't accept non-uniform scaling; prefer a vertical fit.
-		cairo_surface_t *scaled = closure->render(closure, scale_y);
+		FivIoImage *scaled = closure->render(closure, scale_y);
 		if (scaled)
 			return scaled;
 	}
 
-	// This will be CAIRO_FORMAT_INVALID with non-image surfaces, which is fine.
-	cairo_format_t format = cairo_image_surface_get_format(thumbnail);
-	if (format != CAIRO_FORMAT_INVALID &&
-		orientation <= FivIoOrientation0 && scale_x == 1 && scale_y == 1)
-		return cairo_surface_reference(thumbnail);
+	if (orientation <= FivIoOrientation0 && scale_x == 1 && scale_y == 1)
+		return fiv_io_image_ref(thumbnail);
 
+	cairo_format_t format = thumbnail->format;
 	int projected_width = round(scale_x * w);
 	int projected_height = round(scale_y * h);
-	cairo_surface_t *scaled = cairo_image_surface_create(
+	FivIoImage *scaled = fiv_io_image_new(
 		(format == CAIRO_FORMAT_RGB24 || format == CAIRO_FORMAT_RGB30)
 			? CAIRO_FORMAT_RGB24
 			: CAIRO_FORMAT_ARGB32,
 		projected_width, projected_height);
+	if (!scaled) {
+		g_warning("image allocation failure");
+		return fiv_io_image_ref(thumbnail);
+	}
 
-	cairo_t *cr = cairo_create(scaled);
+	cairo_surface_t *surface = fiv_io_image_to_surface_noref(scaled);
+	cairo_t *cr = cairo_create(surface);
+	cairo_surface_destroy(surface);
+
 	cairo_scale(cr, scale_x, scale_y);
 
-	cairo_set_source_surface(cr, thumbnail, 0, 0);
+	surface = fiv_io_image_to_surface_noref(thumbnail);
+	cairo_set_source_surface(cr, surface, 0, 0);
+	cairo_surface_destroy(surface);
+
 	cairo_pattern_t *pattern = cairo_get_source(cr);
 	// CAIRO_FILTER_BEST, for some reason, works bad with CAIRO_FORMAT_RGB30.
 	cairo_pattern_set_filter(pattern, CAIRO_FILTER_GOOD);
@@ -208,9 +214,7 @@ adjust_thumbnail(cairo_surface_t *thumbnail, double row_height)
 
 	// Note that this doesn't get triggered with oversize input surfaces,
 	// even though nothing will be rendered.
-	if (cairo_surface_status(thumbnail) != CAIRO_STATUS_SUCCESS ||
-		cairo_surface_status(scaled) != CAIRO_STATUS_SUCCESS ||
-		cairo_pattern_status(pattern) != CAIRO_STATUS_SUCCESS ||
+	if (cairo_pattern_status(pattern) != CAIRO_STATUS_SUCCESS ||
 		cairo_status(cr) != CAIRO_STATUS_SUCCESS)
 		g_warning("thumbnail scaling failed");
 
@@ -218,27 +222,32 @@ adjust_thumbnail(cairo_surface_t *thumbnail, double row_height)
 	return scaled;
 }
 
-static cairo_surface_t *
-orient_thumbnail(cairo_surface_t *surface)
+static FivIoImage *
+orient_thumbnail(FivIoImage *image)
 {
-	int orientation = (intptr_t) cairo_surface_get_user_data(
-		surface, &fiv_io_key_orientation);
-	if (orientation <= FivIoOrientation0)
-		return surface;
+	if (image->orientation <= FivIoOrientation0)
+		return image;
 
 	double w = 0, h = 0;
 	cairo_matrix_t matrix =
-		fiv_io_orientation_apply(surface, orientation, &w, &h);
-	cairo_surface_t *oriented =
-		cairo_image_surface_create(CAIRO_FORMAT_RGB24, w, h);
+		fiv_io_orientation_apply(image, image->orientation, &w, &h);
+	FivIoImage *oriented = fiv_io_image_new(image->format, w, h);
+	if (!oriented) {
+		g_warning("image allocation failure");
+		return image;
+	}
 
-	cairo_t *cr = cairo_create(oriented);
+	cairo_surface_t *surface = fiv_io_image_to_surface_noref(oriented);
+	cairo_t *cr = cairo_create(surface);
+	cairo_surface_destroy(surface);
+
+	surface = fiv_io_image_to_surface(image);
 	cairo_set_source_surface(cr, surface, 0, 0);
+	cairo_surface_destroy(surface);
 	cairo_pattern_set_matrix(cairo_get_source(cr), &matrix);
 	cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
 	cairo_paint(cr);
 	cairo_destroy(cr);
-	cairo_surface_destroy(surface);
 	return oriented;
 }
 
@@ -390,7 +399,7 @@ extract_libraw_unflip(int flip)
 	}
 }
 
-static cairo_surface_t *
+static FivIoImage *
 extract_libraw_bitmap(libraw_processed_image_t *image, int flip, GError **error)
 {
 	// Anything else is extremely rare.
@@ -399,24 +408,26 @@ extract_libraw_bitmap(libraw_processed_image_t *image, int flip, GError **error)
 		return NULL;
 	}
 
-	cairo_surface_t *surface = cairo_image_surface_create(
+	FivIoImage *I = fiv_io_image_new(
 		CAIRO_FORMAT_RGB24, image->width, image->height);
-	guint32 *out = (guint32 *) cairo_image_surface_get_data(surface);
+	if (!I) {
+		set_error(error, "image allocation failure");
+		return NULL;
+	}
+
+	guint32 *out = (guint32 *) I->data;
 	const unsigned char *in = image->data;
 	for (guint64 i = 0; i < image->width * image->height; in += 3)
 		out[i++] = in[0] << 16 | in[1] << 8 | in[2];
-	cairo_surface_mark_dirty(surface);
 
-	FivIoOrientation orient = extract_libraw_unflip(flip);
-	cairo_surface_set_user_data(
-		surface, &fiv_io_key_orientation, (void *) (intptr_t) orient, NULL);
-	return surface;
+	I->orientation = extract_libraw_unflip(flip);
+	return I;
 }
 
-static cairo_surface_t *
+static FivIoImage *
 extract_libraw(GFile *target, GMappedFile *mf, GError **error)
 {
-	cairo_surface_t *surface = NULL;
+	FivIoImage *I = NULL;
 	libraw_data_t *iprc = libraw_init(
 		LIBRAW_OPIONS_NO_MEMERR_CALLBACK | LIBRAW_OPIONS_NO_DATAERR_CALLBACK);
 	if (!iprc) {
@@ -467,11 +478,11 @@ extract_libraw(GFile *target, GMappedFile *mf, GError **error)
 	switch (image->type) {
 		gboolean dummy;
 	case LIBRAW_IMAGE_JPEG:
-		surface = render(
+		I = render(
 			target, g_bytes_new(image->data, image->data_size), &dummy, error);
 		break;
 	case LIBRAW_IMAGE_BITMAP:
-		surface = extract_libraw_bitmap(image, flip, error);
+		I = extract_libraw_bitmap(image, flip, error);
 		break;
 	default:
 		set_error(error, "unsupported embedded thumbnail");
@@ -480,7 +491,7 @@ extract_libraw(GFile *target, GMappedFile *mf, GError **error)
 	libraw_dcraw_clear_mem(image);
 fail:
 	libraw_close(iprc);
-	return surface;
+	return I;
 }
 
 #endif  // HAVE_LIBRAW
@@ -506,30 +517,30 @@ fiv_thumbnail_extract(GFile *target, FivThumbnailSize max_size, GError **error)
 		return NULL;
 	}
 
-	cairo_surface_t *surface = NULL;
+	FivIoImage *image = NULL;
 #ifdef HAVE_LIBRAW
-	surface = extract_libraw(target, mf, error);
+	image = extract_libraw(target, mf, error);
 #else  // ! HAVE_LIBRAW
 	// TODO(p): Implement our own thumbnail extractors.
 	set_error(error, "unsupported file");
 #endif  // ! HAVE_LIBRAW
 	g_mapped_file_unref(mf);
 
-	if (!surface)
+	if (!image)
 		return NULL;
 	if (max_size < FIV_THUMBNAIL_SIZE_MIN || max_size > FIV_THUMBNAIL_SIZE_MAX)
-		return orient_thumbnail(surface);
+		return fiv_io_image_to_surface(orient_thumbnail(image));
 
-	cairo_surface_t *result =
-		adjust_thumbnail(surface, fiv_thumbnail_sizes[max_size].size);
-	cairo_surface_destroy(surface);
-	return result;
+	FivIoImage *result =
+		adjust_thumbnail(image, fiv_thumbnail_sizes[max_size].size);
+	fiv_io_image_unref(image);
+	return fiv_io_image_to_surface(result);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 static WebPData
-encode_thumbnail(cairo_surface_t *surface)
+encode_thumbnail(FivIoImage *image)
 {
 	WebPData bitstream = {};
 	WebPConfig config = {};
@@ -541,12 +552,12 @@ encode_thumbnail(cairo_surface_t *surface)
 	if (!WebPValidateConfig(&config))
 		return bitstream;
 
-	bitstream.bytes = fiv_io_encode_webp(surface, &config, &bitstream.size);
+	bitstream.bytes = fiv_io_encode_webp(image, &config, &bitstream.size);
 	return bitstream;
 }
 
 static void
-save_thumbnail(cairo_surface_t *thumbnail, const char *path, GString *thum)
+save_thumbnail(FivIoImage *thumbnail, const char *path, GString *thum)
 {
 	WebPMux *mux = WebPMuxNew();
 	WebPData bitstream = encode_thumbnail(thumbnail);
@@ -602,15 +613,15 @@ fiv_thumbnail_produce_for_search(
 		return NULL;
 
 	gboolean color_managed = FALSE;
-	cairo_surface_t *surface = render(target, data, &color_managed, error);
-	if (!surface)
+	FivIoImage *image = render(target, data, &color_managed, error);
+	if (!image)
 		return NULL;
 
 	// TODO(p): Might want to keep this a square.
-	cairo_surface_t *result =
-		adjust_thumbnail(surface, fiv_thumbnail_sizes[max_size].size);
-	cairo_surface_destroy(surface);
-	return result;
+	FivIoImage *result =
+		adjust_thumbnail(image, fiv_thumbnail_sizes[max_size].size);
+	fiv_io_image_unref(image);
+	return fiv_io_image_to_surface(result);
 }
 
 static cairo_surface_t *
@@ -638,14 +649,14 @@ produce_fallback(GFile *target, FivThumbnailSize size, GError **error)
 		return NULL;
 
 	gboolean color_managed = FALSE;
-	cairo_surface_t *surface = render(target, data, &color_managed, error);
-	if (!surface)
+	FivIoImage *image = render(target, data, &color_managed, error);
+	if (!image)
 		return NULL;
 
-	cairo_surface_t *result =
-		adjust_thumbnail(surface, fiv_thumbnail_sizes[size].size);
-	cairo_surface_destroy(surface);
-	return result;
+	FivIoImage *result =
+		adjust_thumbnail(image, fiv_thumbnail_sizes[size].size);
+	fiv_io_image_unref(image);
+	return fiv_io_image_to_surface(result);
 }
 
 cairo_surface_t *
@@ -690,10 +701,10 @@ fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size, GError **error)
 	}
 
 	gboolean color_managed = FALSE;
-	cairo_surface_t *surface =
+	FivIoImage *image =
 		render(target, g_mapped_file_get_bytes(mf), &color_managed, error);
 	g_mapped_file_unref(mf);
-	if (!surface)
+	if (!image)
 		return NULL;
 
 	// Boilerplate copied from fiv_thumbnail_lookup().
@@ -709,12 +720,10 @@ fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size, GError **error)
 	g_string_append_printf(
 		thum, "%s%c%llu%c", THUMB_SIZE, 0, (unsigned long long) filesize, 0);
 
-	if (cairo_surface_get_type(surface) == CAIRO_SURFACE_TYPE_IMAGE) {
-		g_string_append_printf(thum, "%s%c%d%c", THUMB_IMAGE_WIDTH, 0,
-			cairo_image_surface_get_width(surface), 0);
-		g_string_append_printf(thum, "%s%c%d%c", THUMB_IMAGE_HEIGHT, 0,
-			cairo_image_surface_get_height(surface), 0);
-	}
+	g_string_append_printf(thum, "%s%c%u%c", THUMB_IMAGE_WIDTH, 0,
+		(unsigned) image->width, 0);
+	g_string_append_printf(thum, "%s%c%u%c", THUMB_IMAGE_HEIGHT, 0,
+		(unsigned) image->height, 0);
 
 	// Without a CMM, no conversion is attempted.
 	if (color_managed) {
@@ -722,19 +731,19 @@ fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size, GError **error)
 			thum, "%s%c%s%c", THUMB_COLORSPACE, 0, THUMB_COLORSPACE_SRGB, 0);
 	}
 
-	cairo_surface_t *max_size_surface = NULL;
+	FivIoImage *max_size_image = NULL;
 	for (int use = max_size; use >= FIV_THUMBNAIL_SIZE_MIN; use--) {
-		cairo_surface_t *scaled =
-			adjust_thumbnail(surface, fiv_thumbnail_sizes[use].size);
+		FivIoImage *scaled =
+			adjust_thumbnail(image, fiv_thumbnail_sizes[use].size);
 		gchar *path = g_strdup_printf("%s/wide-%s/%s.webp", thumbnails_dir,
 			fiv_thumbnail_sizes[use].thumbnail_spec_name, sum);
 		save_thumbnail(scaled, path, thum);
 		g_free(path);
 
-		if (!max_size_surface)
-			max_size_surface = scaled;
+		if (!max_size_image)
+			max_size_image = scaled;
 		else
-			cairo_surface_destroy(scaled);
+			fiv_io_image_unref(scaled);
 	}
 
 	g_string_free(thum, TRUE);
@@ -742,8 +751,8 @@ fiv_thumbnail_produce(GFile *target, FivThumbnailSize max_size, GError **error)
 	g_free(thumbnails_dir);
 	g_free(sum);
 	g_free(uri);
-	cairo_surface_destroy(surface);
-	return max_size_surface;
+	fiv_io_image_unref(image);
+	return fiv_io_image_to_surface(max_size_image);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -793,23 +802,23 @@ read_wide_thumbnail(const char *path, const Stat *st, GError **error)
 	if (!thumbnail_uri)
 		return NULL;
 
-	cairo_surface_t *surface = fiv_io_image_to_surface(
-		fiv_io_open(&(FivIoOpenContext){.uri = thumbnail_uri}, error));
+	FivIoImage *image =
+		fiv_io_open(&(FivIoOpenContext){.uri = thumbnail_uri}, error);
 	g_free(thumbnail_uri);
-	if (!surface)
+	if (!image)
 		return NULL;
 
 	bool sRGB = false;
-	GBytes *thum = cairo_surface_get_user_data(surface, &fiv_io_key_thum);
-	if (!thum) {
+	if (!image->thum) {
 		g_clear_error(error);
 		set_error(error, "not a thumbnail");
-	} else if (!check_wide_thumbnail_texts(thum, st, &sRGB)) {
+	} else if (!check_wide_thumbnail_texts(image->thum, st, &sRGB)) {
 		g_clear_error(error);
 		set_error(error, "mismatch");
 	} else {
 		// TODO(p): Add a function or a non-valueless define to check
 		// for CMM presence, then remove this ifdef.
+		cairo_surface_t *surface = fiv_io_image_to_surface(image);
 #ifdef HAVE_LCMS2
 		if (!sRGB)
 			mark_thumbnail_lq(surface);
@@ -817,21 +826,21 @@ read_wide_thumbnail(const char *path, const Stat *st, GError **error)
 		return surface;
 	}
 
-	cairo_surface_destroy(surface);
+	fiv_io_image_unref(image);
 	return NULL;
 }
 
 static cairo_surface_t *
 read_png_thumbnail(const char *path, const Stat *st, GError **error)
 {
-	cairo_surface_t *surface = fiv_io_open_png_thumbnail(path, error);
-	if (!surface)
+	FivIoImage *image = fiv_io_open_png_thumbnail(path, error);
+	if (!image)
 		return NULL;
 
-	GHashTable *texts = cairo_surface_get_user_data(surface, &fiv_io_key_text);
+	GHashTable *texts = image->text;
 	if (!texts) {
 		set_error(error, "not a thumbnail");
-		cairo_surface_destroy(surface);
+		fiv_io_image_unref(image);
 		return NULL;
 	}
 
@@ -843,16 +852,16 @@ read_png_thumbnail(const char *path, const Stat *st, GError **error)
 	if (!text_uri || strcmp(text_uri, st->uri) ||
 		!text_mtime || atol(text_mtime) != st->mtime) {
 		set_error(error, "mismatch or not a thumbnail");
-		cairo_surface_destroy(surface);
+		fiv_io_image_unref(image);
 		return NULL;
 	}
 	if (text_size && strtoull(text_size, NULL, 10) != st->size) {
 		set_error(error, "file size mismatch");
-		cairo_surface_destroy(surface);
+		fiv_io_image_unref(image);
 		return NULL;
 	}
 
-	return surface;
+	return fiv_io_image_to_surface(image);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
