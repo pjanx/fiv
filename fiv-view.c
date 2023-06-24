@@ -556,6 +556,7 @@ fiv_view_realize(GtkWidget *widget)
 	if (GDK_IS_X11_WINDOW(window) &&
 		g_settings_get_boolean(settings, "native-view-window"))
 		gdk_window_ensure_native(window);
+	g_object_unref(settings);
 #endif  // GDK_WINDOWING_X11
 
 	gtk_widget_register_window(widget, window);

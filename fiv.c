@@ -514,6 +514,109 @@ show_about_dialog(GtkWidget *parent)
 	cairo_pattern_destroy(ctx.v_pattern);
 }
 
+// --- Settings ----------------------------------------------------------------
+
+static void
+preferences_make_row(
+	GtkWidget *grid, int *row, GSettings *settings, GSettingsSchemaKey *key)
+{
+	const char *name = g_settings_schema_key_get_name(key);
+	const char *summary = g_settings_schema_key_get_summary(key);
+	const char *description = g_settings_schema_key_get_description(key);
+
+	GtkWidget *widget = NULL;
+	const GVariantType *type = g_settings_schema_key_get_value_type(key);
+	if (g_variant_type_equal(type, G_VARIANT_TYPE_BOOLEAN)) {
+		widget = gtk_switch_new();
+		g_settings_bind(
+			settings, name, widget, "active", G_SETTINGS_BIND_DEFAULT);
+	} else {
+		const gchar *type = NULL;
+		GVariant *value = NULL, *range = g_settings_schema_key_get_range(key);
+		g_variant_get(range, "(&sv)", &type, &value);
+		GVariantIter iter = {};
+		g_variant_iter_init(&iter, value);
+		if (g_str_equal(type, "enum")) {
+			widget = gtk_combo_box_text_new();
+
+			GVariant *child = NULL;
+			while ((child = g_variant_iter_next_value(&iter))) {
+				const char *id = g_variant_get_string(child, NULL);
+				gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(widget), id, id);
+				g_variant_unref(child);
+			}
+
+			g_settings_bind(
+				settings, name, widget, "active-id", G_SETTINGS_BIND_DEFAULT);
+		}
+		g_variant_unref(value);
+		g_variant_unref(range);
+	}
+
+	// Ignore unimplemented value types.
+	if (!widget)
+		return;
+
+	GtkWidget *label = gtk_label_new(summary ? summary : name);
+	gtk_label_set_xalign(GTK_LABEL(label), 0);
+	gtk_widget_set_hexpand(label, TRUE);
+	gtk_grid_attach(GTK_GRID(grid), label, 0, (*row), 1, 1);
+	gtk_widget_set_halign(widget, GTK_ALIGN_END);
+	gtk_grid_attach(GTK_GRID(grid), widget, 1, (*row)++, 1, 1);
+
+	if (description) {
+		GtkWidget *label = gtk_label_new(description);
+		PangoAttrList *attr_list = pango_attr_list_new();
+		pango_attr_list_insert(
+			attr_list, pango_attr_scale_new(PANGO_SCALE_SMALL));
+		gtk_label_set_attributes(
+			GTK_LABEL(label), pango_attr_list_ref(attr_list));
+		pango_attr_list_unref(attr_list);
+
+		gtk_label_set_xalign(GTK_LABEL(label), 0);
+		gtk_label_set_line_wrap(GTK_LABEL(label), TRUE);
+		gtk_widget_set_sensitive(label, FALSE);
+		gtk_widget_set_size_request(label, 0, -1);
+		gtk_grid_attach(GTK_GRID(grid), label, 0, (*row)++, 1, 1);
+	}
+}
+
+static void
+show_preferences(GtkWidget *parent)
+{
+	GSettingsSchema *schema = NULL;
+	GSettings *settings = g_settings_new(PROJECT_NS PROJECT_NAME);
+	g_object_get(settings, "settings-schema", &schema, NULL);
+
+	GtkWidget *dialog = gtk_widget_new(GTK_TYPE_DIALOG,
+		"use-header-bar", TRUE,
+		"title", "Preferences",
+		"transient-for", parent,
+		"destroy-with-parent", TRUE, NULL);
+
+	GtkWidget *grid = gtk_grid_new();
+	gtk_grid_set_row_spacing(GTK_GRID(grid), 12);
+	gtk_grid_set_column_spacing(GTK_GRID(grid), 24);
+	g_object_set(grid, "margin", 12, NULL);
+	gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(dialog))),
+		grid, TRUE, TRUE, 0);
+
+	int row = 0;
+	gchar **keys = g_settings_schema_list_keys(schema);
+	for (gchar **p = keys; *p; p++) {
+		GSettingsSchemaKey *key = g_settings_schema_get_key(schema, *p);
+		preferences_make_row(grid, &row, settings, key);
+		g_settings_schema_key_unref(key);
+	}
+	g_strfreev(keys);
+	g_object_unref(settings);
+
+	gtk_window_set_default_size(GTK_WINDOW(dialog), 600, -1);
+	gtk_widget_show_all(dialog);
+	gtk_dialog_run(GTK_DIALOG(dialog));
+	gtk_widget_destroy(dialog);
+}
+
 // --- Main --------------------------------------------------------------------
 
 // TODO(p): See if it's possible to give separators room to shrink
@@ -1345,20 +1448,6 @@ show_help_shortcuts(void)
 }
 
 static void
-show_preferences(void)
-{
-	char *argv[] = {"dconf-editor", PROJECT_NS PROJECT_NAME, NULL};
-	GError *error = NULL;
-	if (!g_spawn_async(
-		NULL, argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, &error)) {
-		if (g_error_matches(error, G_SPAWN_ERROR, G_SPAWN_ERROR_NOENT))
-			g_prefix_error(&error, "%s",
-				"Please install dconf-editor, or use the gsettings utility.\n");
-		show_error_dialog(error);
-	}
-}
-
-static void
 toggle_sunlight(void)
 {
 	GtkSettings *settings = gtk_settings_get_default();
@@ -1415,7 +1504,7 @@ on_key_press(G_GNUC_UNUSED GtkWidget *widget, GdkEventKey *event,
 			show_help_shortcuts();
 			return TRUE;
 		case GDK_KEY_comma:
-			show_preferences();
+			show_preferences(g.window);
 			return TRUE;
 		}
 		break;
