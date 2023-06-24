@@ -499,7 +499,7 @@ fiv_io_profile_page(FivIoImage *page, FivIoProfile target,
 
 	// TODO(p): All animations need to be composited in a linear colour space.
 	for (FivIoImage *frame = page; frame != NULL; frame = frame->frame_next)
-		frame_cb(page, source, target);
+		frame_cb(frame, source, target);
 
 	if (source)
 		fiv_io_profile_free(source);
