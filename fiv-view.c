@@ -797,7 +797,6 @@ stop_animating(FivView *self)
 
 	self->frame_time = 0;
 	self->frame_update_connection = 0;
-	self->remaining_loops = 0;
 	g_object_notify_by_pspec(G_OBJECT(self), view_properties[PROP_PLAYING]);
 }
 
@@ -866,7 +865,15 @@ start_animating(FivView *self)
 	self->frame_time = gdk_frame_clock_get_frame_time(clock);
 	self->frame_update_connection = g_signal_connect(
 		clock, "update", G_CALLBACK(on_frame_clock_update), self);
-	self->remaining_loops = self->page->loops;
+
+	// Only restart looping the animation if it has stopped at the end.
+	if (!self->remaining_loops) {
+		self->remaining_loops = self->page->loops;
+		if (self->remaining_loops && !self->frame->frame_next) {
+			self->frame = self->page;
+			gtk_widget_queue_draw(GTK_WIDGET(self));
+		}
+	}
 
 	gdk_frame_clock_begin_updating(clock);
 	g_object_notify_by_pspec(G_OBJECT(self), view_properties[PROP_PLAYING]);
@@ -884,6 +891,7 @@ switch_page(FivView *self, FivIoImage *page)
 			FivIoOrientationUnknown)
 		self->orientation = FivIoOrientation0;
 
+	self->remaining_loops = 0;
 	start_animating(self);
 	gtk_widget_queue_resize(GTK_WIDGET(self));
 
@@ -1418,11 +1426,14 @@ static void
 frame_step(FivView *self, int step)
 {
 	stop_animating(self);
-	FivIoImage *frame = step < 0
-		? self->frame->frame_previous
-		: self->frame->frame_next;
-	if (!step || !(self->frame = frame))
+
+	if (step > 0) {
+		// Decrease the loop counter as if running on a timer.
+		(void) advance_frame(self);
+	} else if (!step || !(self->frame = self->frame->frame_previous)) {
 		self->frame = self->page;
+		self->remaining_loops = 0;
+	}
 	gtk_widget_queue_draw(GTK_WIDGET(self));
 }
 
