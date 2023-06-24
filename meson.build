@@ -202,10 +202,14 @@ if get_option('tools').enabled()
 	endif
 endif
 
+# Copying the files to the build directory makes GSettings find them in devenv.
 gsettings_schemas = ['fiv.gschema.xml']
 foreach schema : gsettings_schemas
-	install_data(schema,
-		rename : [application_ns + schema],
+	configure_file(
+		input : schema,
+		output : application_ns + schema,
+		copy : true,
+		install: true,
 		install_dir : get_option('datadir') / 'glib-2.0' / 'schemas')
 endforeach
 
