@@ -100,7 +100,16 @@ mark_thumbnail_lq(cairo_surface_t *surface)
 static gchar *
 fiv_thumbnail_get_root(void)
 {
+#ifdef G_OS_WIN32
+	// We can do better than GLib with FOLDERID_InternetCache,
+	// and we don't want to place .cache directly in the user's home.
+	// TODO(p): Register this thumbnail path using the installer:
+	// https://learn.microsoft.com/en-us/windows/win32/lwef/disk-cleanup
+	gchar *cache_dir =
+		g_build_filename(g_get_user_data_dir(), PROJECT_NAME, NULL);
+#else
 	gchar *cache_dir = get_xdg_home_dir("XDG_CACHE_HOME", ".cache");
+#endif
 	gchar *thumbnails_dir = g_build_filename(cache_dir, "thumbnails", NULL);
 	g_free(cache_dir);
 	return thumbnails_dir;
