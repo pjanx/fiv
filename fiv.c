@@ -604,6 +604,10 @@ show_preferences(GtkWidget *parent)
 	int row = 0;
 	gchar **keys = g_settings_schema_list_keys(schema);
 	for (gchar **p = keys; *p; p++) {
+#ifndef GDK_WINDOWING_X11
+		if (g_str_equal(*p, "native-view-window"))
+			continue;
+#endif
 		GSettingsSchemaKey *key = g_settings_schema_get_key(schema, *p);
 		preferences_make_row(grid, &row, settings, key);
 		g_settings_schema_key_unref(key);
