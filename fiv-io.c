@@ -191,12 +191,14 @@ fiv_io_image_new(cairo_format_t format, uint32_t width, uint32_t height)
 	case CAIRO_FORMAT_ARGB32:
 		unit = 4;
 		break;
+#if CAIRO_VERSION >= 11702
 	case CAIRO_FORMAT_RGB96F:
 		unit = 12;
 		break;
 	case CAIRO_FORMAT_RGBA128F:
 		unit = 16;
 		break;
+#endif
 	default:
 		return NULL;
 	}
