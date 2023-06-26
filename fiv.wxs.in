@@ -27,7 +27,7 @@
 		<Media Id='1' Cabinet='data.cab' EmbedCab='yes' />
 		<Icon Id='fiv.ico' SourceFile='fiv.ico' />
 		<Property Id='ARPPRODUCTICON' Value='fiv.ico' />
-		<Property Id='ARPURLINFOABOUT' Value='https://git.janouch.name/p/fiv' />
+		<Property Id='ARPURLINFOABOUT' Value='@ProjectURL@' />
 
 		<UIRef Id='WixUI_Minimal' />
 		<!-- This isn't supported by msitools, but is necessary for WiX.

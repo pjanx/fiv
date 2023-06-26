@@ -93,11 +93,13 @@ endif
 # XXX: https://github.com/mesonbuild/meson/issues/825
 docdir = get_option('datadir') / 'doc' / meson.project_name()
 application_ns = 'name.janouch.'
+application_url = 'https://janouch.name/p/' + meson.project_name()
 
 conf = configuration_data()
 conf.set_quoted('PROJECT_NAME', meson.project_name())
 conf.set_quoted('PROJECT_VERSION', '@VCS_TAG@')
 conf.set_quoted('PROJECT_NS', application_ns)
+conf.set_quoted('PROJECT_URL', application_url)
 conf.set_quoted('PROJECT_DOCDIR', get_option('prefix') / docdir)
 if win32
 	conf.set_quoted('PROJECT_DOCDIR', docdir)
@@ -344,6 +346,7 @@ elif meson.is_cross_build()
 		configuration : configuration_data({
 			'ProjectName' : meson.project_name(),
 			'ProjectVersion' : meson.project_version(),
+			'ProjectURL' : application_url,
 		}),
 	)
 	custom_target('package',
