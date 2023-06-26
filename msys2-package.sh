@@ -1,9 +1,17 @@
 #!/bin/sh -e
-export LC_ALL=C.UTF-8
+export LC_ALL=C
 cd "$MESON_BUILD_ROOT"
+arch=$1 msi=$2 files=package-files.wxs destdir=$(pwd)/package
+shift 2
+
+# We're being passed host_machine.cpu(), which will be either x86 or x86_64.
+[ "$arch" = "x86" ] || arch=x64
+
+rm -rf "$destdir"
+meson install --destdir "$destdir"
 
 txt2rtf() {
-	iconv -f utf-8 -t ascii//translit "$@" | awk 'BEGIN {
+	LC_CTYPE=C.UTF-8 iconv -f utf-8 -t ascii//translit "$@" | awk 'BEGIN {
 		print "{\\rtf1\\ansi\\ansicpg1252\\deff0{\\fonttbl{\\f0 Tahoma;}}"
 		print "\\f0\\fs24{\\pard\\sa240"
 	} {
@@ -15,16 +23,12 @@ txt2rtf() {
 	}'
 }
 
-# We're being passed host_machine.cpu(), which will be either x86 or x86_64.
-[ "$1" = "x86" ] && arch=x86 || arch=x64
-
-wxs=fiv.wxs files=fiv-files.wxs msi=fiv.msi
-
+# msitools have this filename hardcoded in UI files, and it's required.
 txt2rtf "$MESON_SOURCE_ROOT/LICENSE" > License.rtf
-find "$MESON_INSTALL_DESTDIR_PREFIX" -type f \
-	| wixl-heat --prefix "$MESON_INSTALL_DESTDIR_PREFIX/" \
-		--directory-ref INSTALLDIR --component-group CG.fiv \
-		--var var.SourceDir > "$files"
 
-wixl --verbose --arch "$arch" -D SourceDir="$MESON_INSTALL_DESTDIR_PREFIX" \
-	--ext ui --output "$msi" "$wxs" "$files"
+find "$destdir" -type f \
+	| wixl-heat --prefix "$destdir/" --directory-ref INSTALLDIR \
+		--component-group CG.fiv --var var.SourceDir > "$files"
+
+wixl --verbose --arch "$arch" -D SourceDir="$destdir" --ext ui \
+	--output "$msi" "$@" "$files"

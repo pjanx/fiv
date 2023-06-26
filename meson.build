@@ -338,17 +338,23 @@ elif meson.is_cross_build()
 	msys2_root = meson.get_external_property('msys2_root')
 	meson.add_install_script('msys2-install.sh', msys2_root)
 
-	# TODO: If we used DESTDIR instead of the prefix, this could probably
-	# be a custom target that invokes "meson install --destdir $(pwd)/package"
-	# through "meson compile -C builddir msi". Try it out, also in MSYS2.
-	meson.add_install_script('msys2-package.sh', host_machine.cpu())
-	configure_file(
+	wxs = configure_file(
 		input : 'fiv.wxs.in',
 		output : 'fiv.wxs',
 		configuration : configuration_data({
 			'ProjectName' : meson.project_name(),
 			'ProjectVersion' : meson.project_version(),
 		}),
+	)
+	custom_target('package',
+		output : 'fiv.msi',
+		command : [meson.current_source_dir() / 'msys2-package.sh',
+			host_machine.cpu(), 'fiv.msi', wxs],
+		env : ['MESON_BUILD_ROOT=' + meson.current_build_dir(),
+			'MESON_SOURCE_ROOT=' + meson.current_source_dir()],
+		console : true,
+		build_always_stale : true,
+		build_by_default : false,
 	)
 
 	# This is the minimum to run targets from msys2-configure.sh builds.

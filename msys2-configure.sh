@@ -120,13 +120,12 @@ setup() {
 	endian = 'little'
 	EOF
 
-	meson setup --buildtype=debugoptimized --prefix="$packagedir" \
+	meson setup --buildtype=debugoptimized --prefix=/ \
 		--bindir . --libdir . --cross-file="$toolchain" "$builddir" "$sourcedir"
 }
 
 sourcedir=$(realpath "${2:-$(dirname "$0")}")
 builddir=$(realpath "${1:-builddir}")
-packagedir=$builddir/package
 toolchain=$builddir/msys2-cross-toolchain.meson
 
 # This directory name matches the prefix in .pc files, so we don't need to
