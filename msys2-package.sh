@@ -11,7 +11,7 @@ rm -rf "$destdir"
 meson install --destdir "$destdir"
 
 txt2rtf() {
-	LC_CTYPE=C.UTF-8 iconv -f utf-8 -t ascii//translit "$@" | awk 'BEGIN {
+	LC_ALL=C.UTF-8 iconv -f utf-8 -t ascii//translit "$@" | awk 'BEGIN {
 		print "{\\rtf1\\ansi\\ansicpg1252\\deff0{\\fonttbl{\\f0 Tahoma;}}"
 		print "\\f0\\fs24{\\pard\\sa240"
 	} {
