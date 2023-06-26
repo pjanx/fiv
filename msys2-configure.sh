@@ -136,7 +136,7 @@ msys2_root=$builddir$prefix
 mkdir -p "$msys2_root"
 cd "$msys2_root"
 dbsync
-fetch $pkg-gtk3 $pkg-lcms2 $pkg-libraw $pkg-libheif $pkg-perl \
+fetch $pkg-gtk3 $pkg-lcms2 $pkg-libraw $pkg-libheif $pkg-libjxl $pkg-perl \
 	$pkg-perl-win32-api $pkg-libwinpthread-git # Because we don't do "provides"?
 verify
 extract
