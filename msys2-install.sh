@@ -23,12 +23,13 @@ cp -pR "$msys2_root"/lib/gdk-pixbuf-2.0/ lib
 cp -pR "$msys2_root"/lib/perl5/ lib
 mkdir -p share/glib-2.0/schemas
 cp -pR "$msys2_root"/share/glib-2.0/schemas/*.Settings.* share/glib-2.0/schemas
-mkdir -p share
-cp -pR "$msys2_root"/share/mime/ share
 mkdir -p share/icons
 cp -pR "$msys2_root"/share/icons/Adwaita/ share/icons
 mkdir -p share/icons/hicolor
 cp -p "$msys2_root"/share/icons/hicolor/index.theme share/icons/hicolor
+mkdir -p share/mime
+# GIO doesn't use the database on Windows, this subset is for us.
+find "$msys2_root"/share/mime/ -maxdepth 1 -type f -exec cp -p {} share/mime \;
 
 # Remove unreferenced libraries.
 find lib -name '*.a' -exec rm -- {} +
