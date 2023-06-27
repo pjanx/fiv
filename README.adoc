@@ -49,17 +49,20 @@ Runtime dependencies for reverse image search:
  xdg-utils, cURL, jq
 
  $ git clone --recursive https://git.janouch.name/p/fiv.git
+ $ cd fiv
  $ meson setup builddir
  $ cd builddir
  $ meson compile
-
-Considering the vast amount of dynamically-linked dependencies, do not attempt
-direct installations via `ninja install`.  To test the program:
-
  $ meson devenv fiv
 
 The lossless JPEG cropper and reverse image search are intended to be invoked
-from a context menu.
+from a file manager context menu.
+
+For proper integration, you will need to install the application.  On Debian,
+you can get a quick and dirty installation package for testing purposes using:
+
+ $ meson compile deb
+ # dpkg -i fiv-*.deb
 
 Windows
 ~~~~~~~

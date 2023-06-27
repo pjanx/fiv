@@ -335,6 +335,16 @@ if not win32
 	if not meson.is_cross_build()
 		meson.add_install_script(updater, skip_if_destdir : dynamic_desktops)
 	endif
+
+	# Quick and dirty package generation, lacking dependencies.
+	packaging = configuration_data({
+		'name' : meson.project_name(),
+		'version' : meson.project_version(),
+		'summary' : 'Image viewer',
+		'author' : 'Přemysl Eric Janouch',
+	})
+
+	subdir('submodules/liberty/meson/packaging')
 elif meson.is_cross_build()
 	# Note that even compiling /from within MSYS2/ can still be a cross-build.
 	msys2_root = meson.get_external_property('msys2_root')
