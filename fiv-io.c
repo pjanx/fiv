@@ -1627,7 +1627,7 @@ load_libjpeg_enhanced(
 }
 
 #else
-#define load_libjpeg_enhanced libjpeg_turbo_load_simple
+#define load_libjpeg_enhanced load_libjpeg_simple
 #endif
 
 static FivIoImage *
