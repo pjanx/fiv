@@ -37,6 +37,7 @@ dependencies = [
 	dependency('gtk+-3.0'),
 	dependency('pixman-1'),
 
+	dependency('libjpeg'),
 	dependency('libturbojpeg'),
 	dependency('libwebp'),
 	dependency('libwebpdemux'),
