@@ -2291,11 +2291,16 @@ load_resvg_render_internal(FivIoRenderClosureResvg *self,
 	}
 
 	uint32_t *pixels = (uint32_t *) image->data;
+#if RESVG_MAJOR_VERSION == 0 && RESVG_MINOR_VERSION < 33
 	resvg_fit_to fit_to = {
 		scale == 1 ? RESVG_FIT_TO_TYPE_ORIGINAL : RESVG_FIT_TO_TYPE_ZOOM,
 		scale};
 	resvg_render(self->tree, fit_to, resvg_transform_identity(),
 		image->width, image->height, (char *) pixels);
+#else
+	resvg_render(self->tree, (resvg_transform) {.a = scale, .d = scale},
+		image->width, image->height, (char *) pixels);
+#endif
 
 	for (int i = 0; i < w * h; i++) {
 		uint32_t rgba = g_ntohl(pixels[i]);
