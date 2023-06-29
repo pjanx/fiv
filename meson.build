@@ -218,6 +218,7 @@ endforeach
 
 # For the purposes of development: make the program find its GSettings schemas.
 gnome.compile_schemas(depend_files : files(gsettings_schemas))
+gnome.post_install(glib_compile_schemas : true, gtk_update_icon_cache : true)
 
 # Meson is broken on Windows and removes the backslashes, so this ends up empty.
 symbolics = run_command(find_program('sed', required : false, disabler : true),
