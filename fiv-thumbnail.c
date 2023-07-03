@@ -426,7 +426,7 @@ extract_libraw_bitmap(libraw_processed_image_t *image, int flip, GError **error)
 
 	guint32 *out = (guint32 *) I->data;
 	const unsigned char *in = image->data;
-	for (guint64 i = 0; i < image->width * image->height; in += 3)
+	for (guint64 i = 0; i < (guint64) image->width * image->height; in += 3)
 		out[i++] = in[0] << 16 | in[1] << 8 | in[2];
 
 	I->orientation = extract_libraw_unflip(flip);
