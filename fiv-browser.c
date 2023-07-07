@@ -17,9 +17,6 @@
 
 #include "config.h"
 
-#include <math.h>
-#include <pixman.h>
-
 #include <gtk/gtk.h>
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
@@ -27,6 +24,10 @@
 #ifdef GDK_WINDOWING_QUARTZ
 #include <gdk/gdkquartz.h>
 #endif  // GDK_WINDOWING_QUARTZ
+#include <pixman.h>
+
+#include <math.h>
+#include <stdlib.h>
 
 #include "fiv-browser.h"
 #include "fiv-collection.h"
@@ -240,10 +241,12 @@ relayout(FivBrowser *self, int width)
 			pango_layout_set_wrap(label, PANGO_WRAP_WORD_CHAR);
 			pango_layout_set_ellipsize(label, PANGO_ELLIPSIZE_END);
 
+#if PANGO_VERSION_CHECK(1, 44, 0)
 			PangoAttrList *attrs = pango_attr_list_new();
 			pango_attr_list_insert(attrs, pango_attr_insert_hyphens_new(FALSE));
 			pango_layout_set_attributes(label, attrs);
 			pango_attr_list_unref (attrs);
+#endif
 		}
 
 		g_array_append_val(items, ((Item) {

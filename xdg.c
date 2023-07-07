@@ -17,6 +17,9 @@
 
 #include <glib.h>
 
+#include <stdlib.h>
+#include <string.h>
+
 /// Add `element` to the `output` set. `relation` is a map of sets of strings
 /// defining is-a relations, and is traversed recursively.
 static void

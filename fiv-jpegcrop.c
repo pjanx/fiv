@@ -18,6 +18,9 @@
 #include <gtk/gtk.h>
 #include <turbojpeg.h>
 
+#include <stdlib.h>
+#include <string.h>
+
 #include "config.h"
 
 // --- Utilities ---------------------------------------------------------------
