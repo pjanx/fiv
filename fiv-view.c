@@ -407,6 +407,11 @@ prescale_page(FivView *self)
 	// TODO(p): Restart the animation. No vector formats currently animate.
 	g_return_if_fail(!self->frame_update_connection);
 
+	// Optimization, taking into account the workaround in set_scale().
+	if (!self->page_scaled &&
+		(self->scale == 1 || self->scale == 0.999999999999999))
+		return;
+
 	// If it fails, the previous frame pointer may become invalid.
 	g_clear_pointer(&self->page_scaled, fiv_io_image_unref);
 	self->frame = self->page_scaled = closure->render(closure,
@@ -886,6 +891,10 @@ switch_page(FivView *self, FivIoImage *page)
 {
 	g_clear_pointer(&self->page_scaled, fiv_io_image_unref);
 	self->frame = self->page = page;
+
+	// XXX: When self->scale_to_fit is in effect,
+	// this uses an old value that may no longer be appropriate,
+	// resulting in wasted effort.
 	prescale_page(self);
 
 	if (!self->page ||
