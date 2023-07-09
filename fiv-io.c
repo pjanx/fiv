@@ -2310,11 +2310,11 @@ load_resvg_render_internal(FivIoRenderClosureResvg *self,
 }
 
 static FivIoImage *
-load_resvg_render(FivIoRenderClosure *closure, double scale)
+load_resvg_render(
+	FivIoRenderClosure *closure, FivIoProfile target, double scale)
 {
 	FivIoRenderClosureResvg *self = (FivIoRenderClosureResvg *) closure;
-	// TODO(p): Somehow get the target colour management profile.
-	return load_resvg_render_internal(self, scale, NULL, NULL);
+	return load_resvg_render_internal(self, scale, target, NULL);
 }
 
 static const char *
@@ -2434,11 +2434,11 @@ load_librsvg_render_internal(FivIoRenderClosureLibrsvg *self, double scale,
 }
 
 static FivIoImage *
-load_librsvg_render(FivIoRenderClosure *closure, double scale)
+load_librsvg_render(
+	FivIoRenderClosure *closure, FivIoProfile target, double scale)
 {
 	FivIoRenderClosureLibrsvg *self = (FivIoRenderClosureLibrsvg *) closure;
-	// TODO(p): Somehow get the target colour management profile.
-	return load_librsvg_render_internal(self, scale, NULL, NULL);
+	return load_librsvg_render_internal(self, scale, target, NULL);
 }
 
 static FivIoImage *

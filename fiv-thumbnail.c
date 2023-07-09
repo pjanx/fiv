@@ -139,6 +139,7 @@ render(GFile *target, GBytes *data, gboolean *color_managed, GError **error)
 {
 	FivIoOpenContext ctx = {
 		.uri = g_file_get_uri(target),
+		// Remember to synchronize changes with adjust_thumbnail().
 		.screen_profile = fiv_io_profile_new_sRGB(),
 		.screen_dpi = 96,
 		.first_frame_only = TRUE,
@@ -180,8 +181,12 @@ adjust_thumbnail(FivIoImage *thumbnail, double row_height)
 	// Vector images should not have orientation, this should handle them all.
 	FivIoRenderClosure *closure = thumbnail->render;
 	if (closure && orientation <= FivIoOrientation0) {
+		// Remember to synchronize changes with render().
+		FivIoProfile screen_profile = fiv_io_profile_new_sRGB();
 		// This API doesn't accept non-uniform scaling; prefer a vertical fit.
-		FivIoImage *scaled = closure->render(closure, scale_y);
+		FivIoImage *scaled = closure->render(closure, screen_profile, scale_y);
+		if (screen_profile)
+			fiv_io_profile_free(screen_profile);
 		if (scaled)
 			return scaled;
 	}

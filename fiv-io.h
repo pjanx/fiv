@@ -56,9 +56,11 @@ enum _FivIoOrientation {
 	FivIoOrientation270       = 8
 };
 
+// TODO(p): Maybe make FivIoProfile a referencable type,
+// then loaders could store it in their closures.
 struct _FivIoRenderClosure {
 	/// The rendering is allowed to fail, returning NULL.
-	FivIoImage *(*render)(FivIoRenderClosure *, double scale);
+	FivIoImage *(*render)(FivIoRenderClosure *, FivIoProfile, double scale);
 	void (*destroy)(FivIoRenderClosure *);
 };
 

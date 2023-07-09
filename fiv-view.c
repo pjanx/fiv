@@ -409,7 +409,8 @@ prescale_page(FivView *self)
 
 	// If it fails, the previous frame pointer may become invalid.
 	g_clear_pointer(&self->page_scaled, fiv_io_image_unref);
-	self->frame = self->page_scaled = closure->render(closure, self->scale);
+	self->frame = self->page_scaled = closure->render(closure,
+		self->enable_cms ? self->screen_cms_profile : NULL, self->scale);
 	if (!self->page_scaled)
 		self->frame = self->page;
 }
