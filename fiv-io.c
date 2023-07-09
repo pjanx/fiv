@@ -2417,10 +2417,11 @@ load_librsvg_render_internal(FivIoRenderClosureLibrsvg *self, double scale,
 	cairo_surface_t *surface = fiv_io_image_to_surface_noref(image);
 	cairo_t *cr = cairo_create(surface);
 	cairo_surface_destroy(surface);
-	(void) rsvg_handle_render_document(self->handle, cr, &viewport, error);
+	gboolean success =
+		rsvg_handle_render_document(self->handle, cr, &viewport, error);
 	cairo_status_t status = cairo_status(cr);
 	cairo_destroy(cr);
-	if (error) {
+	if (!success) {
 		fiv_io_image_unref(image);
 		return NULL;
 	}
