@@ -2495,7 +2495,7 @@ open_librsvg(
 	}
 
 	image->render = &closure->parent;
-	return fiv_io_profile_finalize(image, ctx->screen_profile);
+	return image;
 }
 
 #endif  // HAVE_LIBRSVG --------------------------------------------------------
