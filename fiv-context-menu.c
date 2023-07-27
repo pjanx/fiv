@@ -541,7 +541,7 @@ fiv_context_menu_new(GtkWidget *widget, GFile *file)
 		gtk_menu_shell_append(
 			GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
 
-		item = gtk_menu_item_new_with_mnemonic("_Information...");
+		item = gtk_menu_item_new_with_mnemonic("_Information");
 		g_signal_connect_data(item, "activate", G_CALLBACK(on_info_activate),
 			g_rc_box_acquire(ctx), open_context_unref, 0);
 		gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
