@@ -346,6 +346,8 @@ static void
 monitor_apply(enum monitor_event event, GPtrArray *target, int index,
 	FivIoModelEntry *new_entry)
 {
+	g_return_if_fail(event != MONITOR_CHANGING || index >= 0);
+
 	if (event == MONITOR_RENAMING && index < 0)
 		// The file used to be filtered out but isn't anymore.
 		event = MONITOR_ADDING;
@@ -706,7 +708,7 @@ fiv_io_model_open(FivIoModel *self, GFile *directory, GError **error)
 
 	GError *e = NULL;
 	if ((self->monitor = g_file_monitor_directory(
-			 directory, G_FILE_MONITOR_WATCH_MOVES, NULL, &e))) {
+			directory, G_FILE_MONITOR_WATCH_MOVES, NULL, &e))) {
 		g_signal_connect(self->monitor, "changed",
 			G_CALLBACK(on_monitor_changed), self);
 	} else {
