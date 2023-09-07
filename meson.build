@@ -186,8 +186,8 @@ jpegcrop = executable('fiv-jpegcrop', 'fiv-jpegcrop.c', rc, config,
 )
 
 if get_option('tools').enabled()
-	# libjq 1.6 lacks a pkg-config file, and there is no release in sight.
-	# libjq 1.6 is required.
+	# libjq has only received a pkg-config file in version 1.7.
+	# libjq >= 1.6 is required.
 	tools_dependencies = [
 		cc.find_library('jq'), dependency('libpng'), dependency('libraw')]
 	tools_c_args = cc.get_supported_arguments(
