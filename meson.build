@@ -192,7 +192,7 @@ if get_option('tools').enabled()
 		cc.find_library('jq'), dependency('libpng'), dependency('libraw')]
 	tools_c_args = cc.get_supported_arguments(
 		'-Wno-unused-function', '-Wno-unused-parameter')
-	foreach tool : ['info', 'pnginfo', 'rawinfo']
+	foreach tool : ['info', 'pnginfo', 'rawinfo', 'hotpixels']
 		executable(tool, 'tools/' + tool + '.c', tiff_tables,
 			dependencies : tools_dependencies,
 			c_args: tools_c_args)
