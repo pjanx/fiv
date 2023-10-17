@@ -459,6 +459,26 @@ out:
 //
 // Note that Wayland does not have any appropriate protocol, as of writing:
 // https://gitlab.freedesktop.org/wayland/wayland-protocols/-/merge_requests/14
+static FivIoProfile
+monitor_cms_profile(GdkWindow *root, int num)
+{
+	char atom[32] = "";
+	g_snprintf(atom, sizeof atom, "_ICC_PROFILE%c%d", num ? '_' : '\0', num);
+
+	// Sadly, there is no nice GTK+/GDK mechanism to watch this for changes.
+	int format = 0, length = 0;
+	GdkAtom type = GDK_NONE;
+	guchar *data = NULL;
+	FivIoProfile result = NULL;
+	if (gdk_property_get(root, gdk_atom_intern(atom, FALSE), GDK_NONE, 0,
+			8 << 20 /* MiB */, FALSE, &type, &format, &length, &data)) {
+		if (format == 8 && length > 0)
+			result = fiv_io_profile_new(data, length);
+		g_free(data);
+	}
+	return result;
+}
+
 static void
 reload_screen_cms_profile(FivView *self, GdkWindow *window)
 {
@@ -488,6 +508,7 @@ reload_screen_cms_profile(FivView *self, GdkWindow *window)
 
 	GdkDisplay *display = gdk_window_get_display(window);
 	GdkMonitor *monitor = gdk_display_get_monitor_at_window(display, window);
+	GdkWindow *root = gdk_screen_get_root_window(gdk_window_get_screen(window));
 
 	int num = -1;
 	for (int i = gdk_display_get_n_monitors(display); num < 0 && i--; )
@@ -496,20 +517,9 @@ reload_screen_cms_profile(FivView *self, GdkWindow *window)
 	if (num < 0)
 		goto out;
 
-	char atom[32] = "";
-	g_snprintf(atom, sizeof atom, "_ICC_PROFILE%c%d", num ? '_' : '\0', num);
-
-	// Sadly, there is no nice GTK+/GDK mechanism to watch this for changes.
-	int format = 0, length = 0;
-	GdkAtom type = GDK_NONE;
-	guchar *data = NULL;
-	GdkWindow *root = gdk_screen_get_root_window(gdk_window_get_screen(window));
-	if (gdk_property_get(root, gdk_atom_intern(atom, FALSE), GDK_NONE, 0,
-			8 << 20 /* MiB */, FALSE, &type, &format, &length, &data)) {
-		if (format == 8 && length > 0)
-			self->screen_cms_profile = fiv_io_profile_new(data, length);
-		g_free(data);
-	}
+	// Cater to xiccd limitations (agalakhov/xiccd#33).
+	if (!(self->screen_cms_profile = monitor_cms_profile(root, num)) && num)
+		self->screen_cms_profile = monitor_cms_profile(root, 0);
 
 out:
 	if (!self->screen_cms_profile)
