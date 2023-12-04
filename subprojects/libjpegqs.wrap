@@ -1,8 +1,8 @@
 [wrap-file]
-directory = jpeg-quantsmooth-1.20210408
-source_url = https://github.com/ilyakurdyukov/jpeg-quantsmooth/archive/refs/tags/1.20210408.tar.gz
-source_filename = jpeg-quantsmooth-1.20210408.tar.gz
-source_hash = 5937ca26db33888cab8638c1a8dc7a367a953bd0857ceb1290d5abc6febf3116
+directory = jpeg-quantsmooth-1.20230818
+source_url = https://github.com/ilyakurdyukov/jpeg-quantsmooth/archive/refs/tags/1.20230818.tar.gz
+source_filename = jpeg-quantsmooth-1.20230818.tar.gz
+source_hash = ff9a62e8560851648c60d84b3d97ebd9769f01ce6b995779e071d19a759eca06
 patch_directory = libjpegqs
 
 [provide]

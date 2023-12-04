@@ -1,8 +1,6 @@
 # vim: noet ts=4 sts=4 sw=4:
 project('jpeg-qs', 'c')
-add_project_arguments(meson.get_compiler('c')
-	.get_supported_arguments('-Wno-misleading-indentation'),
-	'-DWITH_LOG', language : 'c')
+add_project_arguments('-DWITH_LOG', language : 'c')
 
 deps = [
 	dependency('libjpeg'),
