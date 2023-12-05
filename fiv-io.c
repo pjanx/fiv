@@ -1538,6 +1538,8 @@ load_libjpeg_turbo(const char *data, gsize len, const FivIoOpenContext *ctx,
 	jpeg_create_decompress(&cinfo);
 	jpeg_mem_src(&cinfo, (const unsigned char *) data, len);
 	(void) jpeg_read_header(&cinfo, true);
+	// TODO(p): With newer libjpeg-turbo, if cinfo.data_precision is 12 or 16,
+	// try to load it with higher precision.
 
 	bool use_cmyk = cinfo.jpeg_color_space == JCS_CMYK ||
 		cinfo.jpeg_color_space == JCS_YCCK;
