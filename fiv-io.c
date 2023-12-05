@@ -1614,10 +1614,15 @@ load_libjpeg_enhanced(
 {
 	// Go for the maximum quality setting.
 	jpegqs_control_t opts = {
-		.flags = JPEGQS_DIAGONALS | JPEGQS_JOINT_YUV | JPEGQS_UPSAMPLE_UV,
+		.flags = JPEGQS_DIAGONALS | JPEGQS_JOINT_YUV,
 		.threads = g_get_num_processors(),
 		.niter = 3,
 	};
+
+	// Waiting for https://github.com/ilyakurdyukov/jpeg-quantsmooth/issues/28
+#if LIBJPEG_TURBO_VERSION_NUMBER < 2001090
+	opts.flags |= JPEGQS_UPSAMPLE_UV;
+#endif
 
 	(void) jpegqs_start_decompress(cinfo, &opts);
 	while (cinfo->output_scanline < cinfo->output_height)
