@@ -275,14 +275,13 @@ relayout(FivBrowser *self, int width)
 		gtk_adjustment_set_page_size(self->hadjustment, width);
 	}
 	if (self->vadjustment) {
+		int height = gtk_widget_get_allocated_height(widget);
 		gtk_adjustment_set_lower(self->vadjustment, 0);
-		gtk_adjustment_set_upper(self->vadjustment, total_height);
+		gtk_adjustment_set_upper(self->vadjustment, MAX(height, total_height));
 		gtk_adjustment_set_step_increment(self->vadjustment,
 			self->item_height + self->item_spacing + 2 * self->item_border_y);
-		gtk_adjustment_set_page_increment(
-			self->vadjustment, gtk_widget_get_allocated_height(widget) * 0.9);
-		gtk_adjustment_set_page_size(
-			self->vadjustment, gtk_widget_get_allocated_height(widget));
+		gtk_adjustment_set_page_increment(self->vadjustment, height * 0.9);
+		gtk_adjustment_set_page_size(self->vadjustment, height);
 	}
 	return total_height;
 }

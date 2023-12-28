@@ -198,12 +198,14 @@ update_adjustments(FivView *self)
 
 	if (self->hadjustment) {
 		gtk_adjustment_configure(self->hadjustment,
-			gtk_adjustment_get_value(self->hadjustment), 0, dw,
+			gtk_adjustment_get_value(self->hadjustment),
+			0, MAX(dw, alloc.width),
 			alloc.width * 0.1, alloc.width * 0.9, alloc.width);
 	}
 	if (self->vadjustment) {
 		gtk_adjustment_configure(self->vadjustment,
-			gtk_adjustment_get_value(self->vadjustment), 0, dh,
+			gtk_adjustment_get_value(self->vadjustment),
+			0, MAX(dh, alloc.height),
 			alloc.height * 0.1, alloc.height * 0.9, alloc.height);
 	}
 }
