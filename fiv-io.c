@@ -1741,10 +1741,8 @@ load_libwebp_frame(WebPAnimDecoder *dec, const WebPAnimInfo *info,
 		return NULL;
 	}
 
-	bool is_opaque = (info->bgcolor & 0xFF) == 0xFF;
 	uint64_t area = info->canvas_width * info->canvas_height;
-	FivIoImage *image = fiv_io_image_new(
-		is_opaque ? CAIRO_FORMAT_RGB24 : CAIRO_FORMAT_ARGB32,
+	FivIoImage *image = fiv_io_image_new(CAIRO_FORMAT_RGB24,
 		info->canvas_width, info->canvas_height);
 	if (!image) {
 		set_error(error, "image allocation failure");
@@ -1759,6 +1757,13 @@ load_libwebp_frame(WebPAnimDecoder *dec, const WebPAnimInfo *info,
 		for (uint64_t i = 0; i < area; i++)
 			*dst++ = GUINT32_FROM_LE(*src++);
 	}
+
+	// info->bgcolor is not reliable.
+	for (const uint32_t *p = dst, *end = dst + area; p < end; p++)
+		if ((~*p & 0xff000000)) {
+			image->format = CAIRO_FORMAT_ARGB32;
+			break;
+		}
 
 	// This API is confusing and awkward.
 	image->frame_duration = timestamp - *last_timestamp;
