@@ -528,12 +528,16 @@ fiv_collection_file_query_info(GFile *file, const char *attributes,
 		g_file_info_set_name(info, basename);
 		g_free(basename);
 
-		if ((name = g_file_info_get_display_name(info))) {
+		if (g_file_info_has_attribute(
+				info, G_FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME) &&
+			(name = g_file_info_get_display_name(info))) {
 			gchar *prefixed = get_prefixed_name(self, name);
 			g_file_info_set_display_name(info, prefixed);
 			g_free(prefixed);
 		}
-		if ((name = g_file_info_get_edit_name(info))) {
+		if (g_file_info_has_attribute(
+				info, G_FILE_ATTRIBUTE_STANDARD_EDIT_NAME) &&
+			(name = g_file_info_get_edit_name(info))) {
 			gchar *prefixed = get_prefixed_name(self, name);
 			g_file_info_set_edit_name(info, prefixed);
 			g_free(prefixed);
