@@ -1,7 +1,7 @@
 //
 // fiv-io.c: image operations
 //
-// Copyright (c) 2021 - 2023, Přemysl Eric Janouch <p@janouch.name>
+// Copyright (c) 2021 - 2024, Přemysl Eric Janouch <p@janouch.name>
 //
 // Permission to use, copy, modify, and/or distribute this software for any
 // purpose with or without fee is hereby granted.
@@ -316,27 +316,42 @@ fiv_io_profile_new_sRGB(void)
 }
 
 FivIoProfile
-fiv_io_profile_new_sRGB_gamma(double gamma)
+fiv_io_profile_new_parametric(
+	double gamma, double whitepoint[2], double primaries[6])
 {
 #ifdef HAVE_LCMS2
 	// TODO(p): Make sure to use the library in a thread-safe manner.
 	cmsContext context = NULL;
 
-	static const cmsCIExyY D65 = {0.3127, 0.3290, 1.0};
-	static const cmsCIExyYTRIPLE primaries = {
-		{0.6400, 0.3300, 1.0}, {0.3000, 0.6000, 1.0}, {0.1500, 0.0600, 1.0}};
+	const cmsCIExyY cmsWP = {whitepoint[0], whitepoint[1], 1.0};
+	const cmsCIExyYTRIPLE cmsP = {
+		{primaries[0], primaries[1], 1.0},
+		{primaries[2], primaries[3], 1.0},
+		{primaries[4], primaries[5], 1.0},
+	};
+
 	cmsToneCurve *curve = cmsBuildGamma(context, gamma);
 	if (!curve)
 		return NULL;
 
 	cmsHPROFILE profile = cmsCreateRGBProfileTHR(
-		context, &D65, &primaries, (cmsToneCurve *[3]){curve, curve, curve});
+		context, &cmsWP, &cmsP, (cmsToneCurve *[3]){curve, curve, curve});
 	cmsFreeToneCurve(curve);
 	return profile;
 #else
 	(void) gamma;
+	(void) whitepoint;
+	(void) primaries;
 	return NULL;
 #endif
+}
+
+FivIoProfile
+fiv_io_profile_new_sRGB_gamma(double gamma)
+{
+	return fiv_io_profile_new_parametric(gamma,
+		(double[2]){0.3127, 0.3290},
+		(double[6]){0.6400, 0.3300, 0.3000, 0.6000, 0.1500, 0.0600});
 }
 
 static FivIoProfile
@@ -1329,6 +1344,100 @@ parse_mpf(
 
 // --- JPEG --------------------------------------------------------------------
 
+struct exif_profile {
+	double whitepoint[2];               ///< TIFF_WhitePoint
+	double primaries[6];                ///< TIFF_PrimaryChromaticities
+	enum Exif_ColorSpace colorspace;    ///< Exif_ColorSpace
+	double gamma;                       ///< Exif_Gamma
+
+	bool have_whitepoint;
+	bool have_primaries;
+	bool have_colorspace;
+	bool have_gamma;
+};
+
+static bool
+parse_exif_profile_reals(
+	const struct tiffer *T, struct tiffer_entry *entry, double *out)
+{
+	while (tiffer_real(T, entry, out++))
+		if (!tiffer_next_value(entry))
+			return false;
+	return true;
+}
+
+static void
+parse_exif_profile_subifd(
+	struct exif_profile *params, const struct tiffer *T, uint32_t offset)
+{
+	struct tiffer subT = {};
+	if (!tiffer_subifd(T, offset, &subT))
+		return;
+
+	struct tiffer_entry entry = {};
+	while (tiffer_next_entry(&subT, &entry)) {
+		int64_t value = 0;
+		if (G_UNLIKELY(entry.tag == Exif_ColorSpace) &&
+			entry.type == TIFFER_SHORT && entry.remaining_count == 1 &&
+			tiffer_integer(&subT, &entry, &value)) {
+			params->have_colorspace = true;
+			params->colorspace = value;
+		} else if (G_UNLIKELY(entry.tag == Exif_Gamma) &&
+			entry.type == TIFFER_RATIONAL && entry.remaining_count == 1 &&
+			tiffer_real(&subT, &entry, &params->gamma)) {
+			params->have_gamma = true;
+		}
+	}
+}
+
+static FivIoProfile
+parse_exif_profile(const void *data, size_t len)
+{
+	struct tiffer T = {};
+	if (!tiffer_init(&T, (const uint8_t *) data, len) || !tiffer_next_ifd(&T))
+		return NULL;
+
+	struct exif_profile params = {};
+	struct tiffer_entry entry = {};
+	while (tiffer_next_entry(&T, &entry)) {
+		int64_t offset = 0;
+		if (G_UNLIKELY(entry.tag == TIFF_ExifIFDPointer) &&
+			entry.type == TIFFER_LONG && entry.remaining_count == 1 &&
+			tiffer_integer(&T, &entry, &offset) &&
+			offset >= 0 && offset <= UINT32_MAX) {
+			parse_exif_profile_subifd(&params, &T, offset);
+		} else if (G_UNLIKELY(entry.tag == TIFF_WhitePoint) &&
+			entry.type == TIFFER_RATIONAL &&
+			entry.remaining_count == G_N_ELEMENTS(params.whitepoint)) {
+			params.have_whitepoint =
+				parse_exif_profile_reals(&T, &entry, params.whitepoint);
+		} else if (G_UNLIKELY(entry.tag == TIFF_PrimaryChromaticities) &&
+			entry.type == TIFFER_RATIONAL &&
+			entry.remaining_count == G_N_ELEMENTS(params.primaries)) {
+			params.have_primaries =
+				parse_exif_profile_reals(&T, &entry, params.primaries);
+		}
+	}
+	if (!params.have_colorspace)
+		return NULL;
+
+	// If sRGB is claimed, assume all parameters are standard.
+	if (params.colorspace == Exif_ColorSpace_sRGB)
+		return fiv_io_profile_new_sRGB();
+
+	// AdobeRGB Nikon JPEGs provide all of these.
+	if (params.colorspace != Exif_ColorSpace_Uncalibrated ||
+		!params.have_gamma ||
+		!params.have_whitepoint ||
+		!params.have_primaries)
+		return NULL;
+
+	return fiv_io_profile_new_parametric(
+		params.gamma, params.whitepoint, params.primaries);
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
 struct jpeg_metadata {
 	GByteArray *exif;                   ///< Exif buffer or NULL
 	GByteArray *icc;                    ///< ICC profile buffer or NULL
@@ -1481,6 +1590,9 @@ load_jpeg_finalize(FivIoImage *image, bool cmyk,
 	if (icc_profile)
 		source = fiv_io_profile_new(
 			g_bytes_get_data(icc_profile, NULL), g_bytes_get_size(icc_profile));
+	else if (image->exif)
+		source = parse_exif_profile(
+			g_bytes_get_data(image->exif, NULL), g_bytes_get_size(image->exif));
 
 	if (cmyk)
 		fiv_io_profile_cmyk(image, source, ctx->screen_profile);
@@ -2123,6 +2235,9 @@ load_tiff_ep(
 		orientation >= 1 && orientation <= 8) {
 		image->orientation = orientation;
 	}
+
+	// XXX: AdobeRGB Nikon NEFs can only be distinguished by a ColorSpace tag
+	// from within their MakerNote.
 	return image;
 }
 
