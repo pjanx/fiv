@@ -123,6 +123,39 @@ parse_exif_subifds(const struct tiffer *T, struct tiffer_entry *entry,
 	return a;
 }
 
+// Implemented partially, out of curiosity--it is not particularly useful,
+// because there is a ton more parsing to do here.
+static bool
+parse_exif_makernote(jv *v, const struct tiffer_entry *entry)
+{
+	if (!getenv("INFO_MAKERNOTE") ||
+		entry->tag != Exif_MakerNote || entry->type != TIFFER_UNDEFINED)
+		return false;
+
+	struct tiffer T = {};
+	if (entry->remaining_count >= 16 &&
+		!memcmp(entry->p, "Nikon\x00\x02", 7) &&
+		tiffer_init(&T, entry->p + 10, entry->remaining_count - 10) &&
+		tiffer_next_ifd(&T)) {
+		*v = parse_exif_ifd(&T, NULL);
+		return true;
+	}
+	if (entry->remaining_count >= 16 &&
+		!memcmp(entry->p, "Apple iOS\x00\x00\x01MM", 14)) {
+		T.un = &tiffer_unbe;
+		T.begin = T.p = entry->p + 14;
+		T.end = entry->p + entry->remaining_count - 14;
+		T.remaining_fields = 0;
+
+		struct tiffer subT = {};
+		if (tiffer_subifd(&T, 0, &subT)) {
+			*v = parse_exif_ifd(&subT, NULL);
+			return true;
+		}
+	}
+	return false;
+}
+
 static jv
 parse_exif_ascii(struct tiffer_entry *entry)
 {
@@ -198,6 +231,8 @@ parse_exif_entry(jv o, const struct tiffer *T, struct tiffer_entry *entry,
 		v = parse_exif_subifds(T, entry, subentries);
 	} else if (entry->type == TIFFER_ASCII) {
 		v = parse_exif_extract_sole_array_element(parse_exif_ascii(entry));
+	} else if (info_begin == exif_entries && parse_exif_makernote(&v, entry)) {
+		// Already processed.
 	} else if (entry->type == TIFFER_UNDEFINED && !info->values) {
 		// Several Exif entries of UNDEFINED type contain single-byte numbers.
 		v = parse_exif_undefined(entry);
