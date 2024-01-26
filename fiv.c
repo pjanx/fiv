@@ -2583,8 +2583,6 @@ on_app_handle_local_options(G_GNUC_UNUSED GApplication *app,
 		return 0;
 	}
 
-	fiv_io_profile_init();
-
 	// Normalize all arguments to URIs, and run thumbnailing modes first.
 	for (gsize i = 0; o.args && o.args[i]; i++) {
 		GFile *resolved = g_file_new_for_commandline_arg(o.args[i]);

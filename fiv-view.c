@@ -417,6 +417,7 @@ prescale_page(FivView *self)
 	// If it fails, the previous frame pointer may become invalid.
 	g_clear_pointer(&self->page_scaled, fiv_io_image_unref);
 	self->frame = self->page_scaled = closure->render(closure,
+		self->enable_cms ? fiv_io_cmm_get_default() : NULL,
 		self->enable_cms ? self->screen_cms_profile : NULL, self->scale);
 	if (!self->page_scaled)
 		self->frame = self->page;
@@ -475,7 +476,8 @@ monitor_cms_profile(GdkWindow *root, int num)
 	if (gdk_property_get(root, gdk_atom_intern(atom, FALSE), GDK_NONE, 0,
 			8 << 20 /* MiB */, FALSE, &type, &format, &length, &data)) {
 		if (format == 8 && length > 0)
-			result = fiv_io_profile_new(data, length);
+			result = fiv_io_cmm_get_profile(
+				fiv_io_cmm_get_default(), data, length);
 		g_free(data);
 	}
 	return result;
@@ -525,7 +527,8 @@ reload_screen_cms_profile(FivView *self, GdkWindow *window)
 
 out:
 	if (!self->screen_cms_profile)
-		self->screen_cms_profile = fiv_io_profile_new_sRGB();
+		self->screen_cms_profile =
+			fiv_io_cmm_get_profile_sRGB(fiv_io_cmm_get_default());
 }
 
 static void
@@ -1381,6 +1384,7 @@ open_without_swapping_in(FivView *self, const char *uri)
 {
 	FivIoOpenContext ctx = {
 		.uri = uri,
+		.cmm = self->enable_cms ? fiv_io_cmm_get_default() : NULL,
 		.screen_profile = self->enable_cms ? self->screen_cms_profile : NULL,
 		.screen_dpi = 96,  // TODO(p): Try to retrieve it from the screen.
 		.enhance = self->enhance,

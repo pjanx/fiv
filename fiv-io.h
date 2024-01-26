@@ -25,41 +25,50 @@
 typedef enum _FivIoOrientation FivIoOrientation;
 typedef struct _FivIoRenderClosure FivIoRenderClosure;
 typedef struct _FivIoImage FivIoImage;
+typedef struct _FivIoProfile FivIoProfile;
 
 // --- Colour management -------------------------------------------------------
+// Note that without a CMM, all FivIoCmm and FivIoProfile will be returned NULL.
 
-void fiv_io_profile_init(void);
-
-// TODO(p): Make it also possible to use Skia's skcms.
-typedef void *FivIoProfile;
-FivIoProfile *fiv_io_profile_new(const void *data, size_t len);
-FivIoProfile *fiv_io_profile_new_from_bytes(GBytes *bytes);
-FivIoProfile *fiv_io_profile_new_sRGB(void);
-FivIoProfile *fiv_io_profile_new_sRGB_gamma(double gamma);
-FivIoProfile *fiv_io_profile_new_parametric(
-    double gamma, double whitepoint[2], double primaries[6]);
 GBytes *fiv_io_profile_to_bytes(FivIoProfile *profile);
 void fiv_io_profile_free(FivIoProfile *self);
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+#define FIV_TYPE_IO_CMM (fiv_io_cmm_get_type())
+G_DECLARE_FINAL_TYPE(FivIoCmm, fiv_io_cmm, FIV, IO_CMM, GObject)
+
+FivIoCmm *fiv_io_cmm_get_default(void);
+
+FivIoProfile *fiv_io_cmm_get_profile(
+	FivIoCmm *self, const void *data, size_t len);
+FivIoProfile *fiv_io_cmm_get_profile_from_bytes(FivIoCmm *self, GBytes *bytes);
+FivIoProfile *fiv_io_cmm_get_profile_sRGB(FivIoCmm *self);
+FivIoProfile *fiv_io_cmm_get_profile_sRGB_gamma(FivIoCmm *self, double gamma);
+FivIoProfile *fiv_io_cmm_get_profile_parametric(
+	FivIoCmm *self, double gamma, double whitepoint[2], double primaries[6]);
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
 void fiv_io_premultiply_argb32(FivIoImage *image);
 
-void fiv_io_profile_cmyk(
+void fiv_io_cmm_cmyk(FivIoCmm *self,
     FivIoImage *image, FivIoProfile *source, FivIoProfile *target);
-void fiv_io_profile_4x16le_direct(unsigned char *data,
+void fiv_io_cmm_4x16le_direct(FivIoCmm *self, unsigned char *data,
     int w, int h, FivIoProfile *source, FivIoProfile *target);
-void fiv_io_profile_argb32_premultiply(
-    FivIoImage *image, FivIoProfile *source, FivIoProfile *target);
 
-void fiv_io_profile_page(FivIoImage *page, FivIoProfile *target,
-	void (*frame_cb) (FivIoImage *, FivIoProfile *, FivIoProfile *));
-#define fiv_io_profile_argb32_premultiply_page(page, target) \
-	fiv_io_profile_page((page), (target), fiv_io_profile_argb32_premultiply)
-
-void fiv_io_profile_any(
+void fiv_io_cmm_argb32_premultiply(FivIoCmm *self,
 	FivIoImage *image, FivIoProfile *source, FivIoProfile *target);
-FivIoImage *fiv_io_profile_finalize(FivIoImage *image, FivIoProfile *target);
+#define fiv_io_cmm_argb32_premultiply_page(cmm, page, target) \
+	fiv_io_cmm_page((cmm), (page), (target), fiv_io_cmm_argb32_premultiply)
+
+void fiv_io_cmm_page(FivIoCmm *self, FivIoImage *page, FivIoProfile *target,
+	void (*frame_cb) (FivIoCmm *,
+		FivIoImage *, FivIoProfile *, FivIoProfile *));
+void fiv_io_cmm_any(FivIoCmm *self,
+	FivIoImage *image, FivIoProfile *source, FivIoProfile *target);
+FivIoImage *fiv_io_cmm_finish(FivIoCmm *self,
+	FivIoImage *image, FivIoProfile *target);
 
 // --- Loading -----------------------------------------------------------------
 
@@ -84,7 +93,8 @@ enum _FivIoOrientation {
 // then loaders could store it in their closures.
 struct _FivIoRenderClosure {
 	/// The rendering is allowed to fail, returning NULL.
-	FivIoImage *(*render)(FivIoRenderClosure *, FivIoProfile *, double scale);
+	FivIoImage *(*render)(
+		FivIoRenderClosure *, FivIoCmm *, FivIoProfile *, double scale);
 	void (*destroy)(FivIoRenderClosure *);
 };
 
@@ -155,7 +165,8 @@ cairo_surface_t *fiv_io_image_to_surface_noref(const FivIoImage *image);
 
 typedef struct {
 	const char *uri;                    ///< Source URI
-	FivIoProfile screen_profile;        ///< Target colour space or NULL
+	FivIoCmm *cmm;                      ///< Colour management module or NULL
+	FivIoProfile *screen_profile;       ///< Target colour space or NULL
 	int screen_dpi;                     ///< Target DPI
 	gboolean enhance;                   ///< Enhance JPEG (currently)
 	gboolean first_frame_only;          ///< Only interested in the 1st frame

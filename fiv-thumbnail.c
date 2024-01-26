@@ -137,10 +137,12 @@ might_be_a_thumbnail(const char *path_or_uri)
 static FivIoImage *
 render(GFile *target, GBytes *data, gboolean *color_managed, GError **error)
 {
+	FivIoCmm *cmm = fiv_io_cmm_get_default();
 	FivIoOpenContext ctx = {
 		.uri = g_file_get_uri(target),
 		// Remember to synchronize changes with adjust_thumbnail().
-		.screen_profile = fiv_io_profile_new_sRGB(),
+		.cmm = cmm,
+		.screen_profile = fiv_io_cmm_get_profile_sRGB(cmm),
 		.screen_dpi = 96,
 		.first_frame_only = TRUE,
 		// Only using this array as a redirect.
@@ -182,9 +184,11 @@ adjust_thumbnail(FivIoImage *thumbnail, double row_height)
 	FivIoRenderClosure *closure = thumbnail->render;
 	if (closure && orientation <= FivIoOrientation0) {
 		// Remember to synchronize changes with render().
-		FivIoProfile *screen_profile = fiv_io_profile_new_sRGB();
+		FivIoCmm *cmm = fiv_io_cmm_get_default();
+		FivIoProfile *screen_profile = fiv_io_cmm_get_profile_sRGB(cmm);
 		// This API doesn't accept non-uniform scaling; prefer a vertical fit.
-		FivIoImage *scaled = closure->render(closure, screen_profile, scale_y);
+		FivIoImage *scaled =
+			closure->render(closure, cmm, screen_profile, scale_y);
 		if (screen_profile)
 			fiv_io_profile_free(screen_profile);
 		if (scaled)

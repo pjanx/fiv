@@ -379,6 +379,7 @@ struct load_wuffs_frame_context {
 	GBytes *meta_iccp;                  ///< Reference-counted ICC profile
 	GBytes *meta_xmp;                   ///< Reference-counted XMP
 
+	FivIoCmm *cmm;                      ///< CMM context, if any
 	FivIoProfile *target;               ///< Target device profile, if any
 	FivIoProfile *source;               ///< Source colour profile, if any
 
@@ -447,11 +448,12 @@ load_wuffs_frame(struct load_wuffs_frame_context *ctx, GError **error)
 
 	if (ctx->target) {
 		if (ctx->expand_16_float || ctx->pack_16_10) {
-			fiv_io_profile_4x16le_direct(
+			fiv_io_cmm_4x16le_direct(ctx->cmm,
 				targetbuf, ctx->width, ctx->height, ctx->source, ctx->target);
 			// The first one premultiplies below, the second doesn't need to.
 		} else {
-			fiv_io_profile_argb32_premultiply(image, ctx->source, ctx->target);
+			fiv_io_cmm_argb32_premultiply(
+				ctx->cmm, image, ctx->source, ctx->target);
 		}
 	}
 
@@ -589,7 +591,8 @@ open_wuffs(wuffs_base__image_decoder *dec, wuffs_base__io_buffer src,
 	const FivIoOpenContext *ioctx, GError **error)
 {
 	struct load_wuffs_frame_context ctx = {
-		.dec = dec, .src = &src, .target = ioctx->screen_profile};
+		.dec = dec, .src = &src,
+		.cmm = ioctx->cmm, .target = ioctx->screen_profile};
 
 	// TODO(p): PNG text chunks, like we do with PNG thumbnails.
 	// TODO(p): See if something could and should be done about
@@ -673,9 +676,11 @@ open_wuffs(wuffs_base__image_decoder *dec, wuffs_base__io_buffer src,
 	// TODO(p): Improve our simplistic PNG handling of: gAMA, cHRM, sRGB.
 	if (ctx.target) {
 		if (ctx.meta_iccp)
-			ctx.source = fiv_io_profile_new_from_bytes(ctx.meta_iccp);
+			ctx.source = fiv_io_cmm_get_profile_from_bytes(
+				ctx.cmm, ctx.meta_iccp);
 		else if (isfinite(gamma) && gamma > 0)
-			ctx.source = fiv_io_profile_new_sRGB_gamma(gamma);
+			ctx.source = fiv_io_cmm_get_profile_sRGB_gamma(
+				ctx.cmm, gamma);
 	}
 
 	// Wuffs maps tRNS to BGRA in `decoder.decode_trns?`, we should be fine.
@@ -1059,7 +1064,7 @@ parse_exif_profile_subifd(
 }
 
 static FivIoProfile *
-parse_exif_profile(const void *data, size_t len)
+parse_exif_profile(FivIoCmm *cmm, const void *data, size_t len)
 {
 	struct tiffer T = {};
 	if (!tiffer_init(&T, (const uint8_t *) data, len) || !tiffer_next_ifd(&T))
@@ -1091,7 +1096,7 @@ parse_exif_profile(const void *data, size_t len)
 
 	// If sRGB is claimed, assume all parameters are standard.
 	if (params.colorspace == Exif_ColorSpace_sRGB)
-		return fiv_io_profile_new_sRGB();
+		return fiv_io_cmm_get_profile_sRGB(cmm);
 
 	// AdobeRGB Nikon JPEGs provide all of these.
 	if (params.colorspace != Exif_ColorSpace_Uncalibrated ||
@@ -1100,7 +1105,7 @@ parse_exif_profile(const void *data, size_t len)
 		!params.have_primaries)
 		return NULL;
 
-	return fiv_io_profile_new_parametric(
+	return fiv_io_cmm_get_profile_parametric(cmm,
 		params.gamma, params.whitepoint, params.primaries);
 }
 
@@ -1255,17 +1260,17 @@ load_jpeg_finalize(FivIoImage *image, bool cmyk,
 		g_byte_array_free(meta.icc, TRUE);
 
 	FivIoProfile *source = NULL;
-	if (icc_profile)
-		source = fiv_io_profile_new(
+	if (icc_profile && ctx->cmm)
+		source = fiv_io_cmm_get_profile(ctx->cmm,
 			g_bytes_get_data(icc_profile, NULL), g_bytes_get_size(icc_profile));
-	else if (image->exif)
-		source = parse_exif_profile(
+	else if (image->exif && ctx->cmm)
+		source = parse_exif_profile(ctx->cmm,
 			g_bytes_get_data(image->exif, NULL), g_bytes_get_size(image->exif));
 
 	if (cmyk)
-		fiv_io_profile_cmyk(image, source, ctx->screen_profile);
+		fiv_io_cmm_cmyk(ctx->cmm, image, source, ctx->screen_profile);
 	else
-		fiv_io_profile_any(image, source, ctx->screen_profile);
+		fiv_io_cmm_any(ctx->cmm, image, source, ctx->screen_profile);
 
 	if (source)
 		fiv_io_profile_free(source);
@@ -1666,7 +1671,8 @@ open_libwebp(
 
 	WebPDemuxDelete(demux);
 	if (ctx->screen_profile)
-		fiv_io_profile_argb32_premultiply_page(result, ctx->screen_profile);
+		fiv_io_cmm_argb32_premultiply_page(
+			ctx->cmm, result, ctx->screen_profile);
 
 fail:
 	WebPFreeDecBuffer(&config.output);
@@ -2048,7 +2054,7 @@ open_libraw(
 
 out:
 	libraw_close(iprc);
-	return fiv_io_profile_finalize(result, ctx->screen_profile);
+	return fiv_io_cmm_finish(ctx->cmm, result, ctx->screen_profile);
 }
 
 #endif  // HAVE_LIBRAW ---------------------------------------------------------
@@ -2070,8 +2076,8 @@ load_resvg_destroy(FivIoRenderClosure *closure)
 }
 
 static FivIoImage *
-load_resvg_render_internal(FivIoRenderClosureResvg *self,
-	double scale, FivIoProfile *target, GError **error)
+load_resvg_render_internal(FivIoRenderClosureResvg *self, double scale,
+	FivIoCmm *cmm, FivIoProfile *target, GError **error)
 {
 	double w = ceil(self->width * scale), h = ceil(self->height * scale);
 	if (w > SHRT_MAX || h > SHRT_MAX) {
@@ -2101,15 +2107,15 @@ load_resvg_render_internal(FivIoRenderClosureResvg *self,
 		uint32_t rgba = g_ntohl(pixels[i]);
 		pixels[i] = rgba << 24 | rgba >> 8;
 	}
-	return fiv_io_profile_finalize(image, target);
+	return fiv_io_cmm_finish(cmm, image, target);
 }
 
 static FivIoImage *
-load_resvg_render(
-	FivIoRenderClosure *closure, FivIoProfile *target, double scale)
+load_resvg_render(FivIoRenderClosure *closure,
+	FivIoCmm *cmm, FivIoProfile *target, double scale)
 {
 	FivIoRenderClosureResvg *self = (FivIoRenderClosureResvg *) closure;
-	return load_resvg_render_internal(self, scale, target, NULL);
+	return load_resvg_render_internal(self, scale, cmm, target, NULL);
 }
 
 static const char *
@@ -2167,8 +2173,8 @@ open_resvg(
 	closure->width = size.width;
 	closure->height = size.height;
 
-	FivIoImage *image =
-		load_resvg_render_internal(closure, 1., ctx->screen_profile, error);
+	FivIoImage *image = load_resvg_render_internal(
+		closure, 1., ctx->cmm, ctx->screen_profile, error);
 	if (!image) {
 		load_resvg_destroy(&closure->parent);
 		return NULL;
@@ -2198,7 +2204,7 @@ load_librsvg_destroy(FivIoRenderClosure *closure)
 
 static FivIoImage *
 load_librsvg_render_internal(FivIoRenderClosureLibrsvg *self, double scale,
-	FivIoProfile *target, GError **error)
+	FivIoCmm *cmm, FivIoProfile *target, GError **error)
 {
 	RsvgRectangle viewport = {.x = 0, .y = 0,
 		.width = self->width * scale, .height = self->height * scale};
@@ -2225,15 +2231,15 @@ load_librsvg_render_internal(FivIoRenderClosureLibrsvg *self, double scale,
 		fiv_io_image_unref(image);
 		return NULL;
 	}
-	return fiv_io_profile_finalize(image, target);
+	return fiv_io_cmm_finish(cmm, image, target);
 }
 
 static FivIoImage *
-load_librsvg_render(
-	FivIoRenderClosure *closure, FivIoProfile *target, double scale)
+load_librsvg_render(FivIoRenderClosure *closure,
+	FivIoCmm *cmm, FivIoProfile *target, double scale)
 {
 	FivIoRenderClosureLibrsvg *self = (FivIoRenderClosureLibrsvg *) closure;
-	return load_librsvg_render_internal(self, scale, target, NULL);
+	return load_librsvg_render_internal(self, scale, cmm, target, NULL);
 }
 
 static FivIoImage *
@@ -2282,8 +2288,8 @@ open_librsvg(
 
 	// librsvg rasterizes filters, so rendering to a recording Cairo surface
 	// has been abandoned.
-	FivIoImage *image =
-		load_librsvg_render_internal(closure, 1., ctx->screen_profile, error);
+	FivIoImage *image = load_librsvg_render_internal(
+		closure, 1., ctx->cmm, ctx->screen_profile, error);
 	if (!image) {
 		load_librsvg_destroy(&closure->parent);
 		return NULL;
@@ -2599,7 +2605,7 @@ open_libheif(
 	g_free(ids);
 fail_read:
 	heif_context_free(ctx);
-	return fiv_io_profile_finalize(result, ioctx->screen_profile);
+	return fiv_io_cmm_finish(ioctx->cmm, result, ioctx->screen_profile);
 }
 
 #endif  // HAVE_LIBHEIF --------------------------------------------------------
@@ -2830,7 +2836,7 @@ fail:
 	TIFFSetWarningHandlerExt(whe);
 	TIFFSetErrorHandler(eh);
 	TIFFSetWarningHandler(wh);
-	return fiv_io_profile_finalize(result, ctx->screen_profile);
+	return fiv_io_cmm_finish(ctx->cmm, result, ctx->screen_profile);
 }
 
 #endif  // HAVE_LIBTIFF --------------------------------------------------------
@@ -2925,9 +2931,10 @@ open_gdkpixbuf(
 
 	g_object_unref(pixbuf);
 	if (custom_argb32)
-		fiv_io_profile_argb32_premultiply_page(image, ctx->screen_profile);
+		fiv_io_cmm_argb32_premultiply_page(
+			ctx->cmm, image, ctx->screen_profile);
 	else
-		image = fiv_io_profile_finalize(image, ctx->screen_profile);
+		image = fiv_io_cmm_finish(ctx->cmm, image, ctx->screen_profile);
 	return image;
 }
 
