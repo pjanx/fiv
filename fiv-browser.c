@@ -1,7 +1,7 @@
 //
 // fiv-browser.c: filesystem browsing widget
 //
-// Copyright (c) 2021 - 2023, Přemysl Eric Janouch <p@janouch.name>
+// Copyright (c) 2021 - 2024, Přemysl Eric Janouch <p@janouch.name>
 //
 // Permission to use, copy, modify, and/or distribute this software for any
 // purpose with or without fee is hereby granted.
@@ -1562,6 +1562,14 @@ fiv_browser_key_press_event(GtkWidget *widget, GdkEventKey *event)
 	switch ((event->state & gtk_accelerator_get_default_mod_mask())) {
 	case 0:
 		switch (event->keyval) {
+		case GDK_KEY_Delete:
+			if (self->selected) {
+				GtkWindow *window = GTK_WINDOW(gtk_widget_get_toplevel(widget));
+				GFile *file = g_file_new_for_uri(self->selected->e->uri);
+				fiv_context_menu_remove(window, file);
+				g_object_unref(file);
+			}
+			return GDK_EVENT_STOP;
 		case GDK_KEY_Return:
 			if (self->selected)
 				return open_entry(widget, self->selected, FALSE);

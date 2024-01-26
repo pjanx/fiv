@@ -1,7 +1,7 @@
 //
 // fiv-context-menu.h: popup menu
 //
-// Copyright (c) 2022, Přemysl Eric Janouch <p@janouch.name>
+// Copyright (c) 2022 - 2024, Přemysl Eric Janouch <p@janouch.name>
 //
 // Permission to use, copy, modify, and/or distribute this software for any
 // purpose with or without fee is hereby granted.
@@ -18,4 +18,5 @@
 #include <gtk/gtk.h>
 
 void fiv_context_menu_information(GtkWindow *parent, const char *uri);
+void fiv_context_menu_remove(GtkWindow *parent, GFile *file);
 GtkMenu *fiv_context_menu_new(GtkWidget *widget, GFile *file);

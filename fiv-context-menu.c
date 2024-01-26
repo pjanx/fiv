@@ -1,7 +1,7 @@
 //
 // fiv-context-menu.c: popup menu
 //
-// Copyright (c) 2021 - 2022, Přemysl Eric Janouch <p@janouch.name>
+// Copyright (c) 2021 - 2024, Přemysl Eric Janouch <p@janouch.name>
 //
 // Permission to use, copy, modify, and/or distribute this software for any
 // purpose with or without fee is hereby granted.
@@ -328,17 +328,13 @@ open_context_unref(gpointer data, G_GNUC_UNUSED GClosure *closure)
 }
 
 static void
-open_context_show_error_dialog(OpenContext *self, GError *error)
+show_error_dialog(GtkWindow *parent, GError *error)
 {
-	GtkWindow *window = g_weak_ref_get(&self->window);
-
 	GtkWidget *dialog =
-		gtk_message_dialog_new(GTK_WINDOW(window), GTK_DIALOG_MODAL,
+		gtk_message_dialog_new(GTK_WINDOW(parent), GTK_DIALOG_MODAL,
 			GTK_MESSAGE_ERROR, GTK_BUTTONS_CLOSE, "%s", error->message);
 	gtk_dialog_run(GTK_DIALOG(dialog));
 	gtk_widget_destroy(dialog);
-
-	g_clear_object(&window);
 	g_error_free(error);
 }
 
@@ -357,7 +353,9 @@ open_context_launch(GtkWidget *widget, OpenContext *self)
 		(void) g_app_info_set_as_last_used_for_type(
 			self->app_info, self->content_type, NULL);
 	} else {
-		open_context_show_error_dialog(self, error);
+		GtkWindow *window = g_weak_ref_get(&self->window);
+		show_error_dialog(window, error);
+		g_clear_object(&window);
 	}
 	g_list_free(files);
 	g_object_unref(context);
@@ -437,14 +435,22 @@ on_info_activate(G_GNUC_UNUSED GtkMenuItem *item, gpointer user_data)
 	g_free(uri);
 }
 
+void
+fiv_context_menu_remove(GtkWindow *parent, GFile *file)
+{
+	// TODO(p): Use g_file_trash_async(), for which we need a task manager.
+	GError *error = NULL;
+	if (!g_file_trash(file, NULL, &error))
+		show_error_dialog(parent, error);
+}
+
 static void
 on_trash_activate(G_GNUC_UNUSED GtkMenuItem *item, gpointer user_data)
 {
-	// TODO(p): Use g_file_trash_async(), for which we need a task manager.
 	OpenContext *ctx = user_data;
-	GError *error = NULL;
-	if (!g_file_trash(ctx->file, NULL, &error))
-		open_context_show_error_dialog(ctx, error);
+	GtkWindow *window = g_weak_ref_get(&ctx->window);
+	fiv_context_menu_remove(window, ctx->file);
+	g_clear_object(&window);
 }
 
 static gboolean
