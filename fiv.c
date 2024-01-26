@@ -1689,6 +1689,9 @@ make_toolbar_radio(const char *label, const char *tooltip)
 	GtkWidget *button = gtk_radio_button_new_with_label(NULL, label);
 	gtk_widget_set_tooltip_text(button, tooltip);
 	gtk_widget_set_focus_on_click(button, FALSE);
+	gtk_toggle_button_set_mode(GTK_TOGGLE_BUTTON(button), FALSE);
+	gtk_style_context_add_class(
+		gtk_widget_get_style_context(button), GTK_STYLE_CLASS_FLAT);
 	return button;
 }
 
@@ -1750,7 +1753,6 @@ make_browser_toolbar(void)
 		gtk_radio_button_join_group(radio, last);
 		last = radio;
 	}
-
 	return browser_toolbar;
 }
 
@@ -2206,8 +2208,10 @@ static const char stylesheet[] = "@define-color fiv-tile @content_view_bg; \
 		mix(@theme_selected_bg_color, @content_view_bg, 0.5); \
 	fiv-view, fiv-browser { background: @content_view_bg; } \
 	placessidebar.fiv box > separator { margin: 4px 0; } \
-	placessidebar.fiv row { min-height: 1.75em; } \
+	placessidebar.fiv row { min-height: 2em; } \
 	.fiv-toolbar button { padding-left: 0; padding-right: 0; } \
+	.fiv-toolbar button.text-button { \
+		padding-left: 4px; padding-right: 4px; } \
 	.fiv-toolbar > button:first-child { padding-left: 4px; } \
 	.fiv-toolbar > button:last-child { padding-right: 4px; } \
 	.fiv-toolbar separator { \
