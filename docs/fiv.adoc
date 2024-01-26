@@ -32,6 +32,10 @@ Options
 	handler to implement the "Open Containing Folder" feature of certain
 	applications.
 
+*--collection*::
+	Always put arguments in a virtual directory, even when only one is passed.
+	Implies *--browse*.
+
 *--help-all*::
 	Show the full list of options, including those provided by GTK+.
 

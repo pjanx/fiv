@@ -2453,7 +2453,7 @@ on_app_startup(GApplication *app, G_GNUC_UNUSED gpointer user_data)
 }
 
 static struct {
-	gboolean browse, extract_thumbnail;
+	gboolean browse, collection, extract_thumbnail;
 	gchar **args, *thumbnail_size, *thumbnail_size_search;
 } o;
 
@@ -2463,12 +2463,12 @@ on_app_activate(
 {
 	// XXX: We follow the behaviour of Firefox and Eye of GNOME, which both
 	// interpret multiple command line arguments differently, as a collection.
-	// However, single-element collections are unrepresentable this way.
-	// Should we allow multiple targets only in a special new mode?
+	// However, single-element collections are unrepresentable this way,
+	// so we have a switch to enforce it.
 	g.files_index = -1;
 	if (o.args) {
 		const gchar *target = *o.args;
-		if (o.args[1]) {
+		if (o.args[1] || o.collection) {
 			fiv_collection_reload(o.args);
 			target = FIV_COLLECTION_SCHEME ":/";
 		}
@@ -2619,6 +2619,9 @@ main(int argc, char *argv[])
 		{"browse", 0, G_OPTION_FLAG_IN_MAIN,
 			G_OPTION_ARG_NONE, &o.browse,
 			"Start in filesystem browsing mode", NULL},
+		{"collection", 0, G_OPTION_FLAG_IN_MAIN,
+			G_OPTION_ARG_NONE, &o.collection,
+			"Always put arguments in a collection (implies --browse)", NULL},
 		{"invalidate-cache", 0, G_OPTION_FLAG_IN_MAIN,
 			G_OPTION_ARG_NONE, NULL,
 			"Invalidate the wide thumbnail cache", NULL},
