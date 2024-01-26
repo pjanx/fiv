@@ -1,7 +1,7 @@
 //
 // fiv-io.h: image operations
 //
-// Copyright (c) 2021 - 2023, Přemysl Eric Janouch <p@janouch.name>
+// Copyright (c) 2021 - 2024, Přemysl Eric Janouch <p@janouch.name>
 //
 // Permission to use, copy, modify, and/or distribute this software for any
 // purpose with or without fee is hereby granted.
@@ -22,26 +22,50 @@
 #include <glib.h>
 #include <webp/encode.h>  // WebPConfig
 
+typedef enum _FivIoOrientation FivIoOrientation;
+typedef struct _FivIoRenderClosure FivIoRenderClosure;
+typedef struct _FivIoImage FivIoImage;
+
 // --- Colour management -------------------------------------------------------
+
+void fiv_io_profile_init(void);
 
 // TODO(p): Make it also possible to use Skia's skcms.
 typedef void *FivIoProfile;
-FivIoProfile fiv_io_profile_new(const void *data, size_t len);
-FivIoProfile fiv_io_profile_new_sRGB(void);
-void fiv_io_profile_free(FivIoProfile self);
+FivIoProfile *fiv_io_profile_new(const void *data, size_t len);
+FivIoProfile *fiv_io_profile_new_from_bytes(GBytes *bytes);
+FivIoProfile *fiv_io_profile_new_sRGB(void);
+FivIoProfile *fiv_io_profile_new_sRGB_gamma(double gamma);
+FivIoProfile *fiv_io_profile_new_parametric(
+    double gamma, double whitepoint[2], double primaries[6]);
+GBytes *fiv_io_profile_to_bytes(FivIoProfile *profile);
+void fiv_io_profile_free(FivIoProfile *self);
 
-// From libwebp, verified to exactly match [x * a / 255].
-#define PREMULTIPLY8(a, x) (((uint32_t) (x) * (uint32_t) (a) * 32897U) >> 23)
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void fiv_io_premultiply_argb32(FivIoImage *image);
+
+void fiv_io_profile_cmyk(
+    FivIoImage *image, FivIoProfile *source, FivIoProfile *target);
+void fiv_io_profile_4x16le_direct(unsigned char *data,
+    int w, int h, FivIoProfile *source, FivIoProfile *target);
+void fiv_io_profile_argb32_premultiply(
+    FivIoImage *image, FivIoProfile *source, FivIoProfile *target);
+
+void fiv_io_profile_page(FivIoImage *page, FivIoProfile *target,
+	void (*frame_cb) (FivIoImage *, FivIoProfile *, FivIoProfile *));
+#define fiv_io_profile_argb32_premultiply_page(page, target) \
+	fiv_io_profile_page((page), (target), fiv_io_profile_argb32_premultiply)
+
+void fiv_io_profile_any(
+	FivIoImage *image, FivIoProfile *source, FivIoProfile *target);
+FivIoImage *fiv_io_profile_finalize(FivIoImage *image, FivIoProfile *target);
 
 // --- Loading -----------------------------------------------------------------
 
 extern const char *fiv_io_supported_media_types[];
 
 gchar **fiv_io_all_supported_media_types(void);
-
-typedef enum _FivIoOrientation FivIoOrientation;
-typedef struct _FivIoRenderClosure FivIoRenderClosure;
-typedef struct _FivIoImage FivIoImage;
 
 // https://www.cipa.jp/std/documents/e/DC-008-2012_E.pdf Table 6
 enum _FivIoOrientation {
@@ -60,7 +84,7 @@ enum _FivIoOrientation {
 // then loaders could store it in their closures.
 struct _FivIoRenderClosure {
 	/// The rendering is allowed to fail, returning NULL.
-	FivIoImage *(*render)(FivIoRenderClosure *, FivIoProfile, double scale);
+	FivIoImage *(*render)(FivIoRenderClosure *, FivIoProfile *, double scale);
 	void (*destroy)(FivIoRenderClosure *);
 };
 
@@ -179,4 +203,4 @@ unsigned char *fiv_io_encode_webp(
 /// Saves the page as a lossless WebP still picture or animation.
 /// If no exact frame is specified, this potentially creates an animation.
 gboolean fiv_io_save(FivIoImage *page, FivIoImage *frame,
-	FivIoProfile target, const char *path, GError **error);
+	FivIoProfile *target, const char *path, GError **error);

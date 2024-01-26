@@ -44,11 +44,6 @@
 #include "fiv-thumbnail.h"
 #include "fiv-view.h"
 
-#ifdef HAVE_LCMS2_FAST_FLOAT
-#include <lcms2.h>
-#include <lcms2_fast_float.h>
-#endif  // HAVE_LCMS2_FAST_FLOAT
-
 // --- Utilities ---------------------------------------------------------------
 
 static void exit_fatal(const char *format, ...) G_GNUC_PRINTF(1, 2);
@@ -2584,10 +2579,7 @@ on_app_handle_local_options(G_GNUC_UNUSED GApplication *app,
 		return 0;
 	}
 
-	// TODO(p): Use Little CMS with contexts instead.
-#ifdef HAVE_LCMS2_FAST_FLOAT
-	cmsPlugin(cmsFastFloatExtensions());
-#endif  // HAVE_LCMS2_FAST_FLOAT
+	fiv_io_profile_init();
 
 	// Normalize all arguments to URIs, and run thumbnailing modes first.
 	for (gsize i = 0; o.args && o.args[i]; i++) {

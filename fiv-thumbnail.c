@@ -182,7 +182,7 @@ adjust_thumbnail(FivIoImage *thumbnail, double row_height)
 	FivIoRenderClosure *closure = thumbnail->render;
 	if (closure && orientation <= FivIoOrientation0) {
 		// Remember to synchronize changes with render().
-		FivIoProfile screen_profile = fiv_io_profile_new_sRGB();
+		FivIoProfile *screen_profile = fiv_io_profile_new_sRGB();
 		// This API doesn't accept non-uniform scaling; prefer a vertical fit.
 		FivIoImage *scaled = closure->render(closure, screen_profile, scale_y);
 		if (screen_profile)

@@ -78,7 +78,7 @@ struct _FivView {
 	double drag_start[2];               ///< Adjustment values for drag origin
 
 	FivIoImage *enhance_swap;           ///< Quick swap in/out
-	FivIoProfile screen_cms_profile;    ///< Target colour profile for widget
+	FivIoProfile *screen_cms_profile;   ///< Target colour profile for widget
 
 	int remaining_loops;                ///< Greater than zero if limited
 	gint64 frame_time;                  ///< Current frame's start, µs precision
@@ -461,7 +461,7 @@ out:
 //
 // Note that Wayland does not have any appropriate protocol, as of writing:
 // https://gitlab.freedesktop.org/wayland/wayland-protocols/-/merge_requests/14
-static FivIoProfile
+static FivIoProfile *
 monitor_cms_profile(GdkWindow *root, int num)
 {
 	char atom[32] = "";
@@ -471,7 +471,7 @@ monitor_cms_profile(GdkWindow *root, int num)
 	int format = 0, length = 0;
 	GdkAtom type = GDK_NONE;
 	guchar *data = NULL;
-	FivIoProfile result = NULL;
+	FivIoProfile *result = NULL;
 	if (gdk_property_get(root, gdk_atom_intern(atom, FALSE), GDK_NONE, 0,
 			8 << 20 /* MiB */, FALSE, &type, &format, &length, &data)) {
 		if (format == 8 && length > 0)
@@ -1117,7 +1117,7 @@ static gboolean
 save_as(FivView *self, FivIoImage *frame)
 {
 	GtkWindow *window = get_toplevel(GTK_WIDGET(self));
-	FivIoProfile target = NULL;
+	FivIoProfile *target = NULL;
 	if (self->enable_cms && (target = self->screen_cms_profile)) {
 		GtkWidget *dialog = gtk_message_dialog_new(window, GTK_DIALOG_MODAL,
 			GTK_MESSAGE_WARNING, GTK_BUTTONS_CLOSE, "%s",

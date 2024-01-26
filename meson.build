@@ -164,7 +164,8 @@ tiff_tables = custom_target('tiff-tables.h',
 )
 
 desktops = ['fiv.desktop', 'fiv-browse.desktop']
-iolib = static_library('fiv-io', 'fiv-io.c', 'xdg.c', tiff_tables,
+iolib = static_library('fiv-io', 'fiv-io.c', 'fiv-io-profile.c', 'xdg.c',
+	tiff_tables,
 	dependencies : dependencies).extract_all_objects(recursive : true)
 exe = executable('fiv', 'fiv.c', 'fiv-view.c', 'fiv-context-menu.c',
 	'fiv-browser.c', 'fiv-sidebar.c', 'fiv-thumbnail.c', 'fiv-collection.c',
