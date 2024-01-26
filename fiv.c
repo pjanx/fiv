@@ -1,7 +1,7 @@
 //
 // fiv.c: fuck-if-I-know-how-to-name-it image browser and viewer
 //
-// Copyright (c) 2021 - 2023, Přemysl Eric Janouch <p@janouch.name>
+// Copyright (c) 2021 - 2024, Přemysl Eric Janouch <p@janouch.name>
 //
 // Permission to use, copy, modify, and/or distribute this software for any
 // purpose with or without fee is hereby granted.
@@ -2211,6 +2211,7 @@ static const char stylesheet[] = "@define-color fiv-tile @content_view_bg; \
 		mix(@theme_selected_bg_color, @content_view_bg, 0.5); \
 	fiv-view, fiv-browser { background: @content_view_bg; } \
 	placessidebar.fiv box > separator { margin: 4px 0; } \
+	placessidebar.fiv row { min-height: 1.75em; } \
 	.fiv-toolbar button { padding-left: 0; padding-right: 0; } \
 	.fiv-toolbar > button:first-child { padding-left: 4px; } \
 	.fiv-toolbar > button:last-child { padding-right: 4px; } \
