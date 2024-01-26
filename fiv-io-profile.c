@@ -30,12 +30,16 @@
 #include <lcms2_fast_float.h>
 #endif  // HAVE_LCMS2_FAST_FLOAT
 
+// https://github.com/mm2/Little-CMS/issues/430
+static bool g_broken_cms_premul;
+
 void
 fiv_io_profile_init(void)
 {
 	// TODO(p): Use Little CMS with contexts instead.
 #ifdef HAVE_LCMS2_FAST_FLOAT
-	cmsPluginTHR(NULL, cmsFastFloatExtensions());
+	if (cmsPluginTHR(NULL, cmsFastFloatExtensions()))
+		g_broken_cms_premul = LCMS_VERSION <= 2160;
 #endif  // HAVE_LCMS2_FAST_FLOAT
 }
 
@@ -300,6 +304,8 @@ fiv_io_profile_argb32(FivIoImage *image,
 {
 	g_return_if_fail(image->format == CAIRO_FORMAT_ARGB32);
 
+	// TODO: With g_no_cms_premultiplication,
+	// this probably also needs to be wrapped in un-premultiplication.
 	fiv_io_profile_rgb_direct(image->data, image->width, image->height,
 		source, target,
 		FIV_IO_PROFILE_ARGB32_PREMUL, FIV_IO_PROFILE_ARGB32_PREMUL);
@@ -311,6 +317,9 @@ fiv_io_profile_argb32_premultiply(
 {
 	if (image->format != CAIRO_FORMAT_ARGB32) {
 		fiv_io_profile_xrgb32(image, source, target);
+	} else if (g_broken_cms_premul) {
+		fiv_io_profile_xrgb32(image, source, target);
+		fiv_io_premultiply_argb32(image);
 	} else if (!fiv_io_profile_rgb_direct(image->data,
 			image->width, image->height, source, target,
 			FIV_IO_PROFILE_ARGB32, FIV_IO_PROFILE_ARGB32_PREMUL)) {
