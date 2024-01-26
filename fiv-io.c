@@ -297,7 +297,7 @@ FivIoProfile
 fiv_io_profile_new(const void *data, size_t len)
 {
 #ifdef HAVE_LCMS2
-	return cmsOpenProfileFromMem(data, len);
+	return cmsOpenProfileFromMemTHR(NULL, data, len);
 #else
 	(void) data;
 	(void) len;
@@ -309,7 +309,7 @@ FivIoProfile
 fiv_io_profile_new_sRGB(void)
 {
 #ifdef HAVE_LCMS2
-	return cmsCreate_sRGBProfile();
+	return cmsCreate_sRGBProfileTHR(NULL);
 #else
 	return NULL;
 #endif
@@ -439,7 +439,7 @@ fiv_io_profile_cmyk(
 #else
 	cmsHTRANSFORM transform = NULL;
 	if (source && target) {
-		transform = cmsCreateTransform(source, TYPE_CMYK_8_REV, target,
+		transform = cmsCreateTransformTHR(NULL, source, TYPE_CMYK_8_REV, target,
 			FIV_IO_PROFILE_ARGB32, INTENT_PERCEPTUAL, 0);
 	}
 	if (transform) {
@@ -471,11 +471,11 @@ fiv_io_profile_rgb_direct(unsigned char *data, int w, int h,
 	// TODO(p): We should make this optional.
 	cmsHPROFILE src_fallback = NULL;
 	if (target && !source)
-		source = src_fallback = cmsCreate_sRGBProfile();
+		source = src_fallback = cmsCreate_sRGBProfileTHR(NULL);
 
 	cmsHTRANSFORM transform = NULL;
 	if (source && target) {
-		transform = cmsCreateTransform(
+		transform = cmsCreateTransformTHR(NULL,
 			source, source_format, target, target_format, INTENT_PERCEPTUAL, 0);
 	}
 	if (transform) {
