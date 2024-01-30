@@ -92,7 +92,8 @@ struct _FivBrowser {
 
 	Thumbnailer *thumbnailers;          ///< Parallelized thumbnailers
 	size_t thumbnailers_len;            ///< Thumbnailers array size
-	GQueue thumbnailers_queue;          ///< Queued up Entry pointers
+	GQueue thumbnailers_queue_1;        ///< Queued up Entry pointers, hi-prio
+	GQueue thumbnailers_queue_2;        ///< Queued up Entry pointers, lo-prio
 
 	GdkCursor *pointer;                 ///< Cached pointer cursor
 	cairo_pattern_t *glow;              ///< CAIRO_FORMAT_A8 mask for corners
@@ -742,7 +743,7 @@ thumbnailer_reprocess_entry(FivBrowser *self, GBytes *output, Entry *entry)
 	if ((flags & FIV_IO_SERIALIZE_LOW_QUALITY)) {
 		cairo_surface_set_user_data(entry->thumbnail, &fiv_thumbnail_key_lq,
 			(void *) (intptr_t) 1, NULL);
-		g_queue_push_tail(&self->thumbnailers_queue, entry);
+		g_queue_push_tail(&self->thumbnailers_queue_2, entry);
 	}
 
 	entry_set_surface_user_data(entry);
@@ -801,7 +802,8 @@ thumbnailer_next(Thumbnailer *t)
 {
 	// TODO(p): Try to keep the minions alive (stdout will be a problem).
 	FivBrowser *self = t->self;
-	if (!(t->target = g_queue_pop_head(&self->thumbnailers_queue)))
+	if (!(t->target = g_queue_pop_head(&self->thumbnailers_queue_1)) &&
+		!(t->target = g_queue_pop_head(&self->thumbnailers_queue_2)))
 		return FALSE;
 
 	// Case analysis:
@@ -839,7 +841,8 @@ thumbnailer_next(Thumbnailer *t)
 static void
 thumbnailers_abort(FivBrowser *self)
 {
-	g_queue_clear(&self->thumbnailers_queue);
+	g_queue_clear(&self->thumbnailers_queue_1);
+	g_queue_clear(&self->thumbnailers_queue_2);
 
 	for (size_t i = 0; i < self->thumbnailers_len; i++) {
 		Thumbnailer *t = self->thumbnailers + i;
@@ -855,29 +858,23 @@ thumbnailers_abort(FivBrowser *self)
 }
 
 static void
-thumbnailers_start(FivBrowser *self)
+thumbnailers_restart(FivBrowser *self)
 {
 	thumbnailers_abort(self);
 	if (!self->model)
 		return;
 
-	GQueue lq = G_QUEUE_INIT;
 	for (guint i = 0; i < self->entries->len; i++) {
 		Entry *entry = self->entries->pdata[i];
 		if (entry->removed)
 			continue;
 
 		if (entry->icon)
-			g_queue_push_tail(&self->thumbnailers_queue, entry);
+			g_queue_push_tail(&self->thumbnailers_queue_1, entry);
 		else if (cairo_surface_get_user_data(
 			entry->thumbnail, &fiv_thumbnail_key_lq))
-			g_queue_push_tail(&lq, entry);
+			g_queue_push_tail(&self->thumbnailers_queue_2, entry);
 	}
-	while (!g_queue_is_empty(&lq)) {
-		g_queue_push_tail_link(
-			&self->thumbnailers_queue, g_queue_pop_head_link(&lq));
-	}
-
 	for (size_t i = 0; i < self->thumbnailers_len; i++) {
 		if (!thumbnailer_next(self->thumbnailers + i))
 			break;
@@ -1004,7 +1001,7 @@ set_item_size(FivBrowser *self, FivThumbnailSize size)
 
 		g_hash_table_remove_all(self->thumbnail_cache);
 		reload_thumbnails(self);
-		thumbnailers_start(self);
+		thumbnailers_restart(self);
 
 		g_object_notify_by_pspec(
 			G_OBJECT(self), browser_properties[PROP_THUMBNAIL_SIZE]);
@@ -1872,7 +1869,8 @@ fiv_browser_init(FivBrowser *self)
 		g_malloc0_n(self->thumbnailers_len, sizeof *self->thumbnailers);
 	for (size_t i = 0; i < self->thumbnailers_len; i++)
 		self->thumbnailers[i].self = self;
-	g_queue_init(&self->thumbnailers_queue);
+	g_queue_init(&self->thumbnailers_queue_1);
+	g_queue_init(&self->thumbnailers_queue_2);
 
 	set_item_size(self, FIV_THUMBNAIL_SIZE_NORMAL);
 	self->show_labels = FALSE;
@@ -1918,7 +1916,7 @@ on_model_reloaded(FivIoModel *model, FivBrowser *self)
 	g_free(selected_uri);
 
 	reload_thumbnails(self);
-	thumbnailers_start(self);
+	thumbnailers_restart(self);
 }
 
 static void
@@ -1933,8 +1931,10 @@ on_model_changed(FivIoModel *model, FivIoModelEntry *old, FivIoModelEntry *new,
 		g_ptr_array_add(self->entries, entry);
 
 		reload_one_thumbnail(self, entry);
+		// TODO(p): This is important!
+		// thumbnailers_restart() disowns existing processes.
 		// TODO(p): Try to add to thumbnailer queue if already started.
-		thumbnailers_start(self);
+		thumbnailers_restart(self);
 		return;
 	}
 
@@ -1961,7 +1961,7 @@ on_model_changed(FivIoModel *model, FivIoModelEntry *old, FivIoModelEntry *new,
 		// move the thumbnail cache entry to the new URI.
 		reload_one_thumbnail(self, found);
 		// TODO(p): Try to add to thumbnailer queue if already started.
-		thumbnailers_start(self);
+		thumbnailers_restart(self);
 	} else {
 		found->removed = TRUE;
 		gtk_widget_queue_draw(GTK_WIDGET(self));
