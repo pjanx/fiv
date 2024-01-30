@@ -797,14 +797,21 @@ on_thumbnailer_ready(GObject *object, GAsyncResult *res, gpointer user_data)
 	thumbnailer_next(t);
 }
 
+// TODO(p): Try to keep the minions alive (stdout will be a problem).
 static gboolean
 thumbnailer_next(Thumbnailer *t)
 {
-	// TODO(p): Try to keep the minions alive (stdout will be a problem).
+	// Already have something to do, not a failure.
+	if (t->target)
+		return TRUE;
+
+	// They could have been removed via post-reload changes in the model.
 	FivBrowser *self = t->self;
-	if (!(t->target = g_queue_pop_head(&self->thumbnailers_queue_1)) &&
-		!(t->target = g_queue_pop_head(&self->thumbnailers_queue_2)))
-		return FALSE;
+	do {
+		if (!(t->target = g_queue_pop_head(&self->thumbnailers_queue_1)) &&
+			!(t->target = g_queue_pop_head(&self->thumbnailers_queue_2)))
+			return FALSE;
+	} while (t->target->removed);
 
 	// Case analysis:
 	//  - We haven't found any thumbnail for the entry at all
@@ -858,27 +865,33 @@ thumbnailers_abort(FivBrowser *self)
 }
 
 static void
-thumbnailers_restart(FivBrowser *self)
+thumbnailers_enqueue(FivBrowser *self, Entry *entry)
 {
-	thumbnailers_abort(self);
-	if (!self->model)
-		return;
-
-	for (guint i = 0; i < self->entries->len; i++) {
-		Entry *entry = self->entries->pdata[i];
-		if (entry->removed)
-			continue;
-
+	if (!entry->removed) {
 		if (entry->icon)
 			g_queue_push_tail(&self->thumbnailers_queue_1, entry);
 		else if (cairo_surface_get_user_data(
 			entry->thumbnail, &fiv_thumbnail_key_lq))
 			g_queue_push_tail(&self->thumbnailers_queue_2, entry);
 	}
+}
+
+static void
+thumbnailers_deploy(FivBrowser *self)
+{
 	for (size_t i = 0; i < self->thumbnailers_len; i++) {
 		if (!thumbnailer_next(self->thumbnailers + i))
 			break;
 	}
+}
+
+static void
+thumbnailers_restart(FivBrowser *self)
+{
+	thumbnailers_abort(self);
+	for (guint i = 0; i < self->entries->len; i++)
+		thumbnailers_enqueue(self, self->entries->pdata[i]);
+	thumbnailers_deploy(self);
 }
 
 // --- Boilerplate -------------------------------------------------------------
@@ -1915,6 +1928,7 @@ on_model_reloaded(FivIoModel *model, FivBrowser *self)
 	fiv_browser_select(self, selected_uri);
 	g_free(selected_uri);
 
+	// Restarting thumbnailers is critical, because they keep Entry pointers.
 	reload_thumbnails(self);
 	thumbnailers_restart(self);
 }
@@ -1931,10 +1945,8 @@ on_model_changed(FivIoModel *model, FivIoModelEntry *old, FivIoModelEntry *new,
 		g_ptr_array_add(self->entries, entry);
 
 		reload_one_thumbnail(self, entry);
-		// TODO(p): This is important!
-		// thumbnailers_restart() disowns existing processes.
-		// TODO(p): Try to add to thumbnailer queue if already started.
-		thumbnailers_restart(self);
+		thumbnailers_enqueue(self, entry);
+		thumbnailers_deploy(self);
 		return;
 	}
 
@@ -1960,7 +1972,8 @@ on_model_changed(FivIoModel *model, FivIoModelEntry *old, FivIoModelEntry *new,
 		// so that there's no jumping around. Or, a bit more properly,
 		// move the thumbnail cache entry to the new URI.
 		reload_one_thumbnail(self, found);
-		// TODO(p): Try to add to thumbnailer queue if already started.
+		// TODO(p): Rather cancel the entry in any running thumbnailer,
+		// remove it from queues, and _enqueue() + _deploy().
 		thumbnailers_restart(self);
 	} else {
 		found->removed = TRUE;
