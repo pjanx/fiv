@@ -247,7 +247,9 @@ static GPtrArray *
 model_decide_placement(
 	FivIoModel *self, GFileInfo *info, GPtrArray *subdirs, GPtrArray *files)
 {
-	if (self->filtering && g_file_info_get_is_hidden(info))
+	if (self->filtering &&
+		g_file_info_has_attribute(info, G_FILE_ATTRIBUTE_STANDARD_IS_HIDDEN) &&
+		g_file_info_get_is_hidden(info))
 		return NULL;
 	if (g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY)
 		return subdirs;

@@ -433,7 +433,10 @@ complete_path(GFile *location, GtkListStore *model)
 			!info)
 			break;
 
-		if (g_file_info_get_file_type(info) != G_FILE_TYPE_DIRECTORY ||
+		if (g_file_info_get_file_type(info) != G_FILE_TYPE_DIRECTORY)
+			continue;
+		if (g_file_info_has_attribute(info,
+				G_FILE_ATTRIBUTE_STANDARD_IS_HIDDEN) &&
 			g_file_info_get_is_hidden(info))
 			continue;
 
