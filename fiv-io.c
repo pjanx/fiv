@@ -1538,9 +1538,11 @@ load_libwebp_frame(WebPAnimDecoder *dec, const WebPAnimInfo *info,
 	if (G_BYTE_ORDER == G_LITTLE_ENDIAN) {
 		memcpy(dst, buf, area * sizeof *dst);
 	} else {
-		uint32_t *src = (uint32_t *) buf;
-		for (uint64_t i = 0; i < area; i++)
-			*dst++ = GUINT32_FROM_LE(*src++);
+		const uint32_t *src = (const uint32_t *) buf;
+		for (uint64_t i = 0; i < area; i++) {
+			uint32_t value = *src++;
+			*dst++ = GUINT32_FROM_LE(value);
+		}
 	}
 
 	// info->bgcolor is not reliable.
