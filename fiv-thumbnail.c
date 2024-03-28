@@ -392,7 +392,7 @@ extract_libraw_unpack(libraw_data_t *iprc, int *flip, GError **error)
 	// The main image's "flip" often matches up, but sometimes doesn't, e.g.:
 	//  - Phase One/H 25/H25_Outdoor_.IIQ
 	//  - Phase One/H 25/H25_IT8.7-2_Card.TIF
-	*flip = iprc->sizes.flip
+	*flip = iprc->sizes.flip;
 	return TRUE;
 }
 

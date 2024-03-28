@@ -42,6 +42,8 @@
 #include <libraw.h>
 #if LIBRAW_VERSION >= LIBRAW_MAKE_VERSION(0, 21, 0)
 #define LIBRAW_OPIONS_NO_MEMERR_CALLBACK 0
+#else
+#define rawparams params
 #endif
 #endif  // HAVE_LIBRAW
 #ifdef HAVE_RESVG
