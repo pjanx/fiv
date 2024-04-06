@@ -15,7 +15,7 @@ txt2rtf() {
 		print "{\\rtf1\\ansi\\ansicpg1252\\deff0{\\fonttbl{\\f0 Tahoma;}}"
 		print "\\f0\\fs24{\\pard\\sa240"
 	} {
-		gsub(/\\/, "\\\\"); gsub(/{/, "\\{"); gsub(/}/, "\\}")
+		gsub(/\\/, "\\\\"); gsub(/[{]/, "\\{"); gsub(/[}]/, "\\}")
 		if (!$0) { print "\\par}{\\pard\\sa240"; prefix = "" }
 		else { print prefix $0; prefix = " " }
 	} END {
