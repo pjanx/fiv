@@ -400,7 +400,8 @@ fiv_io_cmm_argb32_premultiply(FivIoCmm *self,
 #else  // ! HAVE_LCMS2 || LCMS_VERSION < 2130
 
 static void
-fiv_io_cmm_argb32(FivIoCmm *, FivIoImage *, FivIoProfile *, FivIoProfile *)
+fiv_io_cmm_argb32(G_GNUC_UNUSED FivIoCmm *self, G_GNUC_UNUSED FivIoImage *image,
+	G_GNUC_UNUSED FivIoProfile *source, G_GNUC_UNUSED FivIoProfile *target)
 {
 	// TODO(p): Unpremultiply, transform, repremultiply. Or require lcms2>=2.13.
 }

@@ -75,10 +75,15 @@ extract() {
 		--exclude '*/share/man' --exclude '*/share/doc'
 	done < db.want
 
-	bsdtar -xf exiftool.tar.gz
-	mv Image-ExifTool-*/exiftool bin
-	mv Image-ExifTool-*/lib/* lib/perl5/site_perl
-	rm -rf Image-ExifTool-*
+	# Don't require Perl, which may not exist anymore on i686:
+	# https://github.com/msys2/MINGW-packages/pull/20085
+	if [ -d lib/perl5 ]
+	then
+		bsdtar -xf exiftool.tar.gz
+		mv Image-ExifTool-*/exiftool bin
+		mv Image-ExifTool-*/lib/* lib/perl5/site_perl
+		rm -rf Image-ExifTool-*
+	fi
 }
 
 configure() {

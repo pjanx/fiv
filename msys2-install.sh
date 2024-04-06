@@ -12,15 +12,15 @@ fi
 
 # Copy binaries we directly or indirectly depend on.
 cp -p "$msys2_root"/bin/*.dll .
-cp -p "$msys2_root"/bin/wperl.exe .
-cp -p "$msys2_root"/bin/exiftool .
+cp -p "$msys2_root"/bin/wperl.exe . || :
+cp -p "$msys2_root"/bin/exiftool . || :
 # The console helper is only useful for debug builds.
 cp -p "$msys2_root"/bin/gspawn-*-helper*.exe .
 cp -pR "$msys2_root"/etc/ .
 
 mkdir -p lib
 cp -pR "$msys2_root"/lib/gdk-pixbuf-2.0/ lib
-cp -pR "$msys2_root"/lib/perl5/ lib
+cp -pR "$msys2_root"/lib/perl5/ lib || :
 mkdir -p share/glib-2.0/schemas
 cp -pR "$msys2_root"/share/glib-2.0/schemas/*.Settings.* share/glib-2.0/schemas
 mkdir -p share/icons

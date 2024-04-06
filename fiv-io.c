@@ -61,6 +61,9 @@
 #ifdef HAVE_LIBTIFF
 #include <tiff.h>
 #include <tiffio.h>
+#ifndef TIFF_TMSIZE_T_MAX
+#define TIFF_TMSIZE_T_MAX ((tmsize_t) (SIZE_MAX >> 1))
+#endif
 #endif  // HAVE_LIBTIFF
 #ifdef HAVE_GDKPIXBUF
 #include <gdk-pixbuf/gdk-pixbuf.h>

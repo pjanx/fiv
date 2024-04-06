@@ -646,7 +646,8 @@ reload_screen_cms_profile(FivView *self, GdkWindow *window)
 				gchar *data = NULL;
 				gsize length = 0;
 				if (g_file_get_contents(path, &data, &length, NULL))
-					self->screen_cms_profile = fiv_io_profile_new(data, length);
+					self->screen_cms_profile = fiv_io_cmm_get_profile(
+						fiv_io_cmm_get_default(), data, length);
 				g_free(data);
 			}
 			g_free(path);
