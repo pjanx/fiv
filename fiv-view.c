@@ -851,6 +851,10 @@ gl_draw(FivView *self, cairo_t *cr)
 		cliph = allocation.height;
 	}
 
+	int scale = gtk_widget_get_scale_factor(GTK_WIDGET(self));
+	clipw *= scale;
+	cliph *= scale;
+
 	enum { SRC, DEST };
 	GLuint textures[2] = {};
 	glGenTextures(2, textures);
@@ -963,7 +967,7 @@ gl_draw(FivView *self, cairo_t *cr)
 	GdkWindow *window = gtk_widget_get_window(GTK_WIDGET(self));
 	cairo_translate(cr, dx, dy);
 	gdk_cairo_draw_from_gl(
-		cr, window, textures[DEST], GL_TEXTURE, 1, 0, 0, clipw, cliph);
+		cr, window, textures[DEST], GL_TEXTURE, scale, 0, 0, clipw, cliph);
 	gdk_gl_context_make_current(self->gl_context);
 
 	glDeleteBuffers(1, &vertex_buffer);
