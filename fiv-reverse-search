@@ -5,5 +5,5 @@ if [ "$#" -ne 2 ]; then
 fi
 
 xdg-open "$1$(fiv --thumbnail-for-search large "$2" \
-	| curl --silent --show-error --upload-file - https://transfer.sh/image \
-	| jq --slurp --raw-input --raw-output @uri)"
+	| curl --silent --show-error --form 'files[]=@-' https://uguu.se/upload \
+	| jq --raw-output '.files[] | .url | @uri')"
