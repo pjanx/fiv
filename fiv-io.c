@@ -976,7 +976,7 @@ static uint32_t *
 parse_mpf_index_entries(const struct tiffer *T, struct tiffer_entry *entry)
 {
 	uint32_t count = entry->remaining_count / 16;
-	uint32_t *offsets = g_malloc0_n(sizeof *offsets, count + 1), *out = offsets;
+	uint32_t *offsets = g_malloc0_n(count + 1, sizeof *offsets), *out = offsets;
 	for (uint32_t i = 0; i < count; i++) {
 		// 5.2.3.3.3. Individual Image Data Offset
 		uint32_t offset = parse_mpf_mpentry(entry->p + i * 16, T);
