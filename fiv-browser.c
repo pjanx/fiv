@@ -828,9 +828,18 @@ thumbnailer_next(Thumbnailer *t)
 		"--thumbnail", fiv_thumbnail_sizes[self->item_size].thumbnail_spec_name,
 		"--", uri, NULL};
 
+	GSubprocessLauncher *launcher =
+		g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_STDOUT_PIPE);
+#ifdef G_OS_WIN32
+	gchar *prefix = g_win32_get_package_installation_directory_of_module(NULL);
+	g_subprocess_launcher_set_cwd(launcher, prefix);
+	g_free(prefix);
+#endif
+
 	GError *error = NULL;
-	t->minion = g_subprocess_newv(t->target->icon ? argv_faster : argv_slower,
-		G_SUBPROCESS_FLAGS_STDOUT_PIPE, &error);
+	t->minion = g_subprocess_launcher_spawnv(
+		launcher, t->target->icon ? argv_faster : argv_slower, &error);
+	g_object_unref(launcher);
 	if (error) {
 		g_warning("%s", error->message);
 		g_error_free(error);

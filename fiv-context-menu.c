@@ -185,15 +185,24 @@ info_spawn(GtkWidget *dialog, const char *path, GBytes *bytes_in)
 	if (bytes_in)
 		flags |= G_SUBPROCESS_FLAGS_STDIN_PIPE;
 
+	GSubprocessLauncher *launcher = g_subprocess_launcher_new(flags);
+#ifdef G_OS_WIN32
+	// Both to find wperl, and then to let wperl find the nearby exiftool.
+	gchar *prefix = g_win32_get_package_installation_directory_of_module(NULL);
+	g_subprocess_launcher_set_cwd(launcher, prefix);
+	g_free(prefix);
+#endif
+
 	// TODO(p): Add a fallback to internal capabilities.
 	// The simplest is to specify the filename and the resolution.
 	GError *error = NULL;
-	GSubprocess *subprocess = g_subprocess_new(flags, &error,
+	GSubprocess *subprocess = g_subprocess_launcher_spawn(launcher, &error,
 #ifdef G_OS_WIN32
 		"wperl",
 #endif
 		"exiftool", "-tab", "-groupNames", "-duplicates", "-extractEmbedded",
 		"--binary", "-quiet", "--", path, NULL);
+	g_object_unref(launcher);
 	if (error) {
 		info_redirect_error(dialog, error);
 		return;
