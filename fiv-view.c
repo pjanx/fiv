@@ -962,6 +962,8 @@ gl_draw(FivView *self, cairo_t *cr)
 	// XXX: Native GdkWindows send this to the software fallback path.
 	// XXX: This only reliably alpha blends when using the software fallback,
 	// such as with a native window, because 7237f5d in GTK+ 3 is a regression.
+	// (Introduced in 3.24.39, reverted in 3.24.42.)
+	//
 	// We had to resort to rendering the checkerboard pattern in the shader.
 	// Unfortunately, it is hard to retrieve the theme colours from CSS.
 	GdkWindow *window = gtk_widget_get_window(GTK_WIDGET(self));
