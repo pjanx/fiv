@@ -38,6 +38,9 @@ You can get a package with the latest development version using Arch Linux's
 https://aur.archlinux.org/packages/fiv-git[AUR],
 or as a https://git.janouch.name/p/nixexprs[Nix derivation].
 
+https://janouch.name/cd[Windows installers can be found here],
+you want the _x86_64_ version.
+
 Building and Running
 --------------------
 Build-only dependencies:

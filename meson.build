@@ -1,7 +1,7 @@
 # vim: noet ts=4 sts=4 sw=4:
 project('fiv', 'c',
 	default_options : ['c_std=gnu99', 'warning_level=2'],
-	version : '0.1.0',
+	version : '1.0.0',
 	meson_version : '>=0.57')
 
 cc = meson.get_compiler('c')
