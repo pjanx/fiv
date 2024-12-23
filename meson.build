@@ -363,10 +363,12 @@ elif meson.is_cross_build()
 			'ProjectURL' : application_url,
 		}),
 	)
+	msi = meson.project_name() + '-' + meson.project_version() + \
+		'-' + host_machine.cpu() + '.msi'
 	custom_target('package',
-		output : 'fiv.msi',
+		output : msi,
 		command : [meson.current_source_dir() / 'msys2-package.sh',
-			host_machine.cpu(), 'fiv.msi', wxs],
+			host_machine.cpu(), msi, wxs],
 		env : ['MESON_BUILD_ROOT=' + meson.current_build_dir(),
 			'MESON_SOURCE_ROOT=' + meson.current_source_dir()],
 		console : true,
