@@ -1,7 +1,8 @@
 #!/bin/sh -e
 export LC_ALL=C
 cd "$MESON_BUILD_ROOT"
-arch=$1 msi=$2 files=package-files.wxs destdir=$(pwd)/package
+arch=$1 msi=$2 files=package-files.wxs
+destdir=$(pwd)/package/${msi%.*}
 shift 2
 
 # We're being passed host_machine.cpu(), which will be either x86 or x86_64.
