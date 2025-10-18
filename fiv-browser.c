@@ -1,7 +1,7 @@
 //
 // fiv-browser.c: filesystem browsing widget
 //
-// Copyright (c) 2021 - 2024, Přemysl Eric Janouch <p@janouch.name>
+// Copyright (c) 2021 - 2025, Přemysl Eric Janouch <p@janouch.name>
 //
 // Permission to use, copy, modify, and/or distribute this software for any
 // purpose with or without fee is hereby granted.
@@ -1323,10 +1323,14 @@ fiv_browser_button_release_event(GtkWidget *widget, GdkEventButton *event)
 	if (!entry || entry != entry_at(self, event->x, event->y))
 		return GDK_EVENT_PROPAGATE;
 
+	GdkModifierType primary = gdk_keymap_get_modifier_mask(
+		gdk_keymap_get_for_display(gtk_widget_get_display(widget)),
+		GDK_MODIFIER_INTENT_PRIMARY_ACCELERATOR);
+
 	guint state = event->state & gtk_accelerator_get_default_mod_mask();
 	if ((event->button == GDK_BUTTON_PRIMARY && state == 0))
 		return open_entry(widget, entry, FALSE);
-	if ((event->button == GDK_BUTTON_PRIMARY && state == GDK_CONTROL_MASK) ||
+	if ((event->button == GDK_BUTTON_PRIMARY && state == primary) ||
 		(event->button == GDK_BUTTON_MIDDLE && state == 0))
 		return open_entry(widget, entry, TRUE);
 	return GDK_EVENT_PROPAGATE;
