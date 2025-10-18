@@ -382,6 +382,9 @@ on_monitor_changed(G_GNUC_UNUSED GFileMonitor *monitor, GFile *file,
 	switch (event_type) {
 	case G_FILE_MONITOR_EVENT_CHANGED:
 	case G_FILE_MONITOR_EVENT_ATTRIBUTE_CHANGED:
+		// On macOS, we seem to not receive _CHANGED for child files.
+		// And while this seems to arrive too early, it's a mild improvement.
+	case G_FILE_MONITOR_EVENT_CHANGES_DONE_HINT:
 		event = MONITOR_CHANGING;
 		new_entry_file = file;
 		break;
@@ -400,8 +403,6 @@ on_monitor_changed(G_GNUC_UNUSED GFileMonitor *monitor, GFile *file,
 		new_entry_file = file;
 		break;
 
-	case G_FILE_MONITOR_EVENT_CHANGES_DONE_HINT:
-		// TODO(p): Figure out if we can't make use of _CHANGES_DONE_HINT.
 	case G_FILE_MONITOR_EVENT_PRE_UNMOUNT:
 	case G_FILE_MONITOR_EVENT_UNMOUNTED:
 		// TODO(p): Figure out how to handle _UNMOUNTED sensibly.
