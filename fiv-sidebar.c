@@ -537,6 +537,13 @@ on_show_enter_location(
 	g_signal_connect(entry, "changed",
 		G_CALLBACK(on_enter_location_changed), self);
 
+	GFile *location = fiv_io_model_get_location(self->model);
+	if (location) {
+		gchar *parse_name = g_file_get_parse_name(location);
+		gtk_entry_set_text(GTK_ENTRY(entry), parse_name);
+		g_free(parse_name);
+	}
+
 	// Can't have it ellipsized and word-wrapped at the same time.
 	GtkWidget *protocols = gtk_label_new("");
 	gtk_label_set_ellipsize(GTK_LABEL(protocols), PANGO_ELLIPSIZE_END);
