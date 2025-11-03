@@ -130,6 +130,8 @@ setup() {
 		--bindir . --libdir . --cross-file="$toolchain" "$builddir" "$sourcedir"
 }
 
+# Note: you may need GNU coreutils realpath for non-existent build directories
+# (macOS and busybox will probably not work).
 sourcedir=$(realpath "${2:-$(dirname "$0")}")
 builddir=$(realpath "${1:-builddir}")
 toolchain=$builddir/msys2-cross-toolchain.meson
