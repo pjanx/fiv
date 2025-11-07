@@ -1308,6 +1308,15 @@ fiv_browser_button_press_event(GtkWidget *widget, GdkEventButton *event)
 }
 
 static gboolean
+modifier_state_opens_new_window(GtkWidget *widget, guint state)
+{
+	GdkModifierType primary = gdk_keymap_get_modifier_mask(
+		gdk_keymap_get_for_display(gtk_widget_get_display(widget)),
+		GDK_MODIFIER_INTENT_PRIMARY_ACCELERATOR);
+	return state == primary || state == GDK_SHIFT_MASK;
+}
+
+static gboolean
 fiv_browser_button_release_event(GtkWidget *widget, GdkEventButton *event)
 {
 	FivBrowser *self = FIV_BROWSER(widget);
@@ -1323,15 +1332,13 @@ fiv_browser_button_release_event(GtkWidget *widget, GdkEventButton *event)
 	if (!entry || entry != entry_at(self, event->x, event->y))
 		return GDK_EVENT_PROPAGATE;
 
-	GdkModifierType primary = gdk_keymap_get_modifier_mask(
-		gdk_keymap_get_for_display(gtk_widget_get_display(widget)),
-		GDK_MODIFIER_INTENT_PRIMARY_ACCELERATOR);
 
 	guint state = event->state & gtk_accelerator_get_default_mod_mask();
 	if ((event->button == GDK_BUTTON_PRIMARY && state == 0))
 		return open_entry(widget, entry, FALSE);
-	if ((event->button == GDK_BUTTON_PRIMARY && state == primary) ||
-		(event->button == GDK_BUTTON_MIDDLE && state == 0))
+	if ((event->button == GDK_BUTTON_MIDDLE && state == 0) ||
+		(event->button == GDK_BUTTON_PRIMARY &&
+			modifier_state_opens_new_window(widget, state)))
 		return open_entry(widget, entry, TRUE);
 	return GDK_EVENT_PROPAGATE;
 }
@@ -1582,7 +1589,8 @@ static gboolean
 fiv_browser_key_press_event(GtkWidget *widget, GdkEventKey *event)
 {
 	FivBrowser *self = FIV_BROWSER(widget);
-	switch ((event->state & gtk_accelerator_get_default_mod_mask())) {
+	guint state = event->state & gtk_accelerator_get_default_mod_mask();
+	switch (state) {
 	case 0:
 		switch (event->keyval) {
 		case GDK_KEY_Delete:
@@ -1635,6 +1643,15 @@ fiv_browser_key_press_event(GtkWidget *widget, GdkEventKey *event)
 			return GDK_EVENT_STOP;
 		case GDK_KEY_minus:
 			set_item_size(self, self->item_size - 1);
+			return GDK_EVENT_STOP;
+		}
+	}
+
+	if (modifier_state_opens_new_window(widget, state)) {
+		switch (event->keyval) {
+		case GDK_KEY_Return:
+			if (self->selected)
+				return open_entry(widget, self->selected, TRUE);
 			return GDK_EVENT_STOP;
 		}
 	}
