@@ -380,8 +380,11 @@ append_opener(GtkWidget *menu, GAppInfo *opener, const OpenContext *template)
 	ctx->app_info = opener;
 
 	// On Linux, this prefers the obsoleted X-GNOME-FullName.
-	gchar *name =
-		g_strdup_printf("Open With %s", g_app_info_get_display_name(opener));
+	const char *display_name = g_app_info_get_display_name(opener);
+	// Ironically, GIO reads CFBundleName and can't read CFBundleDisplayName.
+	if (!display_name)
+		display_name = g_app_info_get_executable(opener);
+	gchar *name = g_strdup_printf("Open With %s", display_name);
 
 	// It's documented that we can touch the child, if we want to use markup.
 #if 0
@@ -503,8 +506,6 @@ fiv_context_menu_new(GtkWidget *widget, GFile *file)
 
 	GAppInfo *default_ =
 		g_app_info_get_default_for_type(ctx->content_type, FALSE);
-	GList *recommended = g_app_info_get_recommended_for_type(ctx->content_type);
-	GList *fallback = g_app_info_get_fallback_for_type(ctx->content_type);
 
 	GtkWidget *menu = gtk_menu_new();
 	if (default_) {
@@ -513,6 +514,7 @@ fiv_context_menu_new(GtkWidget *widget, GFile *file)
 			GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
 	}
 
+	GList *recommended = g_app_info_get_recommended_for_type(ctx->content_type);
 	for (GList *iter = recommended; iter; iter = iter->next) {
 		if (!default_ || !g_app_info_equal(iter->data, default_))
 			append_opener(menu, iter->data, ctx);
@@ -525,6 +527,10 @@ fiv_context_menu_new(GtkWidget *widget, GFile *file)
 			GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
 	}
 
+	// The implementation returns the same data for both,
+	// we'd have to filter out the recommended ones from here.
+#ifndef __APPLE__
+	GList *fallback = g_app_info_get_fallback_for_type(ctx->content_type);
 	for (GList *iter = fallback; iter; iter = iter->next) {
 		if (!default_ || !g_app_info_equal(iter->data, default_))
 			append_opener(menu, iter->data, ctx);
@@ -536,6 +542,7 @@ fiv_context_menu_new(GtkWidget *widget, GFile *file)
 		gtk_menu_shell_append(
 			GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
 	}
+#endif
 
 	GtkWidget *item = gtk_menu_item_new_with_label("Open With...");
 	g_signal_connect_data(item, "activate", G_CALLBACK(on_chooser_activate),

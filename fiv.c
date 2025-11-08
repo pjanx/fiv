@@ -73,6 +73,138 @@ slist_to_strv(GSList *slist)
 	return strv;
 }
 
+// --- macOS utilities ---------------------------------------------------------
+
+#ifdef __APPLE__
+#include <CoreFoundation/CoreFoundation.h>
+
+static gchar *
+cfurlref_to_path(CFURLRef urlref)
+{
+	CFStringRef path = CFURLCopyFileSystemPath(urlref, kCFURLPOSIXPathStyle);
+	if (!path)
+		return NULL;
+
+	CFIndex size = CFStringGetMaximumSizeForEncoding(
+		CFStringGetLength(path), kCFStringEncodingUTF8) + 1;
+	gchar *string = g_malloc(size);
+
+	Boolean ok = CFStringGetCString(path, string, size, kCFStringEncodingUTF8);
+	CFRelease(path);
+	if (!ok) {
+		g_free(string);
+		return NULL;
+	}
+	return string;
+}
+
+static gchar *
+get_application_bundle_path(void)
+{
+	gchar *result = NULL;
+	CFBundleRef bundle = CFBundleGetMainBundle();
+	if (!bundle)
+		goto fail_1;
+
+	// When launched from outside a bundle, it will make up one,
+	// but these paths will then be equal.
+	CFURLRef bundle_url = CFBundleCopyBundleURL(bundle);
+	if (!bundle_url)
+		goto fail_1;
+	CFURLRef resources_url = CFBundleCopyResourcesDirectoryURL(bundle);
+	if (!resources_url)
+		goto fail_2;
+
+	if (!CFEqual(bundle_url, resources_url))
+		result = cfurlref_to_path(bundle_url);
+
+	CFRelease(resources_url);
+fail_2:
+	CFRelease(bundle_url);
+fail_1:
+	return result;
+}
+
+static gchar *
+prepend_path_string(const gchar *prepended, const gchar *original)
+{
+	if (!prepended)
+		return g_strdup(original ? original : "");
+	if (!original || !*original)
+		return g_strdup(prepended);
+
+	GHashTable *seen = g_hash_table_new(g_str_hash, g_str_equal);
+	GPtrArray *unique = g_ptr_array_new();
+	g_ptr_array_add(unique, (gpointer) prepended);
+	g_hash_table_add(seen, (gpointer) prepended);
+
+	gchar **components = g_strsplit(original, ":", -1);
+	for (gchar **p = components; *p; p++) {
+		if (g_hash_table_contains(seen, *p))
+			continue;
+
+		g_ptr_array_add(unique, *p);
+		g_hash_table_add(seen, *p);
+	}
+
+	g_ptr_array_add(unique, NULL);
+	gchar *result = g_strjoinv(":", (gchar **) unique->pdata);
+	g_hash_table_destroy(seen);
+	g_ptr_array_free(unique, TRUE);
+
+	g_strfreev(components);
+	return result;
+}
+
+// We reuse foreign dependencies, so we need to prevent them from loading
+// any system-wide files, and point them in the right direction.
+static void
+adjust_environment(void)
+{
+	gchar *bundle_dir = get_application_bundle_path();
+	if (!bundle_dir)
+		return;
+
+	gchar *contents_dir = g_build_filename(bundle_dir, "Contents", NULL);
+	gchar *macos_dir = g_build_filename(contents_dir, "MacOS", NULL);
+	gchar *resources_dir = g_build_filename(contents_dir, "Resources", NULL);
+	gchar *datadir = g_build_filename(resources_dir, "share", NULL);
+	gchar *libdir = g_build_filename(resources_dir, "lib", NULL);
+	g_free(bundle_dir);
+
+	gchar *new_path = prepend_path_string(macos_dir, g_getenv("PATH"));
+	g_setenv("PATH", new_path, TRUE);
+	g_free(new_path);
+
+	const gchar *data_dirs = g_getenv("XDG_DATA_DIRS");
+	gchar *new_data_dirs = data_dirs && *data_dirs
+		? prepend_path_string(datadir, data_dirs)
+		: prepend_path_string(datadir, "/usr/local/share:/usr/share");
+	g_setenv("XDG_DATA_DIRS", new_data_dirs, TRUE);
+	g_free(new_data_dirs);
+
+	gchar *schemas_dir = g_build_filename(datadir, "glib-2.0", "schemas", NULL);
+	g_setenv("GSETTINGS_SCHEMA_DIR", schemas_dir, TRUE);
+	g_free(schemas_dir);
+
+	gchar *gdk_pixbuf_module_file =
+		g_build_filename(libdir, "gdk-pixbuf-2.0", "loaders.cache", NULL);
+	g_setenv("GDK_PIXBUF_MODULE_FILE", gdk_pixbuf_module_file, TRUE);
+	g_free(gdk_pixbuf_module_file);
+
+	// GTK+ is smart enough to also consider application bundles,
+	// but let there be a single source of truth.
+	g_setenv("GTK_EXE_PREFIX", resources_dir, TRUE);
+
+	g_free(libdir);
+	g_free(datadir);
+	g_free(resources_dir);
+	g_free(macos_dir);
+	g_free(contents_dir);
+}
+
+#endif
+
 // --- Keyboard shortcuts ------------------------------------------------------
 // Fuck XML, this can be easily represented in static structures.
 // Though it would be nice if the accelerators could be customized.
@@ -1092,9 +1224,22 @@ on_next(void)
 static gchar **
 build_spawn_argv(const char *uri)
 {
-	// Because we only pass URIs, there is no need to prepend "--" here.
 	GPtrArray *a = g_ptr_array_new();
-	g_ptr_array_add(a, g_strdup(PROJECT_NAME));
+#ifdef __APPLE__
+	// Otherwise we would always launch ourselves in the background.
+	gchar *bundle_dir = get_application_bundle_path();
+	if (bundle_dir) {
+		g_ptr_array_add(a, g_strdup("open"));
+		g_ptr_array_add(a, g_strdup("-a"));
+		g_ptr_array_add(a, bundle_dir);
+		// At least with G_APPLICATION_NON_UNIQUE, this is necessary:
+		g_ptr_array_add(a, g_strdup("-n"));
+		g_ptr_array_add(a, g_strdup("--args"));
+	}
+#endif
+	// Because we only pass URIs, there is no need to prepend "--" after this.
+	if (!a->len)
+		g_ptr_array_add(a, g_strdup(PROJECT_NAME));
 
 	// Process-local VFS URIs need to be resolved to globally accessible URIs.
 	// It doesn't seem possible to reliably tell if a GFile is process-local,
@@ -1403,15 +1548,24 @@ on_window_state_event(G_GNUC_UNUSED GtkWidget *widget,
 static void
 show_help_contents(void)
 {
-	gchar *filename = g_strdup_printf("%s.html", PROJECT_NAME);
 #ifdef G_OS_WIN32
 	gchar *prefix = g_win32_get_package_installation_directory_of_module(NULL);
+#elif defined __APPLE__
+	gchar *prefix = get_application_bundle_path();
+	if (!prefix) {
+		show_error_dialog(g_error_new(
+			G_FILE_ERROR, G_FILE_ERROR_FAILED, "Cannot locate bundle"));
+		return;
+	}
+#else
+	gchar *prefix = g_strdup(PROJECT_PREFIX);
+#endif
+
+	gchar *filename = g_strdup_printf("%s.html", PROJECT_NAME);
 	gchar *path = g_build_filename(prefix, PROJECT_DOCDIR, filename, NULL);
 	g_free(prefix);
-#else
-	gchar *path = g_build_filename(PROJECT_DOCDIR, filename, NULL);
-#endif
 	g_free(filename);
+
 	GError *error = NULL;
 	gchar *uri = g_filename_to_uri(path, NULL, &error);
 	g_free(path);
@@ -2639,6 +2793,10 @@ main(int argc, char *argv[])
 			"Output an image file suitable for searching by content", "SIZE"},
 		{},
 	};
+
+#ifdef __APPLE__
+	adjust_environment();
+#endif
 
 	// We never get the ::open signal, thanks to G_OPTION_ARG_FILENAME_ARRAY.
 	GtkApplication *app = gtk_application_new(NULL, G_APPLICATION_NON_UNIQUE);

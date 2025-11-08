@@ -18,6 +18,8 @@ add_project_arguments(
 #endif
 
 win32 = host_machine.system() == 'windows'
+macos = host_machine.system() == 'darwin' \
+	and host_machine.subsystem() == 'macos'
 
 # The likelihood of this being installed is nearly zero. Enable the wrap.
 libjpegqs = dependency('libjpegqs', required : get_option('libjpegqs'),
@@ -97,15 +99,20 @@ docdir = get_option('datadir') / 'doc' / meson.project_name()
 application_ns = 'name.janouch.'
 application_url = 'https://janouch.name/p/' + meson.project_name()
 
+rawconf = configuration_data({
+	'ProjectName' : meson.project_name(),
+	'ProjectVersion' : meson.project_version(),
+	'ProjectNS' : application_ns,
+	'ProjectURL' : application_url,
+})
+
 conf = configuration_data()
 conf.set_quoted('PROJECT_NAME', meson.project_name())
 conf.set_quoted('PROJECT_VERSION', '@VCS_TAG@')
 conf.set_quoted('PROJECT_NS', application_ns)
 conf.set_quoted('PROJECT_URL', application_url)
-conf.set_quoted('PROJECT_DOCDIR', get_option('prefix') / docdir)
-if win32
-	conf.set_quoted('PROJECT_DOCDIR', docdir)
-endif
+conf.set_quoted('PROJECT_PREFIX', get_option('prefix'))
+conf.set_quoted('PROJECT_DOCDIR', docdir)
 
 conf.set('HAVE_JPEG_QS', libjpegqs.found())
 conf.set('HAVE_LCMS2', lcms2.found())
@@ -147,6 +154,15 @@ if win32
 		output : 'fiv.ico', input : icon_png_list,
 		command : [icotool, '-c', '-o', '@OUTPUT@', '@INPUT@'])
 	rc += windows.compile_resources('fiv.rc', depends : icon_ico)
+elif macos
+	# Meson is really extremely brain-dead and retarded.
+	# There is no real reason why this would have to be a shell script.
+	svg2icns = find_program('macos-svg2icns.sh')
+	icon_icns = custom_target('fiv.icns',
+		output : 'fiv.icns', input : 'fiv.svg',
+		command : [svg2icns, '@INPUT@', '@OUTPUT@'],
+		install : true,
+		install_dir : 'Contents/Resources')
 endif
 
 gnome = import('gnome')
@@ -214,13 +230,12 @@ foreach schema : gsettings_schemas
 		input : schema,
 		output : application_ns + schema,
 		copy : true,
-		install: true,
+		install : true,
 		install_dir : get_option('datadir') / 'glib-2.0' / 'schemas')
 endforeach
 
 # For the purposes of development: make the program find its GSettings schemas.
 gnome.compile_schemas(depend_files : files(gsettings_schemas))
-gnome.post_install(glib_compile_schemas : true, gtk_update_icon_cache : true)
 
 # Meson is broken on Windows and removes the backslashes, so this ends up empty.
 symbolics = run_command(find_program('sed', required : false, disabler : true),
@@ -256,7 +271,26 @@ install_data('fiv.svg',
 install_subdir('docs',
 	install_dir : docdir, strip_directory : true)
 
-if not win32
+if macos
+	# We're going all in on application bundles, seeing as it doesn't make
+	# much sense to install the application as in the block below.
+	#
+	# macOS has other mechanisms we can use to launch the JPEG cropper,
+	# or the reverse search utilities.
+	configure_file(
+		input : 'macos-Info.plist.in',
+		output : 'Info.plist',
+		configuration : rawconf,
+		install : true,
+		install_dir : 'Contents')
+
+	meson.add_install_script('macos-install.sh')
+elif not win32
+	gnome.post_install(
+		glib_compile_schemas : true,
+		gtk_update_icon_cache : true,
+	)
+
 	asciidoctor = find_program('asciidoctor', required : false)
 	a2x = find_program('a2x', required : false)
 	if not asciidoctor.found() and not a2x.found()
@@ -357,11 +391,7 @@ elif meson.is_cross_build()
 	wxs = configure_file(
 		input : 'fiv.wxs.in',
 		output : 'fiv.wxs',
-		configuration : configuration_data({
-			'ProjectName' : meson.project_name(),
-			'ProjectVersion' : meson.project_version(),
-			'ProjectURL' : application_url,
-		}),
+		configuration : rawconf,
 	)
 	msi = meson.project_name() + '-' + meson.project_version() + \
 		'-' + host_machine.cpu() + '.msi'

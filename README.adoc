@@ -2,7 +2,7 @@ fiv
 ===
 
 'fiv' is a slightly unconventional, general-purpose image browser and viewer
-for Linux and Windows (macOS still has major issues).
+for Linux and Windows (macOS also kind of works).
 
 image::docs/fiv.webp["Screenshot of both the browser and the viewer"]
 
@@ -90,6 +90,14 @@ https://www.msys2.org/wiki/Creating-Packages/#re-building-a-package[rebuild]
 _mingw-w64-lcms2_ with the following change:
 
  sed -i 's/meson setup /&-Dfastfloat=true /' PKGCONFIG
+
+macOS
+~~~~~
+Support for this operating system isn't as good.
+If you install Homebrew, you can get an application bundle with:
+
+ $ sh -e macos-configure.sh builddir
+ $ meson install -C builddir
 
 Documentation
 -------------
