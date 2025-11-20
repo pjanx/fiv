@@ -1439,6 +1439,41 @@ get_toplevel(GtkWidget *widget)
 }
 
 static void
+zoom_ask(FivView *self)
+{
+	GtkWidget *dialog = gtk_dialog_new_with_buttons("Set zoom level",
+		get_toplevel(GTK_WIDGET(self)),
+		GTK_DIALOG_DESTROY_WITH_PARENT | GTK_DIALOG_MODAL |
+			GTK_DIALOG_USE_HEADER_BAR,
+		"_OK", GTK_RESPONSE_ACCEPT, "_Cancel", GTK_RESPONSE_CANCEL, NULL);
+
+	GtkAdjustment *adjustment = gtk_adjustment_new(
+		self->scale * 100, 0., 100000., 1., 10., 0.);
+	GtkWidget *spin = gtk_spin_button_new(adjustment, 1., 0);
+	gtk_entry_set_activates_default(GTK_ENTRY(spin), TRUE);
+
+	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+	gtk_box_pack_start(GTK_BOX(box), gtk_label_new("Zoom:"), FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(box), spin, TRUE, TRUE, 0);
+	gtk_box_pack_start(GTK_BOX(box), gtk_label_new("%"), FALSE, FALSE, 0);
+
+	GtkWidget *content = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
+	g_object_set(content, "margin", 12, NULL);
+	gtk_box_set_spacing(GTK_BOX(content), 6);
+	gtk_container_add(GTK_CONTAINER(content), box);
+	gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_ACCEPT);
+	gtk_window_set_skip_taskbar_hint(GTK_WINDOW(dialog), TRUE);
+	gtk_widget_show_all(dialog);
+
+	if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
+		double value = gtk_spin_button_get_value(GTK_SPIN_BUTTON(spin));
+		if (value > 0)
+			set_scale(self, value / 100., NULL);
+	}
+	gtk_widget_destroy(dialog);
+}
+
+static void
 copy(FivView *self)
 {
 	double fractional_width = 0, fractional_height = 0;
@@ -2028,6 +2063,8 @@ fiv_view_command(FivView *self, FivViewCommand command)
 		set_scale(self, self->scale / SCALE_STEP, NULL);
 	break; case FIV_VIEW_COMMAND_ZOOM_1:
 		set_scale(self, 1.0, NULL);
+	break; case FIV_VIEW_COMMAND_ZOOM_ASK:
+		zoom_ask(self);
 	break; case FIV_VIEW_COMMAND_FIT_WIDTH:
 		set_scale_to_fit_width(self);
 	break; case FIV_VIEW_COMMAND_FIT_HEIGHT:

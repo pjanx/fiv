@@ -799,7 +799,7 @@ enum {
 	XX(S3,            gtk_separator_new(GTK_ORIENTATION_HORIZONTAL)) \
 	XX(FIXATE,        T("pin2-symbolic", "Keep zoom and position")) \
 	XX(MINUS,         B("zoom-out-symbolic", "Zoom out")) \
-	XX(SCALE,         gtk_label_new("")) \
+	XX(SCALE,         B(NULL, "Set zoom level")) \
 	XX(PLUS,          B("zoom-in-symbolic", "Zoom in")) \
 	XX(ONE,           B("zoom-original-symbolic", "Original size")) \
 	XX(FIT,           T("zoom-fit-best-symbolic", "Scale to fit")) \
@@ -1815,8 +1815,10 @@ static GtkWidget *
 make_toolbar_button(const char *symbolic, const char *tooltip)
 {
 	GtkWidget *button = gtk_button_new();
-	gtk_button_set_image(GTK_BUTTON(button),
-		gtk_image_new_from_icon_name(symbolic, GTK_ICON_SIZE_BUTTON));
+	if (symbolic) {
+		gtk_button_set_image(GTK_BUTTON(button),
+			gtk_image_new_from_icon_name(symbolic, GTK_ICON_SIZE_BUTTON));
+	}
 	gtk_widget_set_tooltip_text(button, tooltip);
 	gtk_widget_set_focus_on_click(button, FALSE);
 	gtk_style_context_add_class(
@@ -1962,7 +1964,8 @@ on_notify_view_scale(
 	g_object_get(object, g_param_spec_get_name(param_spec), &scale, NULL);
 
 	gchar *scale_str = g_strdup_printf("%.0f%%", round(scale * 100));
-	gtk_label_set_text(GTK_LABEL(g.toolbar[TOOLBAR_SCALE]), scale_str);
+	gtk_label_set_text(GTK_LABEL(
+		gtk_bin_get_child(GTK_BIN(g.toolbar[TOOLBAR_SCALE]))), scale_str);
 	g_free(scale_str);
 
 	// FIXME: The label doesn't immediately assume its new width.
@@ -2047,13 +2050,11 @@ make_view_toolbar(void)
 	TOOLBAR(XX)
 #undef XX
 
-	gtk_widget_set_margin_start(g.toolbar[TOOLBAR_SCALE], 5);
-	gtk_widget_set_margin_end(g.toolbar[TOOLBAR_SCALE], 5);
-
+	GtkWidget *scale_label = gtk_label_new("");
+	gtk_container_add(GTK_CONTAINER(g.toolbar[TOOLBAR_SCALE]), scale_label);
 	// So that the width doesn't jump around in the usual zoom range.
 	// Ideally, we'd measure the widest digit and use width(NNN%).
-	gtk_label_set_width_chars(GTK_LABEL(g.toolbar[TOOLBAR_SCALE]), 5);
-	gtk_widget_set_halign(g.toolbar[TOOLBAR_SCALE], GTK_ALIGN_CENTER);
+	gtk_label_set_width_chars(GTK_LABEL(scale_label), 5);
 
 	// GtkStatusBar solves a problem we do not have here.
 	GtkWidget *view_toolbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
@@ -2084,6 +2085,7 @@ make_view_toolbar(void)
 	toolbar_command(TOOLBAR_PLAY_PAUSE,    FIV_VIEW_COMMAND_TOGGLE_PLAYBACK);
 	toolbar_command(TOOLBAR_SEEK_FORWARD,  FIV_VIEW_COMMAND_FRAME_NEXT);
 	toolbar_command(TOOLBAR_MINUS,         FIV_VIEW_COMMAND_ZOOM_OUT);
+	toolbar_command(TOOLBAR_SCALE,         FIV_VIEW_COMMAND_ZOOM_ASK);
 	toolbar_command(TOOLBAR_PLUS,          FIV_VIEW_COMMAND_ZOOM_IN);
 	toolbar_command(TOOLBAR_ONE,           FIV_VIEW_COMMAND_ZOOM_1);
 	toolbar_toggler(TOOLBAR_FIT,           "scale-to-fit");

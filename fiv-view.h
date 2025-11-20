@@ -59,6 +59,7 @@ typedef enum _FivViewCommand {
 	XX(FIV_VIEW_COMMAND_ZOOM_IN,             "zoom-in")                        \
 	XX(FIV_VIEW_COMMAND_ZOOM_OUT,            "zoom-out")                       \
 	XX(FIV_VIEW_COMMAND_ZOOM_1,              "zoom-1")                         \
+	XX(FIV_VIEW_COMMAND_ZOOM_ASK,            "zoom-ask")                       \
 	XX(FIV_VIEW_COMMAND_FIT_WIDTH,           "fit-width")                      \
 	XX(FIV_VIEW_COMMAND_FIT_HEIGHT,          "fit-height")                     \
 	XX(FIV_VIEW_COMMAND_TOGGLE_SCALE_TO_FIT, "toggle-scale-to-fit")            \
