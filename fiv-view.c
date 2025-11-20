@@ -1438,6 +1438,42 @@ get_toplevel(GtkWidget *widget)
 	return NULL;
 }
 
+struct zoom_ask_context {
+	GtkWidget *result_left, *result_right;
+	Dimensions dimensions;
+};
+
+static void
+on_zoom_ask_spin_changed(GtkSpinButton *spin, G_GNUC_UNUSED gpointer user_data)
+{
+	// We don't want to call gtk_spin_button_update(),
+	// that would immediately replace whatever the user has typed in.
+	gdouble scale = -1;
+	const gchar *text = gtk_entry_get_text(GTK_ENTRY(spin));
+	if (*text) {
+		gchar *end = NULL;
+		gdouble value = g_strtod(text, &end);
+		if (!*end)
+			scale = value / 100.;
+	}
+
+	struct zoom_ask_context *data = user_data;
+	GtkStyleContext *style = gtk_widget_get_style_context(GTK_WIDGET(spin));
+	if (scale <= 0) {
+		gtk_style_context_add_class(style, GTK_STYLE_CLASS_WARNING);
+		gtk_label_set_text(GTK_LABEL(data->result_left), "—");
+		gtk_label_set_text(GTK_LABEL(data->result_right), "—");
+	} else {
+		gtk_style_context_remove_class(style, GTK_STYLE_CLASS_WARNING);
+		gchar *left = g_strdup_printf("%.0f", data->dimensions.width * scale);
+		gchar *right = g_strdup_printf("%.0f", data->dimensions.height * scale);
+		gtk_label_set_text(GTK_LABEL(data->result_left), left);
+		gtk_label_set_text(GTK_LABEL(data->result_right), right);
+		g_free(left);
+		g_free(right);
+	}
+}
+
 static void
 zoom_ask(FivView *self)
 {
@@ -1447,20 +1483,69 @@ zoom_ask(FivView *self)
 			GTK_DIALOG_USE_HEADER_BAR,
 		"_OK", GTK_RESPONSE_ACCEPT, "_Cancel", GTK_RESPONSE_CANCEL, NULL);
 
+	Dimensions dimensions = get_surface_dimensions(self);
+	gchar *original_width = g_strdup_printf("%.0f", dimensions.width);
+	gchar *original_height = g_strdup_printf("%.0f", dimensions.height);
+	GtkWidget *original_left = gtk_label_new(original_width);
+	GtkWidget *original_middle = gtk_label_new("×");
+	GtkWidget *original_right = gtk_label_new(original_height);
+	g_free(original_width);
+	g_free(original_height);
+	gtk_label_set_xalign(GTK_LABEL(original_left), 1.);
+	gtk_label_set_xalign(GTK_LABEL(original_right), 0.);
+
+	GtkWidget *original_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+	gtk_box_pack_start(
+		GTK_BOX(original_box), original_left, TRUE, TRUE, 0);
+	gtk_box_pack_start(
+		GTK_BOX(original_box), original_middle, FALSE, FALSE, 0);
+	gtk_box_pack_start(
+		GTK_BOX(original_box), original_right, TRUE, TRUE, 0);
+
+	// FIXME: This widget's behaviour is absolutely miserable.
+	// For example, we would like to be flexible with decimal spaces.
 	GtkAdjustment *adjustment = gtk_adjustment_new(
 		self->scale * 100, 0., 100000., 1., 10., 0.);
 	GtkWidget *spin = gtk_spin_button_new(adjustment, 1., 0);
+	gtk_spin_button_set_update_policy(
+		GTK_SPIN_BUTTON(spin), GTK_UPDATE_IF_VALID);
 	gtk_entry_set_activates_default(GTK_ENTRY(spin), TRUE);
 
-	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-	gtk_box_pack_start(GTK_BOX(box), gtk_label_new("Zoom:"), FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(box), spin, TRUE, TRUE, 0);
-	gtk_box_pack_start(GTK_BOX(box), gtk_label_new("%"), FALSE, FALSE, 0);
+	GtkWidget *zoom_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+	GtkWidget *zoom_label = gtk_label_new_with_mnemonic("_Zoom:");
+	gtk_label_set_mnemonic_widget(GTK_LABEL(zoom_label), spin);
+	gtk_box_pack_start(GTK_BOX(zoom_box), zoom_label, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(zoom_box), spin, TRUE, TRUE, 0);
+	gtk_box_pack_start(GTK_BOX(zoom_box), gtk_label_new("%"), FALSE, FALSE, 0);
+
+	GtkWidget *result_left = gtk_label_new(NULL);
+	GtkWidget *result_middle = gtk_label_new("×");
+	GtkWidget *result_right = gtk_label_new(NULL);
+	gtk_label_set_xalign(GTK_LABEL(result_left), 1.);
+	gtk_label_set_xalign(GTK_LABEL(result_right), 0.);
+
+	GtkSizeGroup *group = gtk_size_group_new(GTK_SIZE_GROUP_HORIZONTAL);
+	gtk_size_group_add_widget(group, original_left);
+	gtk_size_group_add_widget(group, original_right);
+	gtk_size_group_add_widget(group, result_left);
+	gtk_size_group_add_widget(group, result_right);
+
+	GtkWidget *result_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+	gtk_box_pack_start(GTK_BOX(result_box), result_left, TRUE, TRUE, 0);
+	gtk_box_pack_start(GTK_BOX(result_box), result_middle, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(result_box), result_right, TRUE, TRUE, 0);
+
+	struct zoom_ask_context data = { result_left, result_right, dimensions };
+	g_signal_connect(spin, "changed",
+		G_CALLBACK(on_zoom_ask_spin_changed), &data);
+	on_zoom_ask_spin_changed(GTK_SPIN_BUTTON(spin), &data);
 
 	GtkWidget *content = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
 	g_object_set(content, "margin", 12, NULL);
 	gtk_box_set_spacing(GTK_BOX(content), 6);
-	gtk_container_add(GTK_CONTAINER(content), box);
+	gtk_container_add(GTK_CONTAINER(content), original_box);
+	gtk_container_add(GTK_CONTAINER(content), zoom_box);
+	gtk_container_add(GTK_CONTAINER(content), result_box);
 	gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_ACCEPT);
 	gtk_window_set_skip_taskbar_hint(GTK_WINDOW(dialog), TRUE);
 	gtk_widget_show_all(dialog);
@@ -1471,6 +1556,7 @@ zoom_ask(FivView *self)
 			set_scale(self, value / 100., NULL);
 	}
 	gtk_widget_destroy(dialog);
+	g_object_unref(group);
 }
 
 static void
