@@ -1506,7 +1506,7 @@ zoom_ask(FivView *self)
 	// For example, we would like to be flexible with decimal spaces.
 	GtkAdjustment *adjustment = gtk_adjustment_new(
 		self->scale * 100, 0., 100000., 1., 10., 0.);
-	GtkWidget *spin = gtk_spin_button_new(adjustment, 1., 0);
+	GtkWidget *spin = gtk_spin_button_new(adjustment, 1., 2);
 	gtk_spin_button_set_update_policy(
 		GTK_SPIN_BUTTON(spin), GTK_UPDATE_IF_VALID);
 	gtk_entry_set_activates_default(GTK_ENTRY(spin), TRUE);
