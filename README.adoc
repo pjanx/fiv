@@ -68,6 +68,7 @@ you can get a quick and dirty installation package for testing purposes using:
 
  $ meson compile deb
  # dpkg -i fiv-*.deb
+ # glib-compile-schemas /usr/local/share/glib-2.0/schemas
 
 Windows
 ~~~~~~~
