@@ -1,3 +1,4 @@
+/.qtcreator
 /meson.build.user
 /subprojects/*
 !/subprojects/*.wrap
