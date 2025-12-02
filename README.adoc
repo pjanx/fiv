@@ -68,6 +68,10 @@ you can get a quick and dirty installation package for testing purposes using:
 
  $ meson compile deb
  # dpkg -i fiv-*.deb
+
+And in case you keep the default installation prefix rather than _/usr_,
+it is necessary to:
+
  # glib-compile-schemas /usr/local/share/glib-2.0/schemas
 
 Windows
