@@ -77,6 +77,9 @@ struct _FivView {
 	bool fixate : 1;                    ///< Keep zoom and position
 	double scale;                       ///< Scaling factor
 	double drag_start[2];               ///< Adjustment values for drag origin
+	double zoom_gesture_initial_scale;  ///< Pinch gesture initial scale
+	double zoom_gesture_center[2];      ///< Pinch gesture widget coordinates
+	double zoom_gesture_surface[2];     ///< Pinch gesture surface coordinates
 
 	FivIoImage *enhance_swap;           ///< Quick swap in/out
 	FivIoProfile *screen_cms_profile;   ///< Target colour profile for widget
@@ -1128,28 +1131,14 @@ widget_to_surface(FivView *self, double *x, double *y)
 }
 
 static gboolean
-set_scale(FivView *self, double scale, const GdkEvent *event)
+set_scale_with_focus(FivView *self, double scale,
+	double focus_x, double focus_y, double surface_x, double surface_y)
 {
-	// FIXME: Zooming to exactly 1:1 breaks rendering with some images
-	// when using a native X11 Window. This is a silly workaround.
-	GdkWindow *window = gtk_widget_get_window(GTK_WIDGET(self));
-	if (window && gdk_window_has_native(window) && scale == 1)
-		scale = 0.999999999999999;
-
 	if (self->scale == scale)
 		goto out;
 
 	GtkAllocation allocation;
 	gtk_widget_get_allocation(GTK_WIDGET(self), &allocation);
-	double focus_x = 0, focus_y = 0;
-	if (!event || !gdk_event_get_coords(event, &focus_x, &focus_y)) {
-		focus_x = 0.5 * allocation.width;
-		focus_y = 0.5 * allocation.height;
-	}
-
-	double surface_x = focus_x;
-	double surface_y = focus_y;
-	widget_to_surface(self, &surface_x, &surface_y);
 
 	self->scale = scale;
 	g_object_notify_by_pspec(G_OBJECT(self), view_properties[PROP_SCALE]);
@@ -1172,6 +1161,31 @@ set_scale(FivView *self, double scale, const GdkEvent *event)
 
 out:
 	return set_scale_to_fit(self, false);
+}
+
+static gboolean
+set_scale(FivView *self, double scale, const GdkEvent *event)
+{
+	// FIXME: Zooming to exactly 1:1 breaks rendering with some images
+	// when using a native X11 Window. This is a silly workaround.
+	GdkWindow *window = gtk_widget_get_window(GTK_WIDGET(self));
+	if (window && gdk_window_has_native(window) && scale == 1)
+		scale = 0.999999999999999;
+
+	GtkAllocation allocation;
+	gtk_widget_get_allocation(GTK_WIDGET(self), &allocation);
+	double focus_x = 0, focus_y = 0;
+	if (!event || !gdk_event_get_coords(event, &focus_x, &focus_y)) {
+		focus_x = 0.5 * allocation.width;
+		focus_y = 0.5 * allocation.height;
+	}
+
+	double surface_x = focus_x;
+	double surface_y = focus_y;
+	widget_to_surface(self, &surface_x, &surface_y);
+
+	return set_scale_with_focus(
+		self, scale, focus_x, focus_y, surface_x, surface_y);
 }
 
 static void
@@ -1416,6 +1430,33 @@ on_drag_end(GtkGestureDrag *drag, G_GNUC_UNUSED gdouble start_x,
 	GdkWindow *window = gtk_widget_get_window(
 		gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(drag)));
 	gdk_window_set_cursor(window, NULL);
+}
+
+static void
+on_zoom_begin(GtkGestureZoom *gesture,
+	G_GNUC_UNUSED GdkEventSequence *sequence, gpointer user_data)
+{
+	FivView *self = FIV_VIEW(user_data);
+	self->zoom_gesture_initial_scale = self->scale;
+
+	double x = 0, y = 0;
+	gtk_gesture_get_bounding_box_center(GTK_GESTURE(gesture), &x, &y);
+	self->zoom_gesture_center[0] = x;
+	self->zoom_gesture_center[1] = y;
+
+	widget_to_surface(self, &x, &y);
+	self->zoom_gesture_surface[0] = x;
+	self->zoom_gesture_surface[1] = y;
+}
+
+static void
+on_zoom_scale_changed(
+	G_GNUC_UNUSED GtkGestureZoom *gesture, gdouble scale, gpointer user_data)
+{
+	FivView *self = FIV_VIEW(user_data);
+	set_scale_with_focus(self, self->zoom_gesture_initial_scale * scale,
+		self->zoom_gesture_center[0], self->zoom_gesture_center[1],
+		self->zoom_gesture_surface[0], self->zoom_gesture_surface[1]);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -1903,6 +1944,17 @@ fiv_view_init(FivView *self)
 		G_CALLBACK(on_drag_update), self);
 	g_signal_connect(drag, "drag-end",
 		G_CALLBACK(on_drag_end), self);
+
+	GtkGesture *zoom = gtk_gesture_zoom_new(GTK_WIDGET(self));
+	gtk_event_controller_set_propagation_phase(
+		GTK_EVENT_CONTROLLER(zoom), GTK_PHASE_BUBBLE);
+	g_object_set_data_full(
+		G_OBJECT(self), "fiv-view-zoom-gesture", zoom, g_object_unref);
+
+	g_signal_connect(zoom, "begin",
+		G_CALLBACK(on_zoom_begin), self);
+	g_signal_connect(zoom, "scale-changed",
+		G_CALLBACK(on_zoom_scale_changed), self);
 }
 
 // --- Public interface --------------------------------------------------------
